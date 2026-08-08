@@ -34,15 +34,14 @@ python3 skills/inspect-skill/scan.py <target-path> --json
 ## Development
 
 - `scanner/` — the deterministic scanner (stdlib only, zero dependencies).
-- `skills/inspect-skill/scanner/` — bundled copy shipped with the skill. Keep in
-  sync with `scanner/` when rules change.
-- `RULES.md` — the detection ruleset (the spec). `RULES.v1.md` — prior version.
-- `tests/truepos.py` — detection benchmark against `fixtures/` (23/23 passing).
-- `bench/corpus.py` — false-positive benchmark against installed extensions.
-
 - `scanner/taint.py` — source->sink dataflow (§4). Tracks variable, filesystem,
   environment, and direct-pipe channels; emits `CHN-001`, which supersedes the
   component findings it is built from.
+- `skills/inspect-skill/scanner/` — bundled copy shipped with the skill. Keep in
+  sync with `scanner/` when rules change.
+- `RULES.md` — the detection ruleset (the spec). `RULES.v1.md` — prior version.
+- `tests/truepos.py` — detection benchmark against `fixtures/` (28/28 passing).
+- `bench/corpus.py` — false-positive benchmark against installed extensions.
 
 Deferred (declared in `RULES.md`, not yet implemented): reachability graph (§5),
 semantic pass (§8), diff mode (§12).
