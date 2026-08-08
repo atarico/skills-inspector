@@ -80,9 +80,13 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
     from .engine import headline
     gap = headline(findings)
     if gap:
-        w(f"!  {len(gap)} CAPABILIT{'Y' if len(gap) == 1 else 'IES'} THE DESCRIPTION DOES NOT MENTION")
+        undeclared = sum(1 for f in gap if f.disclosure != "declared")
+        w(f"!  {len(gap)} CAPABILIT{'Y' if len(gap) == 1 else 'IES'} NEED YOUR DECISION"
+          + (f"  ({undeclared} not mentioned in the description)" if undeclared else ""))
         for f in gap[:12]:
-            w(f"   - {f.detects[:64]:<64} {f.severity:<8} {f.confidence:<6} {f.location}:{f.line}")
+            tag = "" if f.disclosure != "declared" else "  [author declared it]"
+            w(f"   - {f.detects[:56]:<56} {f.severity:<8} {f.confidence:<6} "
+              f"{f.location}:{f.line}{tag}")
         if len(gap) > 12:
             w(f"   ... and {len(gap) - 12} more")
         w("")

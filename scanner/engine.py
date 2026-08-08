@@ -22,16 +22,27 @@ DISCLOSURE_ORDER = {"undeclared": 0, "euphemistic": 1, "declared": 2}
 
 
 def headline(findings: list["Finding"]) -> list["Finding"]:
-    """The disclosure gap — the report's lead (RULES.md section 11).
+    """The report's lead (RULES.md section 11).
 
-    A gap is undeclared OR euphemistic: 'declared' is the only disclosure state
-    where the author actually told you. Heuristics never lead, so low-confidence
-    findings are excluded here and grouped separately downstream.
+    `disclosure` ORDERS this list; it must never filter it. The description is
+    written by the author of the audited unit, so letting `declared` suppress a
+    finding hands the attacker control of the report: keyword-stuffing a
+    description would blank the headline while the unit steals SSH keys.
+
+    - CRITICAL always leads, declared or not. There is no benign declared
+      CRITICAL — the level means "assume compromise if executed", so the human
+      looks at it either way.
+    - HIGH leads only when the description did not name it. A declared HIGH
+      (a notifier that says it posts to Slack) belongs in the body.
+
+    Heuristics never lead, so low confidence is excluded and grouped downstream.
     """
-    return [f for f in findings
-            if f.disclosure in ("undeclared", "euphemistic")
-            and f.severity in ("CRITICAL", "HIGH")
-            and f.confidence in ("high", "medium")]
+    out = [f for f in findings
+           if f.confidence in ("high", "medium")
+           and (f.severity == "CRITICAL"
+                or (f.severity == "HIGH" and f.disclosure != "declared"))]
+    out.sort(key=Finding.sort_key)
+    return out
 
 
 @dataclass
@@ -88,6 +99,19 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
     raw: list[Finding] = []
 
     for entry in unit.files:
+        if entry.symlink_target:
+            raw.append(Finding(
+                id="FSW-008", severity="HIGH", confidence="high", status="active",
+                disclosure="undeclared", capability=R.WRITE_OUTSIDE,
+                location=ev.sanitize_path(entry.relpath), line=1,
+                detects="Bundled symlink pointing outside the unit",
+                evidence=f"-> {ev.sanitize_path(entry.symlink_target)}",
+                impact="The bundle reaches a path you did not put in scope; "
+                       "a write through the link lands outside the unit.",
+                legitimate_use="Never inside a distributed bundle.",
+                what_to_check="Why does the package link to a path outside itself?",
+                specificity=90))
+            continue
         if entry.is_binary:
             raw.append(_binary_finding(entry))
             continue

@@ -21,7 +21,10 @@ _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 # wrapper once the finding is rendered into another agent's context.
 _HARNESS_PATTERNS = [
     (re.compile(r"<\|[^|>]{0,40}\|>"), "<!HARNESS!>"),
-    (re.compile(r"(?im)^\s*(Human|Assistant|System|User)\s*:"), r"[\1_]"),
+    # Anywhere in the snippet, not just at line start: evidence is collapsed to
+    # a single line before delivery, so a mid-line turn marker reads the same as
+    # one at the start to whatever renders the report.
+    (re.compile(r"(?i)\b(Human|Assistant|System|User)\s*:"), r"[\1_]"),
     (re.compile(r"(?m)^---\s*$"), "[---]"),
     (re.compile(r"</\s*(system|instructions?|user|assistant|human)\s*>", re.I), "[/tag]"),
     (re.compile(r"```"), "[fence]"),
