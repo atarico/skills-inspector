@@ -40,5 +40,9 @@ python3 skills/inspect-skill/scan.py <target-path> --json
 - `tests/truepos.py` — detection benchmark against `fixtures/` (23/23 passing).
 - `bench/corpus.py` — false-positive benchmark against installed extensions.
 
-Deferred (declared in `RULES.md`, not yet implemented): taint flow (§4),
-reachability graph (§5), semantic pass (§8), diff mode (§12).
+- `scanner/taint.py` — source->sink dataflow (§4). Tracks variable, filesystem,
+  environment, and direct-pipe channels; emits `CHN-001`, which supersedes the
+  component findings it is built from.
+
+Deferred (declared in `RULES.md`, not yet implemented): reachability graph (§5),
+semantic pass (§8), diff mode (§12).

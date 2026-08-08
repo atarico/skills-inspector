@@ -34,8 +34,9 @@ CAPABILITY_LABELS = {
 COVERAGE_LIMITS = [
     "Instruction detection is phrase-seeded. Plain non-imperative prose "
     "instructing harmful behavior is not detectable by this tool.",
-    "Taint tracking is not implemented in this version: reading a secret and "
-    "sending data are reported separately, never as a proven flow.",
+    "Taint tracking covers direct and one-hop-indirect flows inside a single "
+    "file (variable, filesystem, environment, direct pipe). Flows through a "
+    "spawned interpreter, across files, or via a config read later are not seen.",
     "The reachability graph is not implemented: dormant and conditional payloads "
     "are not distinguished from active ones.",
     "The semantic pass is not implemented: description/body mismatch is not checked.",
@@ -80,9 +81,13 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
     from .engine import headline
     gap = headline(findings)
     if gap:
-        w(f"!  {len(gap)} CAPABILIT{'Y' if len(gap) == 1 else 'IES'} THE DESCRIPTION DOES NOT MENTION")
+        undeclared = sum(1 for f in gap if f.disclosure != "declared")
+        w(f"!  {len(gap)} CAPABILIT{'Y NEEDS' if len(gap) == 1 else 'IES NEED'} YOUR DECISION"
+          + (f"  ({undeclared} not mentioned in the description)" if undeclared else ""))
         for f in gap[:12]:
-            w(f"   - {f.detects[:64]:<64} {f.severity:<8} {f.confidence:<6} {f.location}:{f.line}")
+            tag = "" if f.disclosure != "declared" else "  [author declared it]"
+            w(f"   - {f.detects[:56]:<56} {f.severity:<8} {f.confidence:<6} "
+              f"{f.location}:{f.line}{tag}")
         if len(gap) > 12:
             w(f"   ... and {len(gap) - 12} more")
         w("")
@@ -149,6 +154,11 @@ def _emit(w, f: Finding) -> None:
     w(f"      impact     {f.impact}")
     w(f"      normal if  {f.legitimate_use}")
     w(f"      check      {f.what_to_check}")
+    for hop in f.chain:
+        if hop["step"] == "propagation":
+            w(f"      flow       via {hop['channel']}")
+        else:
+            w(f"      {hop['step']:<10} line {hop['line']} [{hop['rule']}]  {hop['evidence']}")
     if f.related_rules:
         w(f"      also matched {', '.join(f.related_rules)} (collapsed)")
     w("")

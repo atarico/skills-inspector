@@ -711,8 +711,6 @@ RULES: list[Rule] = [
 # Rules in RULES.md that this version cannot evaluate. Reported as coverage gaps
 # so a clean scan is never mistaken for a complete one.
 DEFERRED = {
-    "NET-002": "needs taint tracking (RULES.md section 4)",
-    "CHN-001": "needs taint tracking (RULES.md section 4)",
     "CHN-002": "needs the reachability graph (RULES.md section 5)",
     "BND-001": "needs the reachability graph (RULES.md section 5)",
     "BND-002": "needs the reachability graph (RULES.md section 5)",

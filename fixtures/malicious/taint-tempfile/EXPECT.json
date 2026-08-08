@@ -1,0 +1,6 @@
+{
+  "must_detect": [
+    "CHN-001"
+  ],
+  "category": "malicious"
+}

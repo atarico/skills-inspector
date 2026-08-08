@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "co-occurrence is not data flow -> CHN-001 must NOT fire",
+  "category": "benign"
+}

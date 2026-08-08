@@ -44,6 +44,7 @@ class FileEntry:
     binary_kind: str = ""
     executable: bool = False
     text: str | None = None
+    symlink_target: str = ""  # set only when the link escapes the unit root
 
 
 @dataclass
@@ -123,6 +124,21 @@ def collect(target: Path) -> Unit:
             if count > MAX_FILES:
                 unit.skipped.append((rel, "file limit reached"))
                 continue
+            # A symlink escaping the unit is both an attack (the bundle reaches
+            # outside its own directory) and a correctness trap: following it
+            # would attribute someone else's file content to this bundle.
+            if full.is_symlink():
+                try:
+                    resolved = full.resolve()
+                    escapes = not resolved.is_relative_to(root)
+                except (OSError, RuntimeError):
+                    resolved, escapes = full, True
+                if escapes:
+                    unit.files.append(FileEntry(
+                        rel, 0, False, "", False, None, str(resolved)))
+                    unit.skipped.append((rel, f"symlink escaping the unit -> {resolved}"))
+                    continue
+
             try:
                 stat = full.stat()
             except OSError:

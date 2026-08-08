@@ -13,6 +13,7 @@ from . import evidence as ev
 from . import position as pos
 from . import rules as R
 from . import structural
+from . import taint
 from .disclosure import classify_disclosure
 from .unit import Unit
 
@@ -22,16 +23,27 @@ DISCLOSURE_ORDER = {"undeclared": 0, "euphemistic": 1, "declared": 2}
 
 
 def headline(findings: list["Finding"]) -> list["Finding"]:
-    """The disclosure gap — the report's lead (RULES.md section 11).
+    """The report's lead (RULES.md section 11).
 
-    A gap is undeclared OR euphemistic: 'declared' is the only disclosure state
-    where the author actually told you. Heuristics never lead, so low-confidence
-    findings are excluded here and grouped separately downstream.
+    `disclosure` ORDERS this list; it must never filter it. The description is
+    written by the author of the audited unit, so letting `declared` suppress a
+    finding hands the attacker control of the report: keyword-stuffing a
+    description would blank the headline while the unit steals SSH keys.
+
+    - CRITICAL always leads, declared or not. There is no benign declared
+      CRITICAL — the level means "assume compromise if executed", so the human
+      looks at it either way.
+    - HIGH leads only when the description did not name it. A declared HIGH
+      (a notifier that says it posts to Slack) belongs in the body.
+
+    Heuristics never lead, so low confidence is excluded and grouped downstream.
     """
-    return [f for f in findings
-            if f.disclosure in ("undeclared", "euphemistic")
-            and f.severity in ("CRITICAL", "HIGH")
-            and f.confidence in ("high", "medium")]
+    out = [f for f in findings
+           if f.confidence in ("high", "medium")
+           and (f.severity == "CRITICAL"
+                or (f.severity == "HIGH" and f.disclosure != "declared"))]
+    out.sort(key=Finding.sort_key)
+    return out
 
 
 @dataclass
@@ -52,6 +64,8 @@ class Finding:
     position: str = pos.ACTIVE
     related_rules: list[str] = field(default_factory=list)
     specificity: int = 50
+    chain: list[dict] = field(default_factory=list)
+    extra_capabilities: list[str] = field(default_factory=list)
 
     def sort_key(self):
         return (
@@ -78,6 +92,7 @@ class Finding:
             "legitimate_use": self.legitimate_use,
             "what_to_check": self.what_to_check,
             "related_rules": self.related_rules,
+            "chain": self.chain,
         }
 
 
@@ -86,8 +101,22 @@ _MD_SUFFIXES = {".md", ".markdown", ".mdx"}
 
 def scan(unit: Unit) -> tuple[list[Finding], dict]:
     raw: list[Finding] = []
+    chains: list[taint.Chain] = []
 
     for entry in unit.files:
+        if entry.symlink_target:
+            raw.append(Finding(
+                id="FSW-008", severity="HIGH", confidence="high", status="active",
+                disclosure="undeclared", capability=R.WRITE_OUTSIDE,
+                location=ev.sanitize_path(entry.relpath), line=1,
+                detects="Bundled symlink pointing outside the unit",
+                evidence=f"-> {ev.sanitize_path(entry.symlink_target)}",
+                impact="The bundle reaches a path you did not put in scope; "
+                       "a write through the link lands outside the unit.",
+                legitimate_use="Never inside a distributed bundle.",
+                what_to_check="Why does the package link to a path outside itself?",
+                specificity=90))
+            continue
         if entry.is_binary:
             raw.append(_binary_finding(entry))
             continue
@@ -97,6 +126,8 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
             raw.append(_exec_bit_finding(entry))
 
         raw += _scan_text(unit, entry.relpath, entry.text)
+        chains += taint.analyze(entry.relpath, entry.text,
+                                pos.classify_lines(entry.relpath, entry.text))
 
         base_position = pos.file_base_position(entry.relpath)
         for hit in structural.inspect(unit.root, entry.relpath):
@@ -118,6 +149,7 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
         if pos.in_sample_dir(finding.location):
             finding.confidence = "low"
 
+    raw = _supersede(raw, chains)
     findings = _dedupe(raw)
     for finding in findings:
         finding.disclosure = classify_disclosure(finding.capability, unit.description)
@@ -210,6 +242,52 @@ def _exec_bit_finding(entry) -> Finding:
         specificity=80)
 
 
+def _supersede(raw: list[Finding], chains: list) -> list[Finding]:
+    """A taint chain replaces the findings it is made of (RULES.md section L).
+
+    Line-level dedup cannot express this: a chain spans several lines and two
+    different capabilities, so its components must be absorbed across the whole
+    file rather than collapsed within one line. Without this the report shows
+    the flow AND both of its halves, and the severity counts triple-count it.
+    """
+    if not chains:
+        return raw
+
+    absorbed: set[tuple[str, int, str]] = set()
+    by_line = {(f.location, f.line, f.id): f for f in raw}
+    out: list[Finding] = []
+    for chain in chains:
+        absorbed.update(chain.absorbed)
+        component_ids = sorted({rule_id for _f, _l, rule_id in chain.absorbed})
+        # Absorbing the source must not erase it from the capability profile:
+        # this unit really does read secrets, chain or no chain.
+        swallowed_caps = sorted({
+            by_line[key].capability for key in chain.absorbed if key in by_line})
+        out.append(Finding(
+            id="CHN-001", severity="CRITICAL", confidence="high", status="active",
+            disclosure="undeclared", capability=R.NETWORK,
+            location=ev.sanitize_path(chain.file), line=chain.sink_line,
+            detects=f"Data flow: a secret read reaches an outbound sink "
+                    f"via {chain.channel}",
+            evidence=ev.sanitize(chain.sink_evidence),
+            impact="This is exfiltration, not communication: local data leaves "
+                   "the machine.",
+            legitimate_use="Only if moving this data outward is the unit's "
+                           "stated purpose.",
+            what_to_check="Follow the chain and confirm the destination is yours.",
+            related_rules=component_ids, specificity=99,
+            extra_capabilities=swallowed_caps,
+            chain=[{**hop, "evidence": ev.sanitize(hop["evidence"])}
+                   if "evidence" in hop else hop
+                   for hop in chain.hops()]))
+
+    for finding in raw:
+        if (finding.location, finding.line, finding.id) in absorbed:
+            continue
+        out.append(finding)
+    return out
+
+
 def _dedupe(raw: list[Finding]) -> list[Finding]:
     """Section 7: group by (file, line, capability). Most specific rule wins;
     the rest collapse into related_rules and are not counted separately."""
@@ -234,10 +312,11 @@ def _profile(findings: list[Finding], unit: Unit) -> dict:
     for finding in findings:
         if finding.severity == "INFO" and finding.capability in caps:
             continue
-        caps.setdefault(finding.capability, [])
         detail = f"{finding.location}:{finding.line}"
-        if len(caps[finding.capability]) < 4 and detail not in caps[finding.capability]:
-            caps[finding.capability].append(detail)
+        for capability in [finding.capability, *finding.extra_capabilities]:
+            caps.setdefault(capability, [])
+            if len(caps[capability]) < 4 and detail not in caps[capability]:
+                caps[capability].append(detail)
 
     counts: dict[str, int] = {}
     for finding in findings:

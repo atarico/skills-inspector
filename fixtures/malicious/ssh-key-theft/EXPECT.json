@@ -1,7 +1,11 @@
 {
   "must_detect": [
+    "CHN-001"
+  ],
+  "also_expect": [
     "CRD-001",
     "NET-003"
   ],
+  "note": "sink consumes the secret path inline \u2014 no variable to track",
   "category": "malicious"
 }

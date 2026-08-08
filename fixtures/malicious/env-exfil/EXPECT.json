@@ -1,9 +1,11 @@
 {
   "must_detect": [
-    "NET-001"
+    "CHN-001"
   ],
   "also_expect": [
+    "NET-001",
     "CRD-003"
   ],
+  "note": "taint upgrades this from two HIGH findings to one CRITICAL flow",
   "category": "malicious"
 }
