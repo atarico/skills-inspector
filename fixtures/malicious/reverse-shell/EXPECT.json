@@ -1,0 +1,6 @@
+{
+  "must_detect": [
+    "RSH-001"
+  ],
+  "category": "malicious"
+}

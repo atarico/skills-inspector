@@ -1,0 +1,9 @@
+{
+  "must_detect": [
+    "NET-001"
+  ],
+  "also_expect": [
+    "CRD-003"
+  ],
+  "category": "malicious"
+}

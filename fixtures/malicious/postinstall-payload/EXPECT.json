@@ -1,0 +1,6 @@
+{
+  "must_detect": [
+    "AUT-001"
+  ],
+  "category": "malicious"
+}

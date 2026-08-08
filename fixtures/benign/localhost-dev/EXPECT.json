@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "loopback is not exfiltration -> NET-001 must not fire",
+  "category": "benign"
+}

@@ -1,0 +1,6 @@
+{
+  "must_detect": [
+    "AGT-006"
+  ],
+  "category": "malicious"
+}

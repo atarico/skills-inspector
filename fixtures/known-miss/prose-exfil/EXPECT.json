@@ -1,0 +1,7 @@
+{
+  "known_miss": [
+    "AGT-004"
+  ],
+  "note": "plain non-imperative prose, no trigger words -> undetectable by v0",
+  "category": "known-miss"
+}

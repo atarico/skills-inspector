@@ -1,0 +1,6 @@
+{
+  "must_detect": [
+    "PER-003"
+  ],
+  "category": "malicious"
+}

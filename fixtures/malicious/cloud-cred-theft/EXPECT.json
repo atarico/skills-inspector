@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-002",
+    "NET-009"
+  ],
+  "category": "malicious"
+}

@@ -1,0 +1,6 @@
+{
+  "must_detect": [
+    "NET-003"
+  ],
+  "category": "malicious"
+}
