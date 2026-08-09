@@ -156,7 +156,8 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
                 what_to_check=hit.check, position=base_position,
                 specificity=hit.specificity))
 
-    raw += _reachability_findings(graph, unit)
+    raw += _reachability_findings(graph, unit,
+                                  {f.location for f in raw})
 
     # Location floor: a file inside a test/fixtures/examples tree caps at low.
     # Runs after EVERY producer — rules, structural, reachability — so nothing
@@ -275,9 +276,17 @@ def _exec_bit_finding(entry) -> Finding:
         specificity=80)
 
 
-def _reachability_findings(graph, unit: Unit) -> list[Finding]:
-    """BND-001/002/003 — structure findings the rule engine cannot see."""
+def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding]:
+    """BND-001/002/003 — structure findings the rule engine cannot see.
+
+    `flagged` is the set of files that produced a finding of their own. RULES.md
+    gives BND-001 no severity of its own — it inherits from what the file
+    contains — so an unreferenced file containing nothing interesting is not a
+    finding. Emitting one per file turned a bundle with 1200 inert data files
+    into 1200 findings.
+    """
     out: list[Finding] = []
+    executable = {f.relpath for f in unit.files if f.executable}
 
     for relpath, status in sorted(graph.status.items()):
         if not reachability.is_interesting(relpath):
@@ -285,6 +294,10 @@ def _reachability_findings(graph, unit: Unit) -> list[Finding]:
         if pos.in_sample_dir(relpath):
             continue
         if status == reachability.DORMANT:
+            # Worth reporting only if the file carries something, or is a
+            # ready-to-run script that nothing invokes.
+            if relpath not in flagged and relpath not in executable:
+                continue
             out.append(Finding(
                 id="BND-001", severity="MEDIUM", confidence="high", status="dormant",
                 disclosure="undeclared", capability=R.REMOTE_EXEC,

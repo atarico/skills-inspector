@@ -137,13 +137,15 @@ Two benchmarks run against real data, both reproducible on your own machine:
 ```sh
 make detect     # detection, against fixtures/
 make falsepos   # false positives, against the extensions you already have installed
+make fuzz       # malformed input: must not crash or hang
 make anomalies  # invariant sweep: is the output itself well-formed
 make check      # detection + self-scan + bundle sync
 ```
 
 | | |
 |---|---|
-| Detection | **32/32**, plus 5 semantic cross-check tests |
+| Detection | **33/33**, plus 5 semantic cross-checks |
+| Malformed input (truncated encodings, deep JSON, symlink cycles) | **26/26** survived, no crash or hang |
 | False positives, 71 real installed extensions | **77% completely clean**, median 0, p90 1 |
 | Taint chains fired on those 71 legitimate extensions | **0** |
 

@@ -55,6 +55,8 @@ update, and a v2 that looks routine on its own is loud in the delta.
 - `RULES.md` — the detection ruleset (the spec). `docs/RULES.v1.md` — prior version.
 - `tests/truepos.py` — detection benchmark against `fixtures/` (32/32 passing).
 - `tests/semantic_test.py` — semantic cross-check, synthetic panel (5/5).
+- `tests/fuzz.py` — malformed input suite: truncated encodings, unclosed
+  frontmatter, deep JSON, symlink cycles, ReDoS bait (26/26).
 - `bench/corpus.py` — false-positive benchmark against installed extensions.
 - `bench/anomalies.py` — invariant sweep over a corpus: malformed evidence,
   markup-as-description, inconsistent counts, duplicate findings.

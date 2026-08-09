@@ -141,7 +141,13 @@ def _config_refs(text: str, relpath: str, known: set[str], index=None) -> list[t
         return []
     found: list[tuple[str, bool, int, str]] = []
 
-    def walk(node):
+    # Depth-capped: a bundle can ship JSON nested thousands of levels deep, and
+    # an unbounded walk blows the Python stack. Nothing at that depth is a
+    # reference anyone resolves, so stopping early loses no signal — where an
+    # exception handler here would have silently discarded the whole file.
+    def walk(node, depth=0):
+        if depth > 40:
+            return
         if isinstance(node, str):
             for token in re.findall(r"[A-Za-z0-9_./${}-]+\.[A-Za-z0-9]{1,6}", node):
                 target = _candidates(token.replace("${CLAUDE_PLUGIN_ROOT}/", ""),
@@ -150,10 +156,10 @@ def _config_refs(text: str, relpath: str, known: set[str], index=None) -> list[t
                     found.append((target, False, 1, token))
         elif isinstance(node, dict):
             for value in node.values():
-                walk(value)
+                walk(value, depth + 1)
         elif isinstance(node, list):
             for value in node:
-                walk(value)
+                walk(value, depth + 1)
 
     walk(data)
     return found

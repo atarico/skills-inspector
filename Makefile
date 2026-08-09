@@ -1,16 +1,17 @@
-.PHONY: help check detect semantic falsepos anomalies selftest fixtures sync
+.PHONY: help check detect semantic fuzz falsepos anomalies selftest fixtures sync
 
 help:
 	@echo "make check      run everything (detection + self-scan + sync check)"
 	@echo "make detect     detection benchmark against fixtures/"
 	@echo "make semantic   semantic cross-check tests (synthetic panel)"
+	@echo "make fuzz       malformed and hostile inputs: must not crash or hang"
 	@echo "make falsepos   false-positive benchmark against installed extensions"
 	@echo "make anomalies  invariant sweep: is the OUTPUT well-formed"
 	@echo "make selftest   scan this repo with its own scanner"
 	@echo "make fixtures   regenerate fixtures/ from tests/make_fixtures.py"
 	@echo "make sync       copy scanner/ into the installable skill bundle"
 
-check: detect semantic selftest
+check: detect semantic fuzz selftest
 	@diff -rq --exclude='__pycache__' scanner skills/inspect-skill/scanner >/dev/null \
 		&& echo "bundle in sync" \
 		|| (echo "BUNDLE OUT OF SYNC — run: make sync"; exit 1)
@@ -21,6 +22,11 @@ detect:
 # verify() is pure Python, so the panel is synthetic: no model, repeatable.
 semantic:
 	@python3 -m tests.semantic_test
+
+# A crash on a malformed bundle is a denial of audit, and a hang is the
+# same thing with extra steps. Both are failures here.
+fuzz:
+	@python3 -m tests.fuzz
 
 # Needs a corpus of extensions you already trust. Defaults to Claude Code's.
 falsepos:
