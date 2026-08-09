@@ -105,9 +105,25 @@ def in_string_literal(line: str, index: int) -> bool:
 # available signal that the dangerous text is catalogued, not invoked.
 _REGEX_CONSTRUCTION = re.compile(
     r"re\.(compile|search|match|findall|finditer|sub)\s*\(|_r\s*\(|RegExp\s*\(|=~|"
-    r"\bregexp?\s*[:=]|\bpattern\s*[:=]"
+    # A dict/JSON key quotes the name: `"regex": r"..."` — the closing quote sits
+    # between the name and the colon, which a bare \bregex\s*[:=] never sees.
+    r"\b(regexp?|pattern|matcher)[\"']?\s*[:=]"
 )
-_REGEX_SHAPE = re.compile(r"\\[bswdWSDA]|\[\^|\{\d*,\d*\}|\(\?[:=!i]|\\\.")
+_REGEX_SHAPE = re.compile(
+    r"\\[bswdWSDA]|\[\^|\{\d*,\d*\}|\(\?[:=!i]|\(\?<[=!]|\\\.|\\[dws]\+")
+
+
+def _exec_sink_outside_literal(line: str) -> bool:
+    """Is there an execution sink *around* the literal, rather than inside it?
+
+    The guard exists so `os.system("curl x | sh")` never gets demoted — there the
+    sink brackets the string. A sink named *inside* the quotes is the opposite
+    case: `"Warning: eval() executes arbitrary code"` is prose about eval, and
+    matching a bare word anywhere on the line makes every security tool's own
+    warning text look like a live eval.
+    """
+    return any(not in_string_literal(line, m.start())
+               for m in _EXEC_SINK.finditer(line))
 
 
 def in_inline_code(line: str, index: int) -> bool:
@@ -136,10 +152,15 @@ def literal_demotion(line: str, index: int) -> int:
         return 2
     if not in_string_literal(line, index):
         return 0
-    if _EXEC_SINK.search(line):
-        return 0
+    # Order matters. A rule catalogue that catalogues `eval` contains the word
+    # `eval`, so the exec-sink guard below would fire and block the demotion —
+    # which is how another project's `"regex": r"...eval\\("` was reported as a
+    # live eval. An entry that is structurally a regex is data, even when the
+    # pattern it describes names an execution function.
     if _REGEX_CONSTRUCTION.search(line) or len(_REGEX_SHAPE.findall(line)) >= 2:
         return 2
+    if _exec_sink_outside_literal(line):
+        return 0
     return 1
 
 

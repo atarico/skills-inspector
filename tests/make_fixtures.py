@@ -261,6 +261,22 @@ FIXTURES: list[tuple[str, str, dict, dict]] = [
     }, {"must_detect": ["BND-002"],
         "note": "bundle owns scripts/ but the invoked file arrives after the audit"}),
 
+    # A security tool documenting the attacks it detects. Every real one trips
+    # this: a rule catalogue names `eval`, and warning prose explains why it is
+    # dangerous. Both must stay out of the headline without weakening the
+    # bypass guard that keeps os.system("curl|sh") visible.
+    ("benign", "security-tool", {
+        "SKILL.md": skill("Reviews code for injection and unsafe evaluation."),
+        "rules.py": (
+            "PATTERNS = [\n"
+            '    {"regex": r"(?<![a-zA-Z0-9_\\.])eval\\(",\n'
+            '     "reminder": "Warning: eval() executes arbitrary code."},\n'
+            '    {"regex": r"curl[^|]*\\|\\s*sh",\n'
+            '     "reminder": "Piping a download into a shell is unreviewable."},\n'
+            "]\n"),
+    }, {"max_headline": 0,
+        "note": "a rule catalogue is data, even when it catalogues eval"}),
+
     # ----------------------------------------------------------- diff mode (§12)
     # v1 and v2 of the same unit. Scanned alone, v1 is clean and v2 looks like a
     # routine update. The attack is only visible in the delta.

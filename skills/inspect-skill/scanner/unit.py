@@ -171,6 +171,33 @@ def collect(target: Path) -> Unit:
     return unit
 
 
+# Badge rows, raw HTML wrappers, and image lines are not a description. Taking
+# one anyway poisons the `disclosure` axis: every capability then reads as
+# undeclared, because the text it is compared against says nothing.
+_HTML_TAG = __import__("re").compile(r"<[^>]+>")
+_NOISE_LINE = __import__("re").compile(
+    r"^\s*(?:!\[|\[!\[|<img|<p\b|</p>|<div|</div>|<br|<a\b|</a>|<h\d|-{3,}|={3,}|\|)")
+
+
+def _readme_summary(raw: str) -> str:
+    """First line of actual prose, HTML stripped."""
+    import re as _re
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if _NOISE_LINE.match(stripped) and "<strong>" not in stripped \
+                and "<em>" not in stripped:
+            continue
+        text = _HTML_TAG.sub(" ", stripped)
+        text = _re.sub(r"\s+", " ", text).strip(" *_`")
+        # A line that was only markup, or is too short to describe anything.
+        if len(text) < 20:
+            continue
+        return text[:400]
+    return ""
+
+
 def _read_manifest(unit: Unit) -> None:
     """Pull the declared description — the basis of the disclosure axis."""
     import json
@@ -207,7 +234,4 @@ def _read_manifest(unit: Unit) -> None:
             if tools:
                 unit.declared_tools = [t.strip() for t in tools.group(1).split(",") if t.strip()]
         elif candidate == "README.md" and not unit.description:
-            body = [ln.strip() for ln in raw.splitlines()
-                    if ln.strip() and not ln.startswith("#")]
-            if body:
-                unit.description = body[0][:400]
+            unit.description = _readme_summary(raw)
