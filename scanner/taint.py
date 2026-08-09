@@ -51,6 +51,10 @@ _FILE_CONSUMED = re.compile(
 # Reading stdin from a pipe: the left side of `|` feeds the right side.
 _STDIN_MARKER = re.compile(r"(?:-d\s+@-|--data-binary\s+@-|-T\s+-|\s-\s*$|\|\s*(?:curl|wget|nc)\b)")
 
+# $(...) or `...` embedded in the line: the source's output is substituted
+# straight into the sink's arguments.
+_SUBSTITUTION = re.compile(r"\$\([^)]{2,200}\)|`[^`\n]{2,200}`")
+
 
 @dataclass
 class Origin:
@@ -134,8 +138,14 @@ def analyze(relpath: str, text: str, positions: list[tuple[str, str]]) -> list[C
         if source_rules and sink_rules:
             piped = "|" in line or bool(_STDIN_MARKER.search(line))
             consumes = bool(_FILE_CONSUMED.search(line))
-            if piped or consumes:
-                channel = "direct pipe" if piped else "sink reads the secret path"
+            # `curl -d "$(cat ~/.claude.json)" url` — the source is substituted
+            # straight into the sink's argument. No pipe, no file handle, no
+            # variable to track, and it is one of the most common exfil shapes.
+            substituted = bool(_SUBSTITUTION.search(line))
+            if piped or consumes or substituted:
+                channel = ("direct pipe" if piped
+                           else "command substitution into the sink" if substituted
+                           else "sink reads the secret path")
                 origin = Origin(lineno, channel, source_rules[0].id, snippet)
                 chains.append(Chain(relpath, lineno, sink_rules[0].id, snippet,
                                     origin, channel,

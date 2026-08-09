@@ -1,6 +1,11 @@
 {
   "must_detect": [
-    "NET-003"
+    "CHN-001"
   ],
+  "also_expect": [
+    "NET-003",
+    "CRD-008"
+  ],
+  "note": "printenv substituted into a webhook body \u2014 a flow, not two findings",
   "category": "malicious"
 }

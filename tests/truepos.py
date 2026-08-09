@@ -94,6 +94,23 @@ def main() -> int:
                       f"{sorted(should_miss)}  ({expect.get('note','')}){RESET}")
                 fn_confirmed += 1
 
+    # Diff mode: the attack is only visible in the delta between two versions.
+    v1, v2 = ROOT / "update" / "telemetry-v1", ROOT / "update" / "telemetry-v2"
+    if v1.exists() and v2.exists():
+        from scanner import diff as diffmod
+        old = collect(v1)
+        new = collect(v2)
+        delta = diffmod.compare(old, *engine.scan(old), new, *engine.scan(new))
+        silent = delta.silent_escalation
+        if silent and not delta.description_changed:
+            print(f"{GREEN}OK{RESET}    diff/telemetry-v1..v2        "
+                  f"{len(silent)} silent escalation(s), description unchanged")
+            passed += 1
+        else:
+            print(f"{RED}MISS{RESET}  diff/telemetry-v1..v2        "
+                  f"expected a silent escalation, got {len(silent)}")
+            failed += 1
+
     total = passed + failed
     print(f"\n{passed}/{total} detection checks passed"
           f"   {fn_confirmed} known blind spots confirmed")

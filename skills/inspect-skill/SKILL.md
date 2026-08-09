@@ -50,6 +50,7 @@ opencode. Phrases: "is this skill safe", "audit/inspect/review this plugin",
 
 | Situation | Action |
 |---|---|
+| The user is vetting an **update** and has both versions | Run `scan.py diff "<old>" "<new>"`. Lead with any silent escalation — a new severe capability whose description did not change. |
 | Scanner exits non-zero / stack trace | Report the tool failed; do not fall back to reading the target manually. |
 | Target already installed under `~/.claude`, `~/.codex`, `.opencode` | Say so: its description is already in context. Recommend re-scanning the pre-install source. |
 | Codex / opencode target | Same command; see `references/platforms.md` for equivalents. |
