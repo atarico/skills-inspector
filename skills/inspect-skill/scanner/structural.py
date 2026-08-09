@@ -63,6 +63,23 @@ def _fmt(value, limit: int = 160) -> str:
     return text[:limit]
 
 
+def _server_names(value) -> tuple[list[str], bool]:
+    """Names declared by an MCP field, and whether it is a pointer to a file.
+
+    A plugin manifest may set `mcpServers` to an inline object OR to a path
+    string pointing at an .mcp.json. Iterating a string yields its characters,
+    which is how a real marketplace plugin once reported
+    `Registers MCP servers: ., ., /, a, c, ...`.
+    """
+    if isinstance(value, dict):
+        return sorted(str(k) for k in value), False
+    if isinstance(value, str):
+        return [value], True
+    if isinstance(value, list):
+        return [str(v) for v in value if isinstance(v, (str, int))], True
+    return [], False
+
+
 def inspect(root: Path, relpath: str) -> list[StructuralFinding]:
     """Structural checks for one file. Returns findings, never raises."""
     path = root / relpath
@@ -146,14 +163,18 @@ def _claude_settings(path: Path, relpath: str) -> list[StructuralFinding]:
                 relpath, 1, _fmt(hooks.get("PreToolUse"))))
 
     if data.get("mcpServers"):
-        out.append(StructuralFinding(
-            "HOK-003", "CRITICAL", "high", R.CONTROL_PLANE,
-            f"Registers MCP servers: {', '.join(sorted(data['mcpServers']))}",
-            "MCP tool descriptions are prompt text injected into the agent context, "
-            "controlled by a remote server and refreshed every launch.",
-            "The MCP server is the unit's purpose and you trust its operator.",
-            "Who operates each server?",
-            relpath, 1, _fmt(list(data["mcpServers"]))))
+        names, is_pointer = _server_names(data["mcpServers"])
+        if names:
+            out.append(StructuralFinding(
+                "HOK-003", "CRITICAL", "high", R.CONTROL_PLANE,
+                (f"Declares MCP config at {names[0]}" if is_pointer
+                 else f"Registers MCP servers: {', '.join(names)}"),
+                "MCP tool descriptions are prompt text injected into the agent context, "
+                "controlled by a remote server and refreshed every launch.",
+                "The MCP server is the unit's purpose and you trust its operator.",
+                "Who operates each server?",
+                relpath, 1, _fmt(names if not is_pointer else names[0]),
+                specificity=80 if is_pointer else 90))
 
     raw = path.read_text(encoding="utf-8", errors="replace")
     if _PERMISSION_RED_FLAGS.search(raw):
@@ -181,16 +202,16 @@ def _claude_settings(path: Path, relpath: str) -> list[StructuralFinding]:
 
 def _mcp_file(path: Path, relpath: str) -> list[StructuralFinding]:
     data = _load_json(path)
-    servers = (data or {}).get("mcpServers") or {}
-    if not servers:
+    names, _pointer = _server_names((data or {}).get("mcpServers") or {})
+    if not names:
         return []
     return [StructuralFinding(
         "HOK-003", "CRITICAL", "high", R.CONTROL_PLANE,
-        f"Registers MCP servers: {', '.join(sorted(servers))}",
+        f"Registers MCP servers: {', '.join(names)}",
         "MCP tool descriptions are remote-controlled prompt text refreshed every launch.",
         "The MCP server is the unit's purpose and you trust its operator.",
         "Who operates each server?",
-        relpath, 1, _fmt(list(servers)))]
+        relpath, 1, _fmt(names))]
 
 
 def _package_json(path: Path, relpath: str) -> list[StructuralFinding]:
@@ -214,13 +235,14 @@ def _opencode(path: Path, relpath: str) -> list[StructuralFinding]:
         return []
     out = []
     if data.get("mcp"):
+        names, _p = _server_names(data["mcp"])
         out.append(StructuralFinding(
             "HOK-003", "CRITICAL", "high", R.CONTROL_PLANE,
-            f"Registers MCP servers: {', '.join(sorted(data['mcp']))}",
+            f"Registers MCP servers: {', '.join(names)}",
             "Remote-controlled tool descriptions injected into the agent context.",
             "The MCP server is the unit's purpose.",
             "Who operates each server?",
-            relpath, 1, _fmt(list(data["mcp"]))))
+            relpath, 1, _fmt(names)))
     if data.get("permission"):
         out.append(StructuralFinding(
             "HOK-006", "CRITICAL", "high", R.CONTROL_PLANE,
@@ -230,13 +252,14 @@ def _opencode(path: Path, relpath: str) -> list[StructuralFinding]:
             "Read every grant.",
             relpath, 1, _fmt(data["permission"])))
     if data.get("agent"):
+        agents, _p = _server_names(data["agent"])
         out.append(StructuralFinding(
             "HOK-004", "HIGH", "high", R.CONTROL_PLANE,
-            f"Defines subagents: {', '.join(sorted(data['agent']))}",
+            f"Defines subagents: {', '.join(agents)}",
             "A subagent is a bypass of the parent unit's tool restrictions.",
             "Genuine delegation.",
             "Compare each subagent's tools to the unit's.",
-            relpath, 1, _fmt(list(data["agent"]))))
+            relpath, 1, _fmt(agents)))
     return out
 
 

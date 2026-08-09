@@ -64,6 +64,18 @@ def coverage_limits(findings=()) -> list[str]:
 # Kept for callers that want the pessimistic default.
 COVERAGE_LIMITS = coverage_limits()
 
+# Generic label for a group whose members word the same fact differently.
+RULE_SUMMARY = {
+    "HOK-001": "Defines agent hooks",
+    "HOK-003": "Registers MCP servers",
+    "HOK-004": "Defines subagents",
+    "HOK-006": "Lowers agent permissions",
+    "AUT-001": "Package lifecycle scripts",
+    "BND-001": "Files referenced by nothing",
+    "BND-002": "References a path that does not exist",
+    "BND-003": "Files loaded only under a condition",
+}
+
 
 def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
     return json.dumps({
@@ -100,15 +112,44 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
     from .engine import headline
     gap = headline(findings)
     if gap:
-        undeclared = sum(1 for f in gap if f.disclosure != "declared")
-        w(f"!  {len(gap)} CAPABILIT{'Y NEEDS' if len(gap) == 1 else 'IES NEED'} YOUR DECISION"
+        # One fact repeated across sibling files is one line. A plugin shipping
+        # the same MCP server in five platform manifests is not five decisions
+        # to a human, and printing it five times buries the other four.
+        groups: list[tuple[Finding, list[Finding]]] = []
+        index: dict[tuple, int] = {}
+        for f in gap:
+            key = (f.id, f.capability, f.severity)
+            if key in index:
+                groups[index[key]][1].append(f)
+            else:
+                index[key] = len(groups)
+                groups.append((f, []))
+
+        undeclared = sum(1 for lead, rest in groups
+                         if any(f.disclosure != "declared" for f in (lead, *rest)))
+        count = len(groups)
+        w(f"!  {count} CAPABILIT{'Y NEEDS' if count == 1 else 'IES NEED'} YOUR DECISION"
+          + (f", from {len(gap)} findings" if len(gap) != count else "")
           + (f"  ({undeclared} not mentioned in the description)" if undeclared else ""))
-        for f in gap[:12]:
-            tag = "" if f.disclosure != "declared" else "  [author declared it]"
-            w(f"   - {f.detects[:56]:<56} {f.severity:<8} {f.confidence:<6} "
-              f"{f.location}:{f.line}{tag}")
-        if len(gap) > 12:
-            w(f"   ... and {len(gap) - 12} more")
+
+        for lead, rest in groups[:12]:
+            members = [lead, *rest]
+            tag = "" if any(f.disclosure != "declared" for f in members) \
+                else "  [author declared it]"
+            if not rest:
+                label, where = lead.detects, f"{lead.location}:{lead.line}"
+            else:
+                # Members of a group can differ in wording (one manifest points
+                # at an .mcp.json, another inlines it). Showing one member's
+                # text while claiming N files would misdescribe the others.
+                variants = {f.detects for f in members}
+                label = (lead.detects if len(variants) == 1
+                         else RULE_SUMMARY.get(lead.id, lead.detects.split(":")[0]))
+                where = f"{len(members)} files, e.g. {lead.location}"
+            w(f"   - {label[:56]:<56} {lead.severity:<8} "
+              f"{lead.confidence:<6} {where}{tag}")
+        if len(groups) > 12:
+            w(f"   ... and {len(groups) - 12} more")
         w("")
 
     w("CAPABILITY PROFILE")
