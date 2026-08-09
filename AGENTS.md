@@ -56,6 +56,8 @@ update, and a v2 that looks routine on its own is loud in the delta.
 - `tests/truepos.py` — detection benchmark against `fixtures/` (32/32 passing).
 - `tests/semantic_test.py` — semantic cross-check, synthetic panel (5/5).
 - `bench/corpus.py` — false-positive benchmark against installed extensions.
+- `bench/anomalies.py` — invariant sweep over a corpus: malformed evidence,
+  markup-as-description, inconsistent counts, duplicate findings.
 - `make check` runs detection, the self-scan, and the bundle-sync check.
 
 Deferred: CHN-002, AGT-011, SUP-002, EXE-009 — minor rules, all declared in

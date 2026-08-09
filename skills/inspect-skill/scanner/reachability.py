@@ -84,7 +84,17 @@ def _is_entry(relpath: str) -> bool:
     return any(parent.endswith(d) for d in _ENTRY_DIRS)
 
 
-def _candidates(ref: str, source: str, known: set[str]) -> str | None:
+def _basename_index(known: set[str]) -> dict[str, list[str]]:
+    """basename -> paths. Built once; the fallback lookup below is O(files)
+    otherwise, and on a 429-file marketplace that alone cost 13 seconds."""
+    index: dict[str, list[str]] = {}
+    for path in known:
+        index.setdefault(PurePosixPath(path).name, []).append(path)
+    return index
+
+
+def _candidates(ref: str, source: str, known: set[str],
+                index: dict[str, list[str]] | None = None) -> str | None:
     """Resolve a raw reference against the bundle's real file list."""
     ref = ref.strip().lstrip("./").split("#")[0].split("?")[0]
     if not ref or ref.startswith(("http://", "https://", "mailto:", "data:")):
@@ -102,11 +112,12 @@ def _candidates(ref: str, source: str, known: set[str]) -> str | None:
         return normalized
     # last resort: unique basename match
     base = PurePosixPath(ref).name
-    matches = [k for k in known if PurePosixPath(k).name == base]
+    matches = (index.get(base, []) if index is not None
+               else [k for k in known if PurePosixPath(k).name == base])
     return matches[0] if len(matches) == 1 else None
 
 
-def _extract(text: str, relpath: str, known: set[str]) -> list[tuple[str, bool, int, str]]:
+def _extract(text: str, relpath: str, known: set[str], index=None) -> list[tuple[str, bool, int, str]]:
     """(target, is_conditional, line, raw_ref) for each resolvable reference."""
     out = []
     seen: set[tuple[str, int]] = set()
@@ -115,14 +126,14 @@ def _extract(text: str, relpath: str, known: set[str]) -> list[tuple[str, bool, 
         for pattern in _REF_PATTERNS:
             for match in pattern.finditer(line):
                 raw = match.group(1)
-                target = _candidates(raw, relpath, known)
+                target = _candidates(raw, relpath, known, index)
                 if target and target != relpath and (target, idx) not in seen:
                     seen.add((target, idx))
                     out.append((target, conditional, idx, raw))
     return out
 
 
-def _config_refs(text: str, relpath: str, known: set[str]) -> list[tuple[str, bool, int, str]]:
+def _config_refs(text: str, relpath: str, known: set[str], index=None) -> list[tuple[str, bool, int, str]]:
     """JSON config: any string value that resolves to a bundle file."""
     try:
         data = json.loads(text)
@@ -134,7 +145,7 @@ def _config_refs(text: str, relpath: str, known: set[str]) -> list[tuple[str, bo
         if isinstance(node, str):
             for token in re.findall(r"[A-Za-z0-9_./${}-]+\.[A-Za-z0-9]{1,6}", node):
                 target = _candidates(token.replace("${CLAUDE_PLUGIN_ROOT}/", ""),
-                                     relpath, known)
+                                     relpath, known, index)
                 if target and target != relpath:
                     found.append((target, False, 1, token))
         elif isinstance(node, dict):
@@ -152,6 +163,7 @@ def build(files: list) -> Graph:
     """files: FileEntry list. Returns per-file status plus dangling references."""
     known = {f.relpath for f in files}
     known_dirs = {str(PurePosixPath(k).parent) for k in known} - {"."}
+    index = _basename_index(known)
     texts = {f.relpath: f.text for f in files if f.text is not None}
     graph = Graph()
 
@@ -159,9 +171,9 @@ def build(files: list) -> Graph:
     referenced_raw: dict[str, set[str]] = {}
 
     for relpath, text in texts.items():
-        refs = _extract(text, relpath, known)
+        refs = _extract(text, relpath, known, index)
         if relpath.endswith((".json",)):
-            refs += _config_refs(text, relpath, known)
+            refs += _config_refs(text, relpath, known, index)
         edges[relpath] = [(target, cond) for target, cond, _l, _r in refs]
 
         # dangling: a STRUCTURAL reference that resolves to nothing
@@ -176,7 +188,7 @@ def build(files: list) -> Graph:
                         continue
                     if raw.startswith(("@", "~", "/")) or raw.endswith("."):
                         continue
-                    if _candidates(raw, relpath, known) is not None:
+                    if _candidates(raw, relpath, known, index) is not None:
                         continue
                     # Most references in a real skill point at the USER's project
                     # (./CLAUDE.md, dist/server.js, config/settings.json), which

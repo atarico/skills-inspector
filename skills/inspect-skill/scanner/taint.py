@@ -102,8 +102,14 @@ def _normalize(path: str) -> str:
     return PurePosixPath(path.strip("\"'")).name
 
 
-def analyze(relpath: str, text: str, positions: list[tuple[str, str]]) -> list[Chain]:
-    """Find source -> sink flows in one file."""
+def analyze(relpath: str, text: str, positions: list[tuple[str, str]],
+            line_matches: dict[int, list] | None = None) -> list[Chain]:
+    """Find source -> sink flows in one file.
+
+    `line_matches` is the rule-match map the scanning pass already computed.
+    Recomputing it here re-ran all 68 patterns over every line a second time —
+    a third of the total regex work on a large bundle, for no new information.
+    """
     shell = _is_shell(relpath)
     lines = text.splitlines()
     tainted_vars: dict[str, Origin] = {}
@@ -118,7 +124,10 @@ def analyze(relpath: str, text: str, positions: list[tuple[str, str]]) -> list[C
         # Only live statements carry data. A documented example does not run.
         if position != pos.ACTIVE:
             continue
-        matched = _matching_rules(line)
+        matched = (line_matches.get(idx) if line_matches is not None
+                   else _matching_rules(line))
+        if not matched:
+            continue
         # Skip anything that is not a live statement. Passing index 0 to
         # literal_demotion never detects a comment (nothing precedes column 0),
         # so probe at the first rule match instead — otherwise a comment

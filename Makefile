@@ -1,10 +1,11 @@
-.PHONY: help check detect semantic falsepos selftest fixtures sync
+.PHONY: help check detect semantic falsepos anomalies selftest fixtures sync
 
 help:
 	@echo "make check      run everything (detection + self-scan + sync check)"
 	@echo "make detect     detection benchmark against fixtures/"
 	@echo "make semantic   semantic cross-check tests (synthetic panel)"
 	@echo "make falsepos   false-positive benchmark against installed extensions"
+	@echo "make anomalies  invariant sweep: is the OUTPUT well-formed"
 	@echo "make selftest   scan this repo with its own scanner"
 	@echo "make fixtures   regenerate fixtures/ from tests/make_fixtures.py"
 	@echo "make sync       copy scanner/ into the installable skill bundle"
@@ -24,6 +25,11 @@ semantic:
 # Needs a corpus of extensions you already trust. Defaults to Claude Code's.
 falsepos:
 	@python3 -m bench.corpus $${CORPUS:-$$HOME/.claude}
+
+# Asks a different question than falsepos: not "is the verdict noisy" but
+# "is the output well-formed". Every hand-found bug so far was this shape.
+anomalies:
+	@python3 -m bench.anomalies $${CORPUS:-$$HOME/.claude}
 
 # The scanner must stay quiet on its own source: a rules catalogue is full of
 # attack patterns, and flagging them is the failure mode this project exists

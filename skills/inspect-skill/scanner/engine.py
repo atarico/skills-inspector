@@ -127,9 +127,11 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
         if entry.executable and not entry.relpath.endswith((".md", ".json", ".txt")):
             raw.append(_exec_bit_finding(entry))
 
-        raw += _scan_text(unit, entry.relpath, entry.text)
+        line_matches: dict[int, list] = {}
+        raw += _scan_text(unit, entry.relpath, entry.text, line_matches)
         chains += taint.analyze(entry.relpath, entry.text,
-                                pos.classify_lines(entry.relpath, entry.text))
+                                pos.classify_lines(entry.relpath, entry.text),
+                                line_matches)
 
         base_position = pos.file_base_position(entry.relpath)
         for hit in structural.inspect(unit.root, entry.relpath):
@@ -172,7 +174,8 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
     return findings, profile(findings, unit)
 
 
-def _scan_text(unit: Unit, relpath: str, text: str) -> list[Finding]:
+def _scan_text(unit: Unit, relpath: str, text: str,
+               line_matches: dict | None = None) -> list[Finding]:
     out: list[Finding] = []
     lines = text.splitlines()
     positions = pos.classify_lines(relpath, text)
@@ -206,6 +209,8 @@ def _scan_text(unit: Unit, relpath: str, text: str) -> list[Finding]:
             match = rule.pattern.search(line)
             if not match:
                 continue
+            if line_matches is not None:
+                line_matches.setdefault(idx, []).append(rule)
             # Instruction-surface rules in prose are inherently ambiguous: a
             # deterministic match cannot tell a live injection from a doc quoting
             # one ("ignore previous instructions" appears in both). They are

@@ -137,6 +137,7 @@ Two benchmarks run against real data, both reproducible on your own machine:
 ```sh
 make detect     # detection, against fixtures/
 make falsepos   # false positives, against the extensions you already have installed
+make anomalies  # invariant sweep: is the output itself well-formed
 make check      # detection + self-scan + bundle sync
 ```
 
