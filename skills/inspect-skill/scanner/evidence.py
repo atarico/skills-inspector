@@ -15,7 +15,10 @@ MAX_EVIDENCE = 200
 _ZERO_WIDTH = "\u200b\u200c\u200d\u2060\ufeff\u180e"
 _BIDI = "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
 _INVISIBLE_RE = re.compile(f"[{_ZERO_WIDTH}{_BIDI}]")
-_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+# U+2028/U+2029 are line breaks to str.splitlines() and to most renderers, so
+# leaving them in defeats the one-line-per-finding guarantee even though they
+# are not C0/C1 controls.
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u2028\u2029]")
 
 # Sequences that could fake a conversation turn or break out of a quarantine
 # wrapper once the finding is rendered into another agent's context.
@@ -74,13 +77,33 @@ def sanitize(text: str, *, centre: tuple[int, int] | None = None) -> str:
     snippet = snippet.replace("\n", "\\n").replace("\r", "").replace("\t", "    ")
     snippet = snippet.strip()
 
-    if len(snippet) > MAX_EVIDENCE:
-        snippet = snippet[:MAX_EVIDENCE] + "…"
+    # Budget the counters inside the cap rather than appending past it. They
+    # used to be added after truncation, so a snippet carrying several kinds of
+    # invisible character came back over the limit the docstring promises.
+    tail = "".join(f" <{kind}x{n}>" for kind, n in sorted(counts.items()))
+    room = MAX_EVIDENCE - len(tail)
+    if len(snippet) > room:
+        snippet = snippet[:max(0, room - 1)] + "…"
 
-    for kind, n in sorted(counts.items()):
-        snippet += f" <{kind}x{n}>"
+    return snippet + tail
 
-    return snippet
+
+def sanitize_label(text: str) -> str:
+    """Sanitize a finding's `detects` line.
+
+    Same neutralization as `sanitize`, minus the invisible-character counters —
+    a label is a description, and the count belongs on the evidence. This exists
+    because structural findings interpolate target-controlled data into their
+    labels (MCP server names, git alias names, hook event names), so `detects`
+    is an injection channel into the reading agent exactly like `evidence`.
+    """
+    cleaned = _INVISIBLE_RE.sub("", text)
+    cleaned = _CONTROL_RE.sub("", cleaned)
+    for pattern, replacement in _HARNESS_PATTERNS:
+        cleaned = pattern.sub(replacement, cleaned)
+    cleaned = cleaned.replace("\n", " ").replace("\r", "").replace("\t", " ")
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned[:MAX_EVIDENCE - 1] + "…" if len(cleaned) > MAX_EVIDENCE else cleaned
 
 
 def sanitize_path(path: str) -> str:

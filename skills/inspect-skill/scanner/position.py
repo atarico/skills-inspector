@@ -235,11 +235,35 @@ def classify_lines(relpath: str, text: str) -> list[tuple[str, str]]:
 # Triple-quoted / heredoc bodies are prose, not statements. A security tool that
 # documents attacks in its docstrings is the canonical false positive without this.
 _TRIPLE = re.compile(r'"""|\'\'\'')
+_TRIPLE_QUOTE_SUFFIXES = {".py", ".pyi", ".pyw"}
+
+
+def _triple_opener(line: str) -> tuple[str, int] | None:
+    """First triple-quote that actually opens a docstring, with its index.
+
+    A marker sitting inside a `#` comment does not open anything: a comment
+    that merely mentions a docstring delimiter is still a comment. Without
+    this check a commented marker silenced every line beneath it.
+    """
+    for match in _TRIPLE.finditer(line):
+        before = line[:match.start()]
+        hashes = [i for i, ch in enumerate(before) if ch == "#"]
+        if any(not in_string_literal(line, i) for i in hashes):
+            return None  # the marker is inside a comment
+        return match.group(0), match.start()
+    return None
 
 
 def _classify_code(lines: list[str], base: str, suffix: str) -> list[tuple[str, str]]:
     if base in (ILLUSTRATIVE, DOCUMENTARY):
         return [(base, STRUCTURAL)] * len(lines)
+
+    # Triple-quote tracking is Python-only. Applying it everywhere let a single
+    # `# """` at the top of a .sh file mark the whole file documentary, which
+    # demoted every finding in it to low AND made taint skip it entirely: five
+    # characters erased an SSH-key exfiltration chain.
+    if suffix not in _TRIPLE_QUOTE_SUFFIXES:
+        return [(ACTIVE, STRUCTURAL)] * len(lines)
 
     positions: list[tuple[str, str]] = []
     in_docstring = False
@@ -250,10 +274,10 @@ def _classify_code(lines: list[str], base: str, suffix: str) -> list[tuple[str, 
             if delim in raw:
                 in_docstring = False
             continue
-        marks = _TRIPLE.findall(raw)
-        if marks:
-            first = marks[0]
-            after = raw.split(first, 1)[1]
+        opener = _triple_opener(raw)
+        if opener:
+            first, index = opener
+            after = raw[index + len(first):]
             # Opens and does not close on the same line -> body is documentary.
             if first not in after:
                 in_docstring = True

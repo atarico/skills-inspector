@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CHN-001"
+  ],
+  "note": "a commented triple quote must not silence the file",
+  "category": "malicious"
+}

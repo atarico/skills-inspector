@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CHN-001"
+  ],
+  "note": "taint must survive a rename",
+  "category": "malicious"
+}

@@ -99,7 +99,20 @@ def _references_var(line: str, var: str, shell: bool) -> bool:
 
 
 def _normalize(path: str) -> str:
-    return PurePosixPath(path.strip("\"'")).name
+    """Canonical form of a path, keeping its directory.
+
+    This used to return the basename, so `backup/creds.txt` and
+    `logs/creds.txt` were the same key and a write to one plus a read of the
+    other was reported as an exfiltration chain that does not exist. A false
+    chain is worse than a missed one: it accuses.
+    """
+    cleaned = path.strip("\"'").strip()
+    if not cleaned:
+        return cleaned
+    try:
+        return str(PurePosixPath(cleaned))
+    except ValueError:
+        return cleaned
 
 
 def analyze(relpath: str, text: str, positions: list[tuple[str, str]],
@@ -126,6 +139,25 @@ def analyze(relpath: str, text: str, positions: list[tuple[str, str]],
             continue
         matched = (line_matches.get(idx) if line_matches is not None
                    else _matching_rules(line))
+
+        # Reassignment, handled BEFORE the no-match bail. A line that clears a
+        # tainted variable (`K=hello`) matches no rule, so it never reached the
+        # propagation code below and the stale taint survived — producing a
+        # CRITICAL chain whose reported source was a value no longer being sent.
+        # The same pass propagates var-to-var (`payload = secret`), which a
+        # single rename otherwise used to break the chain entirely.
+        if tainted_vars:
+            assign = _ASSIGN.match(line)
+            if assign:
+                target, rhs = assign.group(1), assign.group(2)
+                donor = next((v for v in list(tainted_vars)
+                              if v != target and _references_var(rhs, v, shell)), None)
+                if donor is not None:
+                    tainted_vars[target] = tainted_vars[donor]
+                elif target in tainted_vars and not any(
+                        r.capability in SOURCE_CAPABILITIES for r in (matched or [])):
+                    del tainted_vars[target]
+
         if not matched:
             continue
         # Skip anything that is not a live statement. Passing index 0 to

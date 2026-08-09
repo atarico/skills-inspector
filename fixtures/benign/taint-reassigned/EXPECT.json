@@ -1,0 +1,5 @@
+{
+  "max_headline": 1,
+  "note": "reassignment clears taint; no exfiltration chain",
+  "category": "benign"
+}

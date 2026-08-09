@@ -77,6 +77,18 @@ def check(unit, findings, profile) -> list[tuple[str, str]]:
         if "\n" in finding.evidence:
             bad.append(("ERROR", f"{tag} evidence is multi-line"))
 
+        # --- `detects` is an injection channel too -----------------------
+        # Structural findings interpolate target-controlled data into their
+        # labels (MCP server names, git aliases, hook events). The sweep used
+        # to check only `evidence`, which is how a label carrying `Human:` and
+        # a harness token reached the reading agent intact.
+        if _FORBIDDEN.search(finding.detects):
+            bad.append(("ERROR", f"{tag} detects carries control/invisible chars"))
+        if _HARNESS.search(finding.detects):
+            bad.append(("ERROR", f"{tag} detects carries harness delimiters"))
+        if "\n" in finding.detects or "\r" in finding.detects:
+            bad.append(("ERROR", f"{tag} detects is multi-line"))
+
         # --- a string iterated as a collection --------------------------
         if _CHAR_JOINED.search(finding.detects):
             bad.append(("ERROR", f"{tag} detects looks character-joined: "

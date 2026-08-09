@@ -151,7 +151,8 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
                 id=hit.rule_id, severity=hit.severity, confidence=confidence,
                 status="active", disclosure="undeclared", capability=hit.capability,
                 location=ev.sanitize_path(hit.relpath), line=hit.line,
-                detects=hit.detects, evidence=ev.sanitize(str(hit.evidence)),
+                detects=ev.sanitize_label(hit.detects),
+                evidence=ev.sanitize(str(hit.evidence)),
                 impact=hit.impact, legitimate_use=hit.legitimate,
                 what_to_check=hit.check, position=base_position,
                 specificity=hit.specificity))

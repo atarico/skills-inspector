@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "HOK-003"
+  ],
+  "note": "detects is an injection channel too, not just evidence",
+  "category": "malicious"
+}
