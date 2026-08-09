@@ -37,8 +37,9 @@ COVERAGE_LIMITS = [
     "Taint tracking covers direct and one-hop-indirect flows inside a single "
     "file (variable, filesystem, environment, direct pipe). Flows through a "
     "spawned interpreter, across files, or via a config read later are not seen.",
-    "The reachability graph is not implemented: dormant and conditional payloads "
-    "are not distinguished from active ones.",
+    "Reachability is resolved from explicit references only. A file loaded by a "
+    "path built at runtime looks dormant, and a dangling reference is reported "
+    "only when the bundle itself owns the parent directory.",
     "The semantic pass is not implemented: description/body mismatch is not checked.",
     "Position classification is heuristic. A dangerous pattern in prose may be "
     "demoted to low confidence incorrectly.",

@@ -196,7 +196,15 @@ def classify_lines(relpath: str, text: str) -> list[tuple[str, str]]:
     if suffix not in _DOC_SUFFIXES:
         return _classify_code(lines, base, suffix)
 
-    return _classify_markdown(lines, base)
+    classified = _classify_markdown(lines, base)
+    # Only a sample LOCATION caps the lines. The .md extension alone must not:
+    # `file_base_position` returns documentary for every markdown file, and
+    # using that as a floor would flatten imperative body prose — the exact
+    # thing a skill's instructions are made of — into documentary everywhere.
+    if not in_sample_dir(relpath):
+        return classified
+    floor = _ORDER.index(DOCUMENTARY)
+    return [(_ORDER[max(_ORDER.index(p), floor)], k) for p, k in classified]
 
 
 # Triple-quoted / heredoc bodies are prose, not statements. A security tool that

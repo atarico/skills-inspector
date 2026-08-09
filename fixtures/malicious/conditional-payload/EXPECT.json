@@ -1,0 +1,6 @@
+{
+  "must_detect": [
+    "BND-003"
+  ],
+  "category": "malicious"
+}

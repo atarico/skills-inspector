@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import evidence as ev
 from . import position as pos
+from . import reachability
 from . import rules as R
 from . import structural
 from . import taint
@@ -102,6 +103,7 @@ _MD_SUFFIXES = {".md", ".markdown", ".mdx"}
 def scan(unit: Unit) -> tuple[list[Finding], dict]:
     raw: list[Finding] = []
     chains: list[taint.Chain] = []
+    graph = reachability.build(unit.files)
 
     for entry in unit.files:
         if entry.symlink_target:
@@ -143,11 +145,23 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
                 what_to_check=hit.check, position=base_position,
                 specificity=hit.specificity))
 
-    # Location floor: a file inside a test/fixtures/examples tree caps at low,
-    # after every rule and exemption has run. One place, no bypass.
+    raw += _reachability_findings(graph, unit)
+
+    # Location floor: a file inside a test/fixtures/examples tree caps at low.
+    # Runs after EVERY producer — rules, structural, reachability — so nothing
+    # added later can bypass it. One place, no exceptions.
     for finding in raw:
         if pos.in_sample_dir(finding.location):
             finding.confidence = "low"
+
+    # `status` annotates; it must never lower severity (RULES.md section 2.3).
+    # A dormant CRITICAL is still CRITICAL.
+    for finding in raw:
+        node = graph.status.get(finding.location)
+        if node == reachability.DORMANT:
+            finding.status = "dormant"
+        elif node == reachability.CONDITIONAL:
+            finding.status = "conditional"
 
     raw = _supersede(raw, chains)
     findings = _dedupe(raw)
@@ -240,6 +254,57 @@ def _exec_bit_finding(entry) -> Finding:
         legitimate_use="Helper CLI the unit legitimately invokes.",
         what_to_check="Is this script referenced from the entry point?",
         specificity=80)
+
+
+def _reachability_findings(graph, unit: Unit) -> list[Finding]:
+    """BND-001/002/003 — structure findings the rule engine cannot see."""
+    out: list[Finding] = []
+
+    for relpath, status in sorted(graph.status.items()):
+        if not reachability.is_interesting(relpath):
+            continue
+        if pos.in_sample_dir(relpath):
+            continue
+        if status == reachability.DORMANT:
+            out.append(Finding(
+                id="BND-001", severity="MEDIUM", confidence="high", status="dormant",
+                disclosure="undeclared", capability=R.REMOTE_EXEC,
+                location=ev.sanitize_path(relpath), line=1,
+                detects="File in the bundle is referenced by nothing",
+                evidence="no path from any entry point",
+                impact="Dormant payload: shipped but not wired up. Severity comes "
+                       "from whatever the file contains.",
+                legitimate_use="Vendored deps, assets, docs, tests.",
+                what_to_check="Why is this shipped if nothing loads it?",
+                position=pos.file_base_position(relpath), specificity=70))
+        elif status == reachability.CONDITIONAL:
+            source = graph.conditional_from.get(relpath, "?")
+            out.append(Finding(
+                id="BND-003", severity="MEDIUM", confidence="high",
+                status="conditional", disclosure="undeclared",
+                capability=R.INSTRUCTION,
+                location=ev.sanitize_path(relpath), line=1,
+                detects="File loaded only under a runtime condition",
+                evidence=f"reached conditionally from {ev.sanitize_path(source)}",
+                impact="The human reviews the entry point; the model loads this "
+                       "on a trigger. The skill-native 'below the fold'.",
+                legitimate_use="Genuine progressive disclosure.",
+                what_to_check="Read this file as carefully as the entry point.",
+                position=pos.file_base_position(relpath), specificity=70))
+
+    for raw_ref, path, line in sorted(graph.dangling)[:20]:
+        out.append(Finding(
+            id="BND-002", severity="HIGH", confidence="medium", status="active",
+            disclosure="undeclared", capability=R.REMOTE_EXEC,
+            location=ev.sanitize_path(path), line=line,
+            detects="Reference to a bundle path that does not exist",
+            evidence=ev.sanitize(raw_ref),
+            impact="The file arrives after your audit, or is fetched at runtime.",
+            legitimate_use="A broken docs link. Verify which.",
+            what_to_check="Does anything create this path later?",
+            position=pos.file_base_position(path), specificity=75))
+
+    return out
 
 
 def _supersede(raw: list[Finding], chains: list) -> list[Finding]:

@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "BND-002"
+  ],
+  "note": "bundle owns scripts/ but the invoked file arrives after the audit",
+  "category": "malicious"
+}

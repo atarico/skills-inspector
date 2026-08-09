@@ -711,10 +711,7 @@ RULES: list[Rule] = [
 # Rules in RULES.md that this version cannot evaluate. Reported as coverage gaps
 # so a clean scan is never mistaken for a complete one.
 DEFERRED = {
-    "CHN-002": "needs the reachability graph (RULES.md section 5)",
-    "BND-001": "needs the reachability graph (RULES.md section 5)",
-    "BND-002": "needs the reachability graph (RULES.md section 5)",
-    "BND-003": "needs the reachability graph (RULES.md section 5)",
+    "CHN-002": "binary-plus-execution-path composition not wired yet",
     "AGT-009": "needs the semantic pass (RULES.md section 8)",
     "AGT-011": "superseded by BND-003, not implemented",
     "SUP-002": "needs a registry of known extension names",
