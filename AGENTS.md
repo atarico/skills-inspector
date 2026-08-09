@@ -49,9 +49,10 @@ update, and a v2 that looks routine on its own is loud in the delta.
   finding and never lowers its severity.
 - `skills/inspect-skill/scanner/` — bundled copy shipped with the skill. Keep in
   sync with `scanner/` when rules change.
-- `RULES.md` — the detection ruleset (the spec). `RULES.v1.md` — prior version.
+- `RULES.md` — the detection ruleset (the spec). `docs/RULES.v1.md` — prior version.
 - `tests/truepos.py` — detection benchmark against `fixtures/` (32/32 passing).
 - `bench/corpus.py` — false-positive benchmark against installed extensions.
+- `make check` runs detection, the self-scan, and the bundle-sync check.
 
 Deferred (declared in `RULES.md`, not yet implemented): the semantic pass
 (§8) — the only thing that addresses injection written as plain prose.

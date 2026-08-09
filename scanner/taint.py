@@ -118,10 +118,21 @@ def analyze(relpath: str, text: str, positions: list[tuple[str, str]]) -> list[C
         # Only live statements carry data. A documented example does not run.
         if position != pos.ACTIVE:
             continue
-        if pos.literal_demotion(line, 0) and not shell:
-            continue
-
         matched = _matching_rules(line)
+        # Skip anything that is not a live statement. Passing index 0 to
+        # literal_demotion never detects a comment (nothing precedes column 0),
+        # so probe at the first rule match instead — otherwise a comment
+        # *explaining* an exfil one-liner is reported as one.
+        if matched and not shell:
+            probe = min((m.start() for m in
+                         (r.pattern.search(line) for r in matched) if m), default=0)
+            # Only level 2 — a comment, or a regex/rule-catalogue literal. Level 1
+            # is a plain string literal, which is exactly how real code names the
+            # file it reads: `Path('.env').read_text()` is a genuine source.
+            if pos.literal_demotion(line, probe) >= 2:
+                continue
+        elif shell and line.lstrip().startswith("#"):
+            continue
         source_rules = [r for r in matched if r.capability in SOURCE_CAPABILITIES]
         sink_rules = [r for r in matched
                       if r.capability in SINK_CAPABILITIES and r.severity != "INFO"]

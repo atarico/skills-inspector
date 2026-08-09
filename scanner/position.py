@@ -35,10 +35,14 @@ _ILLUSTRATIVE_HEADING = re.compile(
 )
 
 # A fence stops being illustrative when the sentence above it says to run it.
+# The lead must be *directive toward the fence* — it ends with a colon, or names
+# "the following"/"this". A bare verb anywhere in the sentence is not enough:
+# "It does not block, install, or run anything." would otherwise activate the
+# example output block that follows it.
 _IMPERATIVE_LEAD = re.compile(
-    r"(?i)\b(run|execute|paste|copy|apply|invoke|call|launch|start|"
-    r"add the following|use the following|run the following|"
-    r"ejecut|corr[ée])\b"
+    r"(?i)(?:\b(run|execute|paste|copy|apply|invoke|add|use|ejecut[áa]?|corr[ée])\b"
+    r"[^.\n]{0,60}(?::\s*$|\b(the following|this|these)\b)"
+    r"|^\s*(run|execute|ejecut[áa]?|corr[ée])\b[^.\n]{0,40}:\s*$)"
 )
 
 # Imperative mood at the head of a markdown prose line.
