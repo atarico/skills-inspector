@@ -12,6 +12,34 @@ from pathlib import Path
 
 MAX_FILE_BYTES = 512 * 1024
 MAX_FILES = 2000
+# Total lines the rule pass will read across a unit. A real third-party bundle
+# turned out to ship a 1.7M-line JSON knowledge base; 68 patterns over that is
+# minutes of work for data that is not code. What gets dropped is reported, and
+# files are ordered so the drop lands on bulk data rather than on scripts.
+MAX_TOTAL_LINES = 200_000
+
+# Scanned first, so a budget cut removes the least interesting tail.
+_PRIORITY_NAMES = {
+    "SKILL.md": 0, "plugin.json": 0, "marketplace.json": 0, ".mcp.json": 0,
+    "settings.json": 0, "settings.local.json": 0, "opencode.json": 0,
+    "package.json": 0, ".envrc": 0, "config.toml": 0, "AGENTS.md": 0,
+    "CLAUDE.md": 0, "README.md": 1,
+}
+_PRIORITY_SUFFIXES = {
+    ".sh": 1, ".bash": 1, ".zsh": 1, ".ps1": 1, ".py": 1, ".js": 1, ".mjs": 1,
+    ".cjs": 1, ".ts": 1, ".rb": 1, ".pl": 1,
+    ".md": 2, ".toml": 2, ".yaml": 2, ".yml": 2, ".json": 3,
+}
+
+
+def scan_priority(entry) -> tuple[int, int]:
+    """Lower sorts first: entry points, then code, then docs, then bulk data."""
+    from pathlib import PurePosixPath
+    name = PurePosixPath(entry.relpath).name
+    rank = _PRIORITY_NAMES.get(name)
+    if rank is None:
+        rank = _PRIORITY_SUFFIXES.get(PurePosixPath(entry.relpath).suffix.lower(), 4)
+    return (rank, entry.size)
 
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache",
              ".pytest_cache", "dist", "build", ".next", "target", ".ruff_cache"}
@@ -168,6 +196,7 @@ def collect(target: Path) -> Unit:
             unit.files.append(FileEntry(rel, stat.st_size, False, "", executable, text))
 
     _read_manifest(unit)
+    unit.files.sort(key=scan_priority)
     return unit
 
 
@@ -198,6 +227,58 @@ def _readme_summary(raw: str) -> str:
     return ""
 
 
+def _yaml_scalar(block: str, key: str) -> str:
+    """Read a frontmatter value, including block scalars.
+
+    `description: |` puts the text on the following indented lines, so reading
+    the rest of the key's line yields just "|". That is not cosmetic: it is the
+    text the `disclosure` axis compares against, so a unit using block style
+    would have every capability marked undeclared.
+    """
+    import re as _re
+
+    lines = block.splitlines()
+    for idx, line in enumerate(lines):
+        match = _re.match(rf"^{_re.escape(key)}:\s*(.*)$", line)
+        if not match:
+            continue
+        inline = match.group(1).strip()
+        if inline and inline not in ("|", ">", "|-", ">-", "|+", ">+"):
+            return inline.strip("\"'")
+        # Block scalar: take the indented run that follows.
+        body: list[str] = []
+        for follow in lines[idx + 1:]:
+            if follow.strip() and not follow.startswith((" ", "\t")):
+                break
+            body.append(follow.strip())
+        folded = " ".join(part for part in body if part)
+        return _re.sub(r"\s+", " ", folded).strip()
+    return ""
+
+
+def _yaml_list(block: str, key: str) -> list[str]:
+    """Read a frontmatter value that may be inline CSV or a YAML sequence."""
+    import re as _re
+
+    lines = block.splitlines()
+    for idx, line in enumerate(lines):
+        match = _re.match(rf"^{_re.escape(key)}:\s*(.*)$", line)
+        if not match:
+            continue
+        inline = match.group(1).strip()
+        if inline:
+            return [t.strip().strip("\"'") for t in inline.split(",") if t.strip()]
+        items: list[str] = []
+        for follow in lines[idx + 1:]:
+            if follow.strip() and not follow.startswith((" ", "\t")):
+                break
+            entry = follow.strip()
+            if entry.startswith("- "):
+                items.append(entry[2:].strip().strip("\"'"))
+        return items
+    return []
+
+
 def _read_manifest(unit: Unit) -> None:
     """Pull the declared description — the basis of the disclosure axis."""
     import json
@@ -224,14 +305,11 @@ def _read_manifest(unit: Unit) -> None:
         match = re.match(r"^---\s*\n(.*?)\n---\s*\n", raw, re.DOTALL)
         if match:
             block = match.group(1)
-            desc = re.search(r"^description:\s*(.+?)\s*$", block, re.MULTILINE)
-            if desc and not unit.description:
-                unit.description = desc.group(1).strip().strip("\"'")
+            if not unit.description:
+                unit.description = _yaml_scalar(block, "description")
             name = re.search(r"^name:\s*(.+?)\s*$", block, re.MULTILINE)
             if name:
                 unit.name = name.group(1).strip().strip("\"'")
-            tools = re.search(r"^allowed-tools:\s*(.+?)\s*$", block, re.MULTILINE)
-            if tools:
-                unit.declared_tools = [t.strip() for t in tools.group(1).split(",") if t.strip()]
+            unit.declared_tools = _yaml_list(block, "allowed-tools")
         elif candidate == "README.md" and not unit.description:
             unit.description = _readme_summary(raw)

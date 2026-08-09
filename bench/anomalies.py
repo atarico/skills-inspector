@@ -131,6 +131,7 @@ def main(argv: list[str]) -> int:
     errors = warns = crashes = 0
     slow: list[tuple[float, str]] = []
     by_message: Counter = Counter()
+    sample: dict[str, str] = {}
 
     for path in units:
         started = time.monotonic()
@@ -151,13 +152,20 @@ def main(argv: list[str]) -> int:
                 print(f"{RED}ERROR{RESET} {unit.name or path.name}: {message}")
             else:
                 warns += 1
-                by_message[message.split(":")[0].split("@")[0]] += 1
+                # Group by the message TEXT, not the finding tag. Keying on the
+                # tag collapsed every warning into its rule id and threw away
+                # the only part that says what went wrong.
+                shape = re.sub(r"^\S+@\S+\s+", "", message)
+                shape = re.sub(r"['\"].*", "", shape).strip()[:56]
+                by_message[shape] += 1
+                sample.setdefault(shape, f"{unit.name or path.name}: {message}")
 
     print(f"\ncrashes {crashes}   errors {errors}   warnings {warns}")
     if by_message:
         print("\nwarning shapes:")
         for shape, count in by_message.most_common(8):
-            print(f"  {count:>4}  {shape[:70]}")
+            print(f"  {count:>4}  {shape}")
+            print(f"        {DIM}e.g. {sample[shape][:96]}{RESET}")
     if slow:
         print(f"\nslow units (> {SLOW_SECONDS}s):")
         for elapsed, name in sorted(slow, reverse=True)[:5]:

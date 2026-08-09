@@ -10,6 +10,7 @@ A report that omits them implies a completeness the tool does not have.
 from __future__ import annotations
 
 import json
+import re
 
 from . import evidence as ev
 from . import rules as R
@@ -40,6 +41,8 @@ _BASE_LIMITS = [
     "only when the bundle itself owns the parent directory.",
     "Position classification is heuristic. A dangerous pattern in prose may be "
     "demoted to low confidence incorrectly.",
+    "Large bundles are capped: files past the unit line budget are listed under "
+    "NOT ANALYZED and were never read.",
     "A clean report is not a safety claim.",
 ]
 
@@ -192,11 +195,22 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
         w("")
 
     if unit.skipped:
-        w("NOT ANALYZED")
-        for path, reason in unit.skipped[:15]:
-            w(f"  {ev.sanitize_path(path):<44} {reason}")
-        if len(unit.skipped) > 15:
-            w(f"  ... and {len(unit.skipped) - 15} more")
+        # Grouped by reason first. A bundle that ships a 1700-file data blob
+        # produces a skip list longer than the findings, and a flat list of the
+        # first fifteen hides the scale of what went unread.
+        by_reason: dict[str, list[str]] = {}
+        for path, reason in unit.skipped:
+            kind = re.sub(r"^\d+\s*(KB|lines)?,?\s*", "", reason).strip()
+            by_reason.setdefault(kind, []).append(path)
+
+        total = len(unit.skipped)
+        w(f"NOT ANALYZED  ({total} file{'' if total == 1 else 's'})")
+        for kind, paths in sorted(by_reason.items(), key=lambda kv: -len(kv[1])):
+            w(f"  {len(paths):>5}  {kind}")
+            for path in paths[:3]:
+                w(f"         {ev.sanitize_path(path)}")
+            if len(paths) > 3:
+                w(f"         ... and {len(paths) - 3} more")
         w("")
 
     w("COVERAGE LIMITS")

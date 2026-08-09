@@ -104,6 +104,8 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
     raw: list[Finding] = []
     chains: list[taint.Chain] = []
     graph = reachability.build(unit.files)
+    unit_budget = unit_line_budget()
+    lines_used = 0
 
     for entry in unit.files:
         if entry.symlink_target:
@@ -126,6 +128,13 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
             continue
         if entry.executable and not entry.relpath.endswith((".md", ".json", ".txt")):
             raw.append(_exec_bit_finding(entry))
+
+        line_count = entry.text.count("\n") + 1
+        if lines_used + line_count > unit_budget:
+            unit.skipped.append((entry.relpath,
+                                 f"{line_count} lines, unit line budget exhausted"))
+            continue
+        lines_used += line_count
 
         line_matches: dict[int, list] = {}
         raw += _scan_text(unit, entry.relpath, entry.text, line_matches)
@@ -172,6 +181,11 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
 
     findings.sort(key=Finding.sort_key)
     return findings, profile(findings, unit)
+
+
+def unit_line_budget() -> int:
+    from .unit import MAX_TOTAL_LINES
+    return MAX_TOTAL_LINES
 
 
 def _scan_text(unit: Unit, relpath: str, text: str,
