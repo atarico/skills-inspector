@@ -41,6 +41,9 @@ update, and a v2 that looks routine on its own is loud in the delta.
 - `scanner/taint.py` — source->sink dataflow (§4). Tracks variable, filesystem,
   environment, and direct-pipe channels; emits `CHN-001`, which supersedes the
   component findings it is built from.
+- `scanner/semantic.py` — the semantic pass (§8). Asks judges to DESCRIBE, not
+  judge, then cross-checks against the scanner. A judge omitting a capability
+  the scanner proved is itself the finding, which makes steering detectable.
 - `scanner/diff.py` — capability delta between two versions (§12). The
   loudest signal it produces: a new severe capability with the description
   unchanged.
@@ -51,8 +54,9 @@ update, and a v2 that looks routine on its own is loud in the delta.
   sync with `scanner/` when rules change.
 - `RULES.md` — the detection ruleset (the spec). `docs/RULES.v1.md` — prior version.
 - `tests/truepos.py` — detection benchmark against `fixtures/` (32/32 passing).
+- `tests/semantic_test.py` — semantic cross-check, synthetic panel (5/5).
 - `bench/corpus.py` — false-positive benchmark against installed extensions.
 - `make check` runs detection, the self-scan, and the bundle-sync check.
 
-Deferred (declared in `RULES.md`, not yet implemented): the semantic pass
-(§8) — the only thing that addresses injection written as plain prose.
+Deferred: CHN-002, AGT-011, SUP-002, EXE-009 — minor rules, all declared in
+`RULES.md` and reported as coverage gaps rather than silently dropped.

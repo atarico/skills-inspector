@@ -712,7 +712,6 @@ RULES: list[Rule] = [
 # so a clean scan is never mistaken for a complete one.
 DEFERRED = {
     "CHN-002": "binary-plus-execution-path composition not wired yet",
-    "AGT-009": "needs the semantic pass (RULES.md section 8)",
     "AGT-011": "superseded by BND-003, not implemented",
     "SUP-002": "needs a registry of known extension names",
     "EXE-009": "entropy scan not enabled in v0 (high false-positive rate)",

@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from . import diff as diffmod
+from . import semantic
 from . import engine, report
 from .unit import collect
 
@@ -36,6 +37,55 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("path", type=Path, help="file or directory to audit")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--verbose", action="store_true", help="do not truncate lists")
+
+    if argv and argv[0] == "semantic-prep":
+        sparser = argparse.ArgumentParser(
+            prog="inspector-skills semantic-prep",
+            description="Emit quarantined chunks for the semantic pass. "
+                        "Carries no scanner results: the comparison baseline is "
+                        "recomputed at verify time so no judge can echo it back.")
+        sparser.add_argument("path", type=Path)
+        args = sparser.parse_args(argv[1:])
+        if not args.path.exists():
+            print(f"error: {args.path} does not exist", file=sys.stderr)
+            return 2
+        print(semantic.request_json(semantic.prepare(collect(args.path))))
+        return 0
+
+    if argv and argv[0] == "semantic-verify":
+        vparser = argparse.ArgumentParser(
+            prog="inspector-skills semantic-verify",
+            description="Cross-check judge descriptions against the scanner. "
+                        "Every comparison happens here, never in a context that "
+                        "read the target.")
+        vparser.add_argument("path", type=Path)
+        vparser.add_argument("answers", type=Path, help="JSON from the judge panel")
+        vparser.add_argument("--json", action="store_true")
+        args = vparser.parse_args(argv[1:])
+        for candidate in (args.path, args.answers):
+            if not candidate.exists():
+                print(f"error: {candidate} does not exist", file=sys.stderr)
+                return 2
+
+        unit, findings, profile = _scan(args.path)
+        request = semantic.prepare(unit)
+        try:
+            raw = json.loads(args.answers.read_text(encoding="utf-8", errors="replace"))
+        except json.JSONDecodeError as exc:
+            print(f"error: answers file is not valid JSON: {exc}", file=sys.stderr)
+            return 2
+
+        extra = semantic.verify(unit, findings, request, raw)
+        combined = sorted(findings + extra, key=lambda f: f.sort_key())
+        # Recompute: a profile built before the semantic pass would print
+        # "Network no" in the same report where SEM-002 reports network.
+        profile = engine.profile(combined, unit)
+        if args.json:
+            print(report.to_json(unit, combined, profile))
+        else:
+            print(report.to_text(unit, combined, profile, verbose=args.verbose
+                                 if hasattr(args, "verbose") else False))
+        return 0
 
     if argv and argv[0] == "diff":
         dparser = argparse.ArgumentParser(

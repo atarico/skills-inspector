@@ -169,7 +169,7 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
         finding.disclosure = classify_disclosure(finding.capability, unit.description)
 
     findings.sort(key=Finding.sort_key)
-    return findings, _profile(findings, unit)
+    return findings, profile(findings, unit)
 
 
 def _scan_text(unit: Unit, relpath: str, text: str) -> list[Finding]:
@@ -370,7 +370,7 @@ def _dedupe(raw: list[Finding]) -> list[Finding]:
     return out
 
 
-def _profile(findings: list[Finding], unit: Unit) -> dict:
+def profile(findings: list[Finding], unit: Unit) -> dict:
     """Capability profile. CHN-003 lives here and only here: co-occurrence is
     reported, never escalated."""
     caps: dict[str, list[str]] = {}

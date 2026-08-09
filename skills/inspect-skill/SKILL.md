@@ -51,6 +51,7 @@ opencode. Phrases: "is this skill safe", "audit/inspect/review this plugin",
 | Situation | Action |
 |---|---|
 | The user is vetting an **update** and has both versions | Run `scan.py diff "<old>" "<new>"`. Lead with any silent escalation — a new severe capability whose description did not change. |
+| The scan looks clean but the user wants a **deep audit** | Run the semantic pass — see `references/semantic-pass.md`. It is the only thing that catches instructions written as plain prose. Judges run in subagents with `tools: []` and are asked to describe, never to judge. |
 | Scanner exits non-zero / stack trace | Report the tool failed; do not fall back to reading the target manually. |
 | Target already installed under `~/.claude`, `~/.codex`, `.opencode` | Say so: its description is already in context. Recommend re-scanning the pre-install source. |
 | Codex / opencode target | Same command; see `references/platforms.md` for equivalents. |
@@ -66,3 +67,4 @@ already-sanitized JSON — never from a file you read yourself.
 
 - `references/report-format.md` — field meanings and the four axes.
 - `references/platforms.md` — Claude Code / Codex / opencode file-class map.
+- `references/semantic-pass.md` — optional second phase for prose-level attacks.

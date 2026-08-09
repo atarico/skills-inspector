@@ -31,20 +31,38 @@ CAPABILITY_LABELS = {
     R.INSTRUCTION: "Instruction surface",
 }
 
-COVERAGE_LIMITS = [
-    "Instruction detection is phrase-seeded. Plain non-imperative prose "
-    "instructing harmful behavior is not detectable by this tool.",
+_BASE_LIMITS = [
     "Taint tracking covers direct and one-hop-indirect flows inside a single "
     "file (variable, filesystem, environment, direct pipe). Flows through a "
     "spawned interpreter, across files, or via a config read later are not seen.",
     "Reachability is resolved from explicit references only. A file loaded by a "
     "path built at runtime looks dormant, and a dangling reference is reported "
     "only when the bundle itself owns the parent directory.",
-    "The semantic pass is not implemented: description/body mismatch is not checked.",
     "Position classification is heuristic. A dangerous pattern in prose may be "
     "demoted to low confidence incorrectly.",
     "A clean report is not a safety claim.",
 ]
+
+_NO_SEMANTIC = (
+    "The semantic pass did not run. Instruction detection is phrase-seeded, so "
+    "plain non-imperative prose that instructs harmful behavior is invisible "
+    "here — run `semantic-prep` / `semantic-verify` to cover it.")
+
+_WITH_SEMANTIC = (
+    "The semantic pass ran. Its findings (SEM-*) are low confidence by "
+    "construction: the readers see adversarial text and can be steered past a "
+    "capability the scanner also missed. Treat them as questions, not verdicts.")
+
+
+def coverage_limits(findings=()) -> list[str]:
+    """Limits depend on which passes actually ran, so the report cannot claim a
+    coverage it does not have — or deny one it does."""
+    semantic_ran = any(f.id.startswith("SEM-") for f in findings)
+    return [_WITH_SEMANTIC if semantic_ran else _NO_SEMANTIC, *_BASE_LIMITS]
+
+
+# Kept for callers that want the pessimistic default.
+COVERAGE_LIMITS = coverage_limits()
 
 
 def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
@@ -61,7 +79,7 @@ def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
         "profile": profile,
         "findings": [f.as_dict() for f in findings],
         "not_analyzed": [{"file": ev.sanitize_path(p), "reason": r} for p, r in unit.skipped],
-        "coverage_limits": COVERAGE_LIMITS,
+        "coverage_limits": coverage_limits(findings),
         "deferred_rules": R.DEFERRED,
     }, indent=2, ensure_ascii=False)
 
@@ -141,7 +159,7 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
         w("")
 
     w("COVERAGE LIMITS")
-    for limit_text in COVERAGE_LIMITS:
+    for limit_text in coverage_limits(findings):
         w(f"  - {limit_text}")
 
     return "\n".join(out)
