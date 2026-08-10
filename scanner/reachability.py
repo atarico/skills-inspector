@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
+from . import position
+
 ENTRY = "entry"
 ACTIVE = "active"
 CONDITIONAL = "conditional"
@@ -37,7 +39,12 @@ _REF_PATTERNS = [
     re.compile(r"!?\[[^\]]*\]\(\s*<?([^)>\s#]+)"),                 # markdown link
     re.compile(r"`([^`\n]{2,120}?\.[A-Za-z0-9]{1,6})`"),           # `path.ext` in backticks
     re.compile(r"""["']([^"'\n]{2,120}?\.[A-Za-z0-9]{1,6})["']"""),  # quoted path
-    re.compile(r"(?:source|\.|bash|sh|zsh|python3?|node|ruby|perl)\s+"
+    # The lookbehind is load-bearing. Without it the `sh` alternative matched the
+    # tail of any word: "The cleanup will flush scripts/cache.json" was read as
+    # an invocation of scripts/cache.json and reported BND-002 HIGH. The bare `.`
+    # (shell's `source` shorthand) had the same problem in reverse — it matched
+    # the full stop ending a sentence whenever a path followed it.
+    re.compile(r"(?<![\w./-])(?:source|bash|sh|zsh|python3?|node|ruby|perl|\.)\s+"
                r"([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,6})"),            # invocation
     re.compile(r"(?:from|require|import)\s*\(?\s*['\"]([^'\"\n]+)['\"]"),
     re.compile(r"\$\{?CLAUDE_PLUGIN_ROOT\}?/([A-Za-z0-9_./-]+)"),
@@ -74,6 +81,12 @@ class Graph:
     status: dict[str, str] = field(default_factory=dict)
     conditional_from: dict[str, str] = field(default_factory=dict)
     dangling: list[tuple[str, str, int]] = field(default_factory=list)
+    # Files referenced from a line that is itself in ACTIVE position — an
+    # instruction to run the thing, not a mention of it. This is deliberately
+    # narrower than `status == ACTIVE`: "see examples/basic.sh for usage" makes a
+    # file reachable, while "Run `bash examples/payload.sh`" makes it live. Only
+    # the second may lift the sample-directory confidence floor.
+    invoked: set[str] = field(default_factory=set)
 
 
 def _is_entry(relpath: str) -> bool:
@@ -133,6 +146,36 @@ def _extract(text: str, relpath: str, known: set[str], index=None) -> list[tuple
     return out
 
 
+def _invocation_refs(text: str, relpath: str, known: set[str],
+                     index=None) -> set[str]:
+    """Targets this file tells something to RUN, as opposed to mentions.
+
+    Two narrowings, and both are load-bearing:
+
+    Only the invocation pattern counts (`bash x.sh`, `python3 x.py`, `. x.sh`).
+    A quoted or backticked path is a mention — `tests/make_fixtures.py` names
+    every fixture path it writes as a plain string, and treating that as an
+    invocation lit up this repository's own attack fixtures.
+
+    And the referring line must be in ACTIVE position, so an invocation shown
+    inside an example block or under a "Don't do this" heading stays a
+    demonstration.
+
+    The result lifts the sample-directory confidence floor, so it has to mean
+    "an entry point wired this up", not "someone typed this path once".
+    """
+    out: set[str] = set()
+    positions = position.classify_lines(relpath, text)
+    for idx, line in enumerate(text.splitlines()):
+        if idx < len(positions) and positions[idx][0] != position.ACTIVE:
+            continue
+        for match in _REF_PATTERNS[3].finditer(line):
+            target = _candidates(match.group(1), relpath, known, index)
+            if target and target != relpath:
+                out.add(target)
+    return out
+
+
 def _config_refs(text: str, relpath: str, known: set[str], index=None) -> list[tuple[str, bool, int, str]]:
     """JSON config: any string value that resolves to a bundle file."""
     try:
@@ -181,6 +224,12 @@ def build(files: list) -> Graph:
         if relpath.endswith((".json",)):
             refs += _config_refs(text, relpath, known, index)
         edges[relpath] = [(target, cond) for target, cond, _l, _r in refs]
+
+        graph.invoked.update(_invocation_refs(text, relpath, known, index))
+        if relpath.endswith((".json",)):
+            # A config that wires a file is not mentioning it, it is wiring it.
+            graph.invoked.update(t for t, _c, _l, _r in
+                                 _config_refs(text, relpath, known, index))
 
         # dangling: a STRUCTURAL reference that resolves to nothing
         for idx, line in enumerate(text.splitlines(), start=1):

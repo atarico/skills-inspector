@@ -10,7 +10,17 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-MAX_FILE_BYTES = 512 * 1024
+# Per-file read cap. Deliberately generous, because the old 512 KB limit was a
+# one-line evasion: a file over the cap was given `text=None` and the engine
+# skipped it outright, so padding a payload script past the limit produced a scan
+# with ZERO findings and a single NOT ANALYZED line. Cost to the attacker: one
+# `print("x" * 600000)`.
+#
+# The real bound on work is MAX_TOTAL_LINES below, which is per-unit and cannot
+# be evaded by splitting or padding a single file. This cap now only decides when
+# a file is too big to hold in memory, and anything hitting it is reported as
+# partially read AND escalated if something in the bundle runs it.
+MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_FILES = 2000
 # Total lines the rule pass will read across a unit. A real third-party bundle
 # turned out to ship a 1.7M-line JSON knowledge base; 68 patterns over that is
@@ -73,6 +83,7 @@ class FileEntry:
     executable: bool = False
     text: str | None = None
     symlink_target: str = ""  # set only when the link escapes the unit root
+    truncated: bool = False   # read only in part; anything past the cap is unseen
 
 
 @dataclass
@@ -96,12 +107,20 @@ def resolve(target: Path) -> tuple[Path, str, bool]:
     target = target.resolve()
     start = target if target.is_dir() else target.parent
 
+    # A non-skill marker (plugin, marketplace, opencode project) always wins:
+    # that is the widening this function exists for. Between two SKILL.md files
+    # the INNERMOST one wins — it is the unit the caller asked about. Letting an
+    # ancestor overwrite it took the name and description from the wrong unit,
+    # which marks every real capability of the target `undeclared` (or, worse,
+    # `declared` against a sibling's description) and poisons the whole
+    # disclosure axis. Pinned by tests/unit_test.py::resolve.
     best: tuple[Path, str] | None = None
     current = start
     for _ in range(8):
         for marker, kind in UNIT_MARKERS:
             if (current / marker).exists():
-                best = (current, kind)
+                if best is None or kind != "skill":
+                    best = (current, kind)
                 break
         if best and best[1] != "skill":
             break
@@ -182,18 +201,26 @@ def collect(target: Path) -> Unit:
                 unit.skipped.append((rel, f"{binary_kind}, contents unreviewable"))
                 continue
 
-            if stat.st_size > MAX_FILE_BYTES:
-                unit.files.append(FileEntry(rel, stat.st_size, False, "", executable))
-                unit.skipped.append((rel, f"{stat.st_size // 1024} KB, over size limit"))
-                continue
-
+            # Over the cap the file is read PARTIALLY, never dropped. Handing the
+            # engine `text=None` was the evasion; a partial read still carries
+            # line numbers that are correct for everything it contains, and the
+            # truncation is both reported and escalated downstream.
+            truncated = stat.st_size > MAX_FILE_BYTES
             try:
-                text = full.read_text(encoding="utf-8", errors="replace")
+                if truncated:
+                    with full.open("r", encoding="utf-8", errors="replace") as fh:
+                        text = fh.read(MAX_FILE_BYTES)
+                    unit.skipped.append((
+                        rel, f"{stat.st_size // 1024} KB, read the first "
+                             f"{MAX_FILE_BYTES // 1024} KB only"))
+                else:
+                    text = full.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 unit.skipped.append((rel, "unreadable"))
                 continue
 
-            unit.files.append(FileEntry(rel, stat.st_size, False, "", executable, text))
+            unit.files.append(FileEntry(rel, stat.st_size, False, "", executable,
+                                        text, "", truncated))
 
     _read_manifest(unit)
     unit.files.sort(key=scan_priority)
