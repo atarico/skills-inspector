@@ -9,7 +9,7 @@ DEFERRED and reported as coverage gaps, never silently dropped.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Capability buckets drive the profile and the disclosure comparison.
 NETWORK = "network"
@@ -25,8 +25,6 @@ DESTRUCTIVE = "destructive"
 INSTRUCTION = "instruction"
 RECON = "recon"
 
-ALL_PLATFORMS = ("claude", "codex", "opencode")
-
 
 @dataclass(frozen=True)
 class Rule:
@@ -40,10 +38,8 @@ class Rule:
     check: str
     pattern: re.Pattern
     specificity: int = 50  # section 7 precedence; higher wins
-    platforms: tuple[str, ...] = ALL_PLATFORMS
     markdown_only: bool = False
     code_only: bool = False
-    extra: dict = field(default_factory=dict)
 
 
 def _r(pattern: str, flags: int = re.IGNORECASE) -> re.Pattern:
@@ -426,9 +422,17 @@ RULES: list[Rule] = [
          "Rewrites the rules the agent follows — a persistent foothold in your assistant.",
          "Only as the unit's stated purpose.",
          "What exactly is written into the agent config?",
+         # The `.claude/` and `.codex/` alternatives used to match ANY path under
+         # those directories, so `echo ... >> .claude/deployment-checkpoints.log`
+         # was reported as rewriting the agent's instructions. It is not: the
+         # rule's own name is "modifies agent instructions or CONFIG", and a log,
+         # lock or cache file is neither. Writing `.claude/commands/x.md` still
+         # fires, because that IS a command definition.
          _r(r"(>>|>|tee\s+-a?|write_text|writeFile|open\s*\([^)]{0,60}[\"']w)"
-            r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|\.claude/|\.codex/|opencode\.json|\.mcp\.json"
-            r"|settings\.local\.json|settings\.json)"),
+            r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
+            r"|settings\.local\.json|settings\.json"
+            r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
+            r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))"),
          specificity=93),
 
     Rule("AGT-015", "HIGH", "high", CONTROL_PLANE,
