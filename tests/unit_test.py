@@ -604,17 +604,33 @@ def _rules_doc_cases() -> None:
     root = Path(__file__).resolve().parent.parent
     doc = (root / "RULES.md").read_text(encoding="utf-8")
 
-    documented = set(re.findall(r"^\|\s*`([A-Z]{3}-\d{3})`", doc, re.M))
-    deferred_block = re.search(r"### 6\.x Deferred(.*?)(?=\n## )", doc, re.S)
-    deferred: set[str] = set()
-    if deferred_block:
-        for low, high in re.findall(r"`([A-Z]{3}-\d{3})`(?:…`([A-Z]{3}-\d{3})`)?",
-                                    deferred_block.group(1)):
-            deferred.add(low)
+    def _expand(row: str) -> set[str]:
+        """Rule ids in a table row, expanding `X-001`…`X-004` range notation."""
+        found: set[str] = set()
+        for low, high in re.findall(
+                r"`([A-Z]{3}-\d{3})`(?:…`([A-Z]{3}-\d{3})`)?", row):
+            found.add(low)
             if high:
                 prefix, start = low.rsplit("-", 1)
-                deferred.update(f"{prefix}-{n:03d}" for n in
-                                range(int(start), int(high.rsplit("-", 1)[1]) + 1))
+                found.update(f"{prefix}-{n:03d}" for n in
+                             range(int(start), int(high.rsplit("-", 1)[1]) + 1))
+        return found
+
+    documented: set[str] = set()
+    for row in re.findall(r"^\|\s*(`[A-Z]{3}-\d{3}`[^|]*)", doc, re.M):
+        documented |= _expand(row)
+
+    # Only the FIRST table of §6.x is the deferred list. The section also carries
+    # a second table running the other way (implemented, documented elsewhere),
+    # and prose that names other rule ids in passing — neither is a coverage gap.
+    deferred_block = re.search(
+        r"### 6\.x Deferred(.*?)(?=\nTwo rules run in the opposite direction|\n## )",
+        doc, re.S)
+    deferred: set[str] = set()
+    if deferred_block:
+        for row in re.findall(r"^\|\s*(`[A-Z]{3}-\d{3}`[^|]*)",
+                              deferred_block.group(1), re.M):
+            deferred |= _expand(row)
 
     implemented = {r.id for r in R.RULES}
     for module in ("structural", "engine", "taint", "semantic", "reachability"):
@@ -628,6 +644,18 @@ def _rules_doc_cases() -> None:
     check("RULES.md", "every implemented rule is documented",
           sorted(implemented - documented - deferred), [],
           "a rule nobody can read about is a rule nobody can audit")
+
+    # The prose table above and rules.DEFERRED must agree, because DEFERRED is
+    # what reaches the auditing agent as `deferred_rules` in the JSON. It listed
+    # four rules while RULES.md specified seventeen, so the field an agent reads
+    # to learn what was NOT covered understated the gap — including a CRITICAL.
+    check("RULES.md", "the deferred table matches rules.DEFERRED exactly",
+          sorted(deferred ^ set(R.DEFERRED)), [],
+          "deferred_rules is the machine-readable half of RULES.md 6.x")
+
+    check("RULES.md", "no rule is both deferred and implemented",
+          sorted(set(R.DEFERRED) & {r.id for r in R.RULES}), [],
+          "claiming a gap that does not exist is its own kind of lie")
 
 
 _rules_doc_cases()

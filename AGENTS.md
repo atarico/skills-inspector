@@ -52,15 +52,42 @@ update, and a v2 that looks routine on its own is loud in the delta.
   finding and never lowers its severity.
 - `skills/inspect-skill/scanner/` — bundled copy shipped with the skill. Keep in
   sync with `scanner/` when rules change.
+- `scanner/finding.py` — the `Finding` record, the axis orderings, and
+  `headline()`. Separate from `engine.py` so describing a finding does not
+  depend on the machinery that produces one.
+- `scanner/position.py` — the position taxonomy (§3), which sets `confidence`.
+  The most heuristic part of the tool and the load-bearing one.
+- `scanner/structural.py` — control plane and auto-execution, from parsing
+  config files. Takes `(relpath, text)`; it performs no file I/O.
 - `RULES.md` — the detection ruleset (the spec). `docs/RULES.v1.md` — prior version.
-- `tests/truepos.py` — detection benchmark against `fixtures/` (32/32 passing).
+- `tests/unit_test.py` — the invariant safety net (99 checks). Runs FIRST in
+  `make check`. Every case pins a property a docstring already promises.
+- `tests/truepos.py` — detection benchmark against `fixtures/` (38/38 passing).
 - `tests/semantic_test.py` — semantic cross-check, synthetic panel (5/5).
 - `tests/fuzz.py` — malformed input suite: truncated encodings, unclosed
   frontmatter, deep JSON, symlink cycles, ReDoS bait (26/26).
-- `bench/corpus.py` — false-positive benchmark against installed extensions.
+- `bench/corpus.py` — headline-rate benchmark against installed extensions.
 - `bench/anomalies.py` — invariant sweep over a corpus: malformed evidence,
   markup-as-description, inconsistent counts, duplicate findings.
-- `make check` runs detection, the self-scan, and the bundle-sync check.
+- `make check` runs the unit suite, detection, the semantic cross-check, fuzz,
+  the self-scan, and the bundle-sync check. It also runs in CI on every push.
 
-Deferred: CHN-002, AGT-011, SUP-002, EXE-009 — minor rules, all declared in
-`RULES.md` and reported as coverage gaps rather than silently dropped.
+**Changing a demotion heuristic requires a case in BOTH directions** — the
+detection case and its false-positive twin. Every heuristic in `position.py` was
+originally tuned to silence a false positive, and for a long time nothing pinned
+the invariant it was meant to preserve; that is how a precision fix once opened a
+critical evasion.
+
+## Coverage gaps
+
+Seventeen rule IDs are specified in `RULES.md` but **not implemented**. They are
+listed with a reason in `RULES.md` §6.x, and `tests/unit_test.py` fails if the
+document and the implementation drift apart.
+
+`NET-002` is the one to know about: it is CRITICAL and genuinely missing, not
+minor. The rest are instruction-surface shapes with no deterministic signature,
+supply-chain provenance (a subsystem, not a pattern), and config surfaces that
+each need their own corpus measurement before they can ship.
+
+Do not read a rule's presence in `RULES.md` as a guarantee that this build
+enforces it.

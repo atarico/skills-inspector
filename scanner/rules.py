@@ -714,11 +714,31 @@ RULES: list[Rule] = [
 
 # Rules in RULES.md that this version cannot evaluate. Reported as coverage gaps
 # so a clean scan is never mistaken for a complete one.
+#
+# This table is the machine-readable half of RULES.md §6.x, and it MUST list
+# every documented-but-unimplemented rule. It used to name four while the
+# ruleset specified seventeen, so the field an auditing agent reads to learn what
+# was NOT covered understated the gap by thirteen rules — one of them CRITICAL.
+# A tool that under-reports its own blind spots is doing the exact thing it was
+# built to catch. `tests/unit_test.py` fails if this drifts from RULES.md again.
 DEFERRED = {
+    "NET-002": "CRITICAL and genuinely missing — the highest-value gap here",
+    "AGT-007": "instruction-surface shape with no deterministic signature",
+    "AGT-009": "instruction-surface shape with no deterministic signature",
+    "AGT-011": "reviewer-fatigue padding; superseded by BND-003 as a signal",
+    "AUT-006": "auto-execution surface not parsed yet; needs its own corpus measurement",
+    "AUT-007": "auto-execution surface not parsed yet; needs its own corpus measurement",
+    "BND-004": "needs the semantic pass to tell imperative prose from a template",
     "CHN-002": "binary-plus-execution-path composition not wired yet",
-    "AGT-011": "superseded by BND-003, not implemented",
+    "CHN-003": "implemented as the capability profile, deliberately not as a finding",
+    "EXE-009": "needs archive extraction — running a parser on hostile input",
+    "HOK-005": "control-plane surface not parsed yet",
+    "SUP-001": "supply-chain provenance: a subsystem, not a pattern",
     "SUP-002": "needs a registry of known extension names",
-    "EXE-009": "entropy scan not enabled in v0 (high false-positive rate)",
+    "SUP-003": "supply-chain provenance: a subsystem, not a pattern",
+    "SUP-004": "supply-chain provenance: a subsystem, not a pattern",
+    "SUP-005": "supply-chain provenance: a subsystem, not a pattern",
+    "SUP-006": "supply-chain provenance: a subsystem, not a pattern",
 }
 
 BY_ID = {rule.id: rule for rule in RULES}
