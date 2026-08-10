@@ -1,0 +1,46 @@
+name: check
+
+# The whole suite is stdlib-only and runs in seconds, so there is no reason for
+# it not to gate every change. `make check` is the same command a contributor
+# runs locally — no CI-only steps, nothing that passes here and fails there.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor the README promises. Testing only the newest
+        # version would let a 3.11+ syntax feature break that promise silently.
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: No third-party dependencies
+        # The README's central claim about this tool is that installing it pulls
+        # nothing. A dependency file appearing is a change to what the tool IS,
+        # so it fails the build rather than passing quietly.
+        run: |
+          for f in requirements.txt pyproject.toml setup.py Pipfile poetry.lock; do
+            if [ -e "$f" ]; then
+              echo "::error::$f exists — this project must stay stdlib-only"
+              exit 1
+            fi
+          done
+
+      - name: make check
+        run: make check
+
+      - name: Invariant sweep over the checkout itself
+        # Not a false-positive benchmark — that one needs a corpus of trusted
+        # extensions, which a runner does not have. This asks the other
+        # question: is the OUTPUT well-formed on a real tree.
+        run: make anomalies CORPUS=.
