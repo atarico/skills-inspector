@@ -16,10 +16,15 @@ all three targets. Point it at the downloaded directory; it resolves the unit.
 
 - **Claude Code**: place this directory under `~/.claude/skills/inspect-skill/`.
   The `allowed-tools` line restricts it to running the scanner.
-- **Codex / opencode**: these have no `SKILL.md` mechanism. Invoke the scanner
-  directly and read its JSON — `python3 <dir>/scan.py <target> --json` — from a
-  prompt/command wrapper. The security contract in `../SKILL.md` still applies:
-  never read the target yourself; only consume the JSON.
+- **opencode**: place it under `~/.config/opencode/skills/inspect-skill/`. It
+  reads the same `SKILL.md` format. This file used to say opencode had no skill
+  mechanism; it does, and the claim cost users a working install path.
+- **Codex**: no skills directory. Invoke the scanner directly and read its JSON —
+  `python3 <dir>/scan.py <target> --json` — from a prompt wrapper under
+  `~/.codex/prompts/`, or work from a checkout so `AGENTS.md` is picked up.
+
+The security contract in `../SKILL.md` applies on every platform: never read the
+target yourself; only consume the JSON.
 
 ## Neighbouring assistants
 

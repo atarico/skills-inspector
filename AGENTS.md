@@ -10,10 +10,20 @@ you install it. It reports; it never blocks, installs, or runs the target.
 |---|---|---|
 | `inspect-skill` | audit / inspect / review a skill or plugin before installing; check for prompt injection or attack vectors | `skills/inspect-skill/SKILL.md` |
 
+## Installing on each platform
+
+- **Claude Code** — `cp -r skills/inspect-skill ~/.claude/skills/`
+- **opencode** — `cp -r skills/inspect-skill ~/.config/opencode/skills/`.
+  It supports the same `SKILL.md` format; an earlier version of this file
+  claimed it did not, which sent people down a longer path for no reason.
+- **Codex** — no skills directory. It reads `AGENTS.md` from the working
+  directory, so either run it from a checkout of this repo, or wrap the scanner
+  call in a prompt under `~/.codex/prompts/`.
+
 ## Auditing from Codex or opencode
 
-These platforms read this `AGENTS.md` natively but have no `SKILL.md` mechanism.
-To audit an extension, run the scanner and read only its JSON:
+Both read `AGENTS.md` natively. To audit an extension, run the scanner and read
+only its JSON:
 
 ```
 python3 skills/inspect-skill/scan.py <target-path> --json
