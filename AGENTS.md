@@ -18,10 +18,22 @@ To audit an extension, run the scanner and read only its JSON:
 ```
 python3 skills/inspect-skill/scan.py <target-path> --json
 python3 skills/inspect-skill/scan.py diff <old-version> <new-version> --json
+python3 skills/inspect-skill/scan.py baseline <target-path> --json
+python3 skills/inspect-skill/scan.py check <target-path> --json
 ```
 
-Audit updates with `diff`, not a fresh scan: supply-chain attacks arrive as the
-update, and a v2 that looks routine on its own is loud in the delta.
+Audit updates with `diff` or `check`, not a fresh scan: supply-chain attacks
+arrive as the update, and a v2 that looks routine on its own is loud in the
+delta.
+
+Use `diff` when the user still has both versions. Use `check` when they do not —
+which is the normal case, because an update overwrites the installed copy in
+place. `check` compares what is on disk against a previously approved state
+stored in `~/.inspector-baselines/`.
+
+**Never run `baseline` on the user's behalf without being asked.** It records the
+current state as approved, and approving a version nobody has read makes every
+later comparison clean by definition. Report the delta; let the human approve.
 
 **Security contract (all platforms):**
 
@@ -47,6 +59,10 @@ update, and a v2 that looks routine on its own is loud in the delta.
 - `scanner/diff.py` — capability delta between two versions (§12). The
   loudest signal it produces: a new severe capability with the description
   unchanged.
+- `scanner/baseline.py` — approved-state store (§12). Keeps the scan RESULT, not
+  the tree, because `diff.compare` never needed the old files. Trust-on-first-use:
+  `check` never records, `baseline` always does, and a store that fails its
+  checksum is refused rather than trusted.
 - `scanner/reachability.py` — entry-point graph (§5). Produces `status`
   (active/conditional/dormant) and `BND-001/002/003`. `status` annotates a
   finding and never lowers its severity.
@@ -60,8 +76,10 @@ update, and a v2 that looks routine on its own is loud in the delta.
 - `scanner/structural.py` — control plane and auto-execution, from parsing
   config files. Takes `(relpath, text)`; it performs no file I/O.
 - `RULES.md` — the detection ruleset (the spec). `docs/RULES.v1.md` — prior version.
-- `tests/unit_test.py` — the invariant safety net (99 checks). Runs FIRST in
-  `make check`. Every case pins a property a docstring already promises.
+- `tests/unit_test.py` — the invariant safety net. Runs FIRST in `make check`.
+  Every case pins a property a docstring already promises. Deliberately not
+  given a count here: it grows with every fix, and a number in prose is a
+  number that goes stale.
 - `tests/truepos.py` — detection benchmark against `fixtures/` (38/38 passing).
 - `tests/semantic_test.py` — semantic cross-check, synthetic panel (5/5).
 - `tests/fuzz.py` — malformed input suite: truncated encodings, unclosed

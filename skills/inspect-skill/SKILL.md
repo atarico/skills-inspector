@@ -51,6 +51,10 @@ opencode. Phrases: "is this skill safe", "audit/inspect/review this plugin",
 | Situation | Action |
 |---|---|
 | The user is vetting an **update** and has both versions | Run `scan.py diff "<old>" "<new>"`. Lead with any silent escalation — a new severe capability whose description did not change. |
+| The user is vetting an **update** and the old version is gone | The normal case: updates overwrite in place. Run `scan.py check "<path>"`, which compares against the state they approved earlier. |
+| `check` reports no approved state | Say so plainly and audit in full instead. Do **not** run `baseline` to make the message go away — that approves a version nobody read. |
+| The user has read a change and accepts it | Only then run `scan.py baseline "<path>"` to record the new approved state. Never on your own initiative. |
+| `check` exits 2 with a checksum error | The stored baseline was modified after approval. Report it as a finding in its own right; do not re-approve to clear it. |
 | The scan looks clean but the user wants a **deep audit** | Run the semantic pass — see `references/semantic-pass.md`. It is the only thing that catches instructions written as plain prose. Judges run in subagents with `tools: []` and are asked to describe, never to judge. |
 | Scanner exits non-zero / stack trace | Report the tool failed; do not fall back to reading the target manually. |
 | Target already installed under `~/.claude`, `~/.codex`, `.opencode` | Say so: its description is already in context. Recommend re-scanning the pre-install source. |

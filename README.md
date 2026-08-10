@@ -73,6 +73,9 @@ cd skills-inspector
 
 python3 -m scanner /path/to/downloaded-skill            # human-readable
 python3 -m scanner /path/to/downloaded-skill --json     # machine-readable
+
+python3 -m scanner baseline /path/to/skill              # record it as approved
+python3 -m scanner check    /path/to/skill              # what changed since?
 ```
 
 `python3 -m scanner` runs from the repository root. To scan from anywhere else,
@@ -163,12 +166,49 @@ So it reports, and stops. You decide.
    states what was found; it never states that nothing exists.
 5. **Then decide.** Copy it, or don't.
 
-### And when it updates
+### And when it updates — the part that needs a baseline
 
-Step 6 is the one people skip, and the one that catches real attacks: when a
-skill you already trust ships a new version, run `diff` between the old and new
-copies rather than re-scanning the new one alone. See
-[Quick start](#quick-start).
+Step 6 is the one people skip, and the one that catches real attacks.
+
+`diff` compares two trees, which assumes you still have the old one. **You
+usually do not.** An update overwrites `~/.claude/skills/<name>` in place, and
+most marketplace caches are not git repositories — by the time there is a v2 to
+inspect, v1 is gone. The attacker did not have to do anything to arrange that.
+
+So record what you approved, and compare against the record:
+
+```sh
+python3 -m scanner baseline ~/.claude/skills/some-skill   # after you audit it
+# ...time passes, the skill updates in place...
+python3 -m scanner check ~/.claude/skills/some-skill      # what changed?
+```
+
+`check` scans what is on disk now and compares it to the approved state. If the
+update gained a severe capability while the description stayed the same, that is
+the headline. When you have read the change and accept it, run `baseline` again
+to record the new state.
+
+Two rules the store follows, both deliberate:
+
+- **`check` never records anything.** Approving is always an explicit `baseline`
+  run. A first `check` reports that there is nothing to compare against and
+  stops — self-approving whatever is on disk the first time it runs would bless
+  a payload nobody read.
+- **The store lives in `~/.inspector-baselines/`, not under `~/.claude/`.** That
+  directory is writable by any skill with filesystem access, and writing to it is
+  something this scanner reports (`FSW-002`). Keeping the trust anchor there
+  would let a compromised extension approve its own next version.
+
+Each entry is a few kilobytes of JSON you can read with `cat` — the scan result,
+not a copy of the tree. It carries a checksum, and a baseline that fails it is
+refused rather than trusted: a bad baseline produces a confident *"nothing
+changed"*, which is worse than having none.
+
+**What that checksum is not:** protection against someone who already has write
+access to your home directory. They can recompute it. Nothing stored on the same
+machine can defend against that, and saying otherwise would be the overselling
+this README refuses to do. What it buys is that silent modification takes
+deliberate effort and leaves the store in a state the tool will not trust.
 
 ## What it detects
 
@@ -330,6 +370,7 @@ scanner/              the analyzer (stdlib only)
   taint.py            source -> sink data flow
   reachability.py     entry-point graph -> active / conditional / dormant
   diff.py             capability delta between versions
+  baseline.py         approved-state store for the update check
   semantic.py         describe-then-cross-check pass for prose attacks
   evidence.py         output sanitization (mandatory)
 skills/inspect-skill/ the installable skill (bundles a copy of scanner/)

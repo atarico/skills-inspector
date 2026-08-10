@@ -626,11 +626,50 @@ have.
 
 ---
 
-## 12. Diff mode
+## 12. Diff mode and the approved state
 
 `inspector diff <old> <new>` — the highest-value mode, and the reason for it is
 simple: **supply chain attacks arrive as the update, not the install.** Marketplaces
 auto-update. Nobody re-reads v2.
+
+### 12.1 The problem with `diff` alone
+
+`diff` needs both trees. **You usually have only one.** An update overwrites the
+installed copy in place: `~/.claude/skills/<name>` is not a git repository, and
+neither are most marketplace caches. By the time there is a v2 to inspect, v1 is
+gone — and the attacker did not have to do anything to arrange that. It is how
+installation works.
+
+A mode that only functions when the user happened to keep a copy is a mode that
+does not function.
+
+### 12.2 The approved state
+
+`inspector baseline <target>` records the *result* of an audit. `inspector check
+<target>` scans what is on disk now and compares it against that record.
+
+What gets stored is the scan result, never the tree. §12's comparison reads a
+name, a description, a file count, the capability keys, and `(id, capability,
+severity)` per finding — a few kilobytes. That is why the store is a directory of
+readable JSON and not a database: a file you can `cat` is the right shape for
+something whose whole job is to tell you what you already approved.
+
+Three invariants:
+
+- **`check` never records.** Approving is always an explicit `baseline` run.
+  Self-approving on first sight would bless a payload nobody read, and every
+  later comparison would then be clean by construction.
+- **The store lives outside `~/.claude/`.** That directory is writable by any
+  extension with filesystem access, and writing to it is itself a finding
+  (`FSW-002`). A trust anchor kept there lets a compromised extension approve its
+  own next version.
+- **A baseline that fails its checksum is refused, not repaired.** A bad baseline
+  produces a confident "nothing changed", which is worse than having none.
+
+The checksum detects corruption and casual modification. It is **not** a defence
+against an attacker with write access to the user's home directory — they can
+recompute it, and nothing stored on the same machine can prevent that. Claiming
+otherwise would violate §1's rule against overselling.
 
 Reports **new capabilities**, not new lines:
 

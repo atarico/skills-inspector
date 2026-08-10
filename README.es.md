@@ -75,6 +75,9 @@ cd skills-inspector
 
 python3 -m scanner /ruta/a/la/skill-descargada            # legible por humanos
 python3 -m scanner /ruta/a/la/skill-descargada --json     # legible por máquinas
+
+python3 -m scanner baseline /ruta/a/la/skill              # registrala como aprobada
+python3 -m scanner check    /ruta/a/la/skill              # ¿qué cambió desde entonces?
 ```
 
 `python3 -m scanner` corre parado en la raíz del repositorio. Para escanear desde
@@ -169,12 +172,52 @@ Así que reporta, y se detiene. Vos decidís.
    se encontró; nunca dice que no exista nada.
 5. **Recién ahí decidís.** La copiás, o no.
 
-### Y cuando se actualiza
+### Y cuando se actualiza — la parte que necesita una línea base
 
-El paso 6 es el que la gente saltea, y el que atrapa ataques reales: cuando una
-skill en la que ya confiás publica una versión nueva, corré `diff` entre la copia
-vieja y la nueva en vez de re-escanear la nueva sola. Ver
-[Inicio rápido](#inicio-rápido).
+El paso 6 es el que la gente saltea, y el que atrapa ataques reales.
+
+`diff` compara dos árboles, lo que asume que todavía tenés el viejo. **Casi
+nunca lo tenés.** Una actualización pisa `~/.claude/skills/<nombre>` en el lugar,
+y la mayoría de los cachés de marketplace no son repositorios git: para cuando
+hay una v2 que inspeccionar, la v1 ya no existe. El atacante no tuvo que hacer
+nada para lograrlo.
+
+Entonces registrás lo que aprobaste, y comparás contra ese registro:
+
+```sh
+python3 -m scanner baseline ~/.claude/skills/una-skill   # después de auditarla
+# ...pasa el tiempo, la skill se actualiza en el lugar...
+python3 -m scanner check ~/.claude/skills/una-skill      # ¿qué cambió?
+```
+
+`check` escanea lo que hay en disco ahora y lo compara con el estado aprobado. Si
+la actualización ganó una capacidad severa mientras la descripción quedó igual,
+eso es el titular. Cuando leíste el cambio y lo aceptás, corrés `baseline` de
+nuevo para registrar el estado nuevo.
+
+Dos reglas que el almacén cumple, las dos deliberadas:
+
+- **`check` nunca registra nada.** Aprobar es siempre un `baseline` explícito. Un
+  primer `check` reporta que no hay contra qué comparar y se detiene:
+  autoaprobar lo que haya en disco la primera vez que corre sería bendecir un
+  payload que nadie leyó.
+- **El almacén vive en `~/.inspector-baselines/`, no bajo `~/.claude/`.** Ese
+  directorio lo puede escribir cualquier skill con acceso al sistema de archivos,
+  y escribir ahí es algo que este mismo scanner reporta (`FSW-002`). Tener el
+  ancla de confianza ahí dejaría que una extensión comprometida apruebe su propia
+  versión siguiente.
+
+Cada entrada son unos pocos kilobytes de JSON que podés leer con `cat` — el
+resultado del escaneo, no una copia del árbol. Lleva un checksum, y una línea
+base que no lo cumple es rechazada en vez de usada: una línea base mala produce
+un confiado *"no cambió nada"*, que es peor que no tener ninguna.
+
+**Lo que ese checksum NO es:** protección contra alguien que ya tiene permiso de
+escritura en tu directorio personal. Puede recalcularlo. Nada guardado en la
+misma máquina puede defenderse de eso, y decir lo contrario sería el tipo de
+exageración que este README se niega a hacer. Lo que compra es que modificarla en
+silencio requiera esfuerzo deliberado y deje el almacén en un estado en el que la
+herramienta no va a confiar.
 
 ## Qué detecta
 
@@ -341,6 +384,7 @@ scanner/              el analizador (solo stdlib)
   taint.py            flujo de datos origen -> destino
   reachability.py     grafo de puntos de entrada -> active / conditional / dormant
   diff.py             delta de capacidades entre versiones
+  baseline.py         almacén de estado aprobado para el chequeo de actualización
   semantic.py         pasada describir-y-contrastar para ataques en prosa
   evidence.py         sanitización de salida (obligatoria)
 skills/inspect-skill/ la skill instalable (incluye una copia de scanner/)
