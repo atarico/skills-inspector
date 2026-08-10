@@ -5,8 +5,6 @@ The four axes are computed independently and never multiplied together.
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import evidence as ev
@@ -16,86 +14,9 @@ from . import rules as R
 from . import structural
 from . import taint
 from .disclosure import classify_disclosure
-from .unit import Unit
-
-SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
-CONFIDENCE_ORDER = {"high": 0, "medium": 1, "low": 2}
-DISCLOSURE_ORDER = {"undeclared": 0, "euphemistic": 1, "declared": 2}
-
-
-def headline(findings: list["Finding"]) -> list["Finding"]:
-    """The report's lead (RULES.md section 11).
-
-    `disclosure` ORDERS this list; it must never filter it. The description is
-    written by the author of the audited unit, so letting `declared` suppress a
-    finding hands the attacker control of the report: keyword-stuffing a
-    description would blank the headline while the unit steals SSH keys.
-
-    - CRITICAL always leads, declared or not. There is no benign declared
-      CRITICAL — the level means "assume compromise if executed", so the human
-      looks at it either way.
-    - HIGH leads only when the description did not name it. A declared HIGH
-      (a notifier that says it posts to Slack) belongs in the body.
-
-    Heuristics never lead, so low confidence is excluded and grouped downstream.
-    """
-    out = [f for f in findings
-           if f.confidence in ("high", "medium")
-           and (f.severity == "CRITICAL"
-                or (f.severity == "HIGH" and f.disclosure != "declared"))]
-    out.sort(key=Finding.sort_key)
-    return out
-
-
-@dataclass
-class Finding:
-    id: str
-    severity: str
-    confidence: str
-    status: str
-    disclosure: str
-    capability: str
-    location: str
-    line: int
-    detects: str
-    evidence: str
-    impact: str
-    legitimate_use: str
-    what_to_check: str
-    position: str = pos.ACTIVE
-    related_rules: list[str] = field(default_factory=list)
-    specificity: int = 50
-    chain: list[dict] = field(default_factory=list)
-    extra_capabilities: list[str] = field(default_factory=list)
-
-    def sort_key(self):
-        return (
-            DISCLOSURE_ORDER.get(self.disclosure, 3),
-            SEVERITY_ORDER.get(self.severity, 9),
-            CONFIDENCE_ORDER.get(self.confidence, 9),
-            self.location,
-            self.line,
-        )
-
-    def as_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "severity": self.severity,
-            "confidence": self.confidence,
-            "status": self.status,
-            "disclosure": self.disclosure,
-            "capability": self.capability,
-            "location": {"file": self.location, "line": self.line},
-            "position": self.position,
-            "detects": self.detects,
-            "evidence": self.evidence,
-            "impact": self.impact,
-            "legitimate_use": self.legitimate_use,
-            "what_to_check": self.what_to_check,
-            "related_rules": self.related_rules,
-            "chain": self.chain,
-        }
-
+from .finding import (CONFIDENCE_ORDER, DISCLOSURE_ORDER, SEVERITY_ORDER,
+                      Finding, headline)
+from .unit import MAX_TOTAL_LINES, Unit
 
 _MD_SUFFIXES = {".md", ".markdown", ".mdx"}
 
@@ -107,12 +28,17 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
     unit_budget = unit_line_budget()
     lines_used = 0
 
+    # Files the scanner could not read in full. Tracked rather than silently
+    # dropped: an unread file that something in the bundle RUNS is the audit's
+    # blind spot, and a blind spot the attacker chooses is an evasion.
+    unread: list[tuple[str, str]] = []
+
     for entry in unit.files:
         if entry.symlink_target:
             raw.append(Finding(
                 id="FSW-008", severity="HIGH", confidence="high", status="active",
                 disclosure="undeclared", capability=R.WRITE_OUTSIDE,
-                location=ev.sanitize_path(entry.relpath), line=1,
+                location=entry.relpath, line=1,
                 detects="Bundled symlink pointing outside the unit",
                 evidence=f"-> {ev.sanitize_path(entry.symlink_target)}",
                 impact="The bundle reaches a path you did not put in scope; "
@@ -133,50 +59,55 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
         if lines_used + line_count > unit_budget:
             unit.skipped.append((entry.relpath,
                                  f"{line_count} lines, unit line budget exhausted"))
+            unread.append((entry.relpath, "unit line budget exhausted before this file"))
             continue
         lines_used += line_count
+        if entry.truncated:
+            unread.append((entry.relpath,
+                           f"{entry.size // 1024} KB, read only in part"))
+
+        # An entry point that tells the model to RUN this file outranks the
+        # directory it happens to sit in. Without this the sample-directory
+        # convention alone demoted a live, invoked payload two levels.
+        invoked = entry.relpath in graph.invoked
 
         line_matches: dict[int, list] = {}
-        raw += _scan_text(unit, entry.relpath, entry.text, line_matches)
+        raw += _scan_text(unit, entry.relpath, entry.text, line_matches, invoked)
         chains += taint.analyze(entry.relpath, entry.text,
-                                pos.classify_lines(entry.relpath, entry.text),
+                                pos.classify_lines(entry.relpath, entry.text, invoked),
                                 line_matches)
 
-        base_position = pos.file_base_position(entry.relpath)
-        for hit in structural.inspect(unit.root, entry.relpath):
+        base_position = pos.file_base_position(entry.relpath, invoked)
+        for hit in structural.inspect(entry.relpath, entry.text):
             # Structural findings respect position too: a settings.json inside a
             # fixtures/ tree is a sample, not a live control-plane change.
             confidence = pos.demote(hit.confidence, base_position)
             raw.append(Finding(
                 id=hit.rule_id, severity=hit.severity, confidence=confidence,
                 status="active", disclosure="undeclared", capability=hit.capability,
-                location=ev.sanitize_path(hit.relpath), line=hit.line,
+                location=hit.relpath, line=hit.line,
                 detects=ev.sanitize_label(hit.detects),
                 evidence=ev.sanitize(str(hit.evidence)),
                 impact=hit.impact, legitimate_use=hit.legitimate,
                 what_to_check=hit.check, position=base_position,
-                specificity=hit.specificity))
+                specificity=hit.specificity, structural=True))
 
     raw += _reachability_findings(graph, unit,
                                   {f.location for f in raw})
+    raw += _unread_findings(graph, unread)
 
-    # Location floor: a file inside a test/fixtures/examples tree caps at low.
-    # Runs after EVERY producer — rules, structural, reachability — so nothing
-    # added later can bypass it. One place, no exceptions.
-    for finding in raw:
-        if pos.in_sample_dir(finding.location):
-            finding.confidence = "low"
-
-    # `status` annotates; it must never lower severity (RULES.md section 2.3).
-    # A dormant CRITICAL is still CRITICAL.
-    for finding in raw:
-        node = graph.status.get(finding.location)
-        if node == reachability.DORMANT:
-            finding.status = "dormant"
-        elif node == reachability.CONDITIONAL:
-            finding.status = "conditional"
-
+    # Supersession runs BEFORE the two annotation passes below, and that order is
+    # the fix for a docstring that used to lie. The comment claimed the location
+    # floor ran "after EVERY producer, one place, no exceptions" — but
+    # `_supersede` is a producer too, and it ran afterwards emitting CHN-001 with
+    # a hardcoded `confidence="high", status="active"`. A dormant file therefore
+    # reported `status=dormant` on its components and `status=active` on the
+    # chain built from those same components.
     raw = _supersede(raw, chains)
+
+    _apply_sample_floor(raw, graph)
+    _annotate_status(raw, graph)
+
     findings = _dedupe(raw)
     for finding in findings:
         finding.disclosure = classify_disclosure(finding.capability, unit.description)
@@ -185,19 +116,54 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
     return findings, profile(findings, unit)
 
 
+def _apply_sample_floor(raw: list[Finding], graph) -> None:
+    """Cap findings from a test/fixtures/examples tree at low confidence.
+
+    Runs after every producer, taint chains included, so nothing added later can
+    bypass it.
+
+    One exception, and it closes a critical evasion. The floor used to ignore
+    reachability entirely, so parking a live payload in `examples/` and invoking
+    it from SKILL.md ("Run `bash examples/payload.sh`") bought two levels of
+    demotion and emptied the headline. A directory name is a convention; an
+    entry point telling the model to run the file is a fact, and the fact wins.
+
+    `graph.invoked` is narrower than `status == ACTIVE` on purpose: a mention
+    ("see examples/basic.sh for usage") makes a file reachable but does not make
+    it live, so ordinary example directories keep their floor.
+    """
+    for finding in raw:
+        if pos.in_sample_dir(finding.location) and finding.location not in graph.invoked:
+            finding.confidence = "low"
+
+
+def _annotate_status(raw: list[Finding], graph) -> None:
+    """Mark findings dormant or conditional (RULES.md section 2.3).
+
+    `status` annotates; it must never lower severity. A dormant CRITICAL is
+    still CRITICAL — code nobody wired up is code waiting to be wired up.
+    """
+    for finding in raw:
+        node = graph.status.get(finding.location)
+        if node == reachability.DORMANT:
+            finding.status = "dormant"
+        elif node == reachability.CONDITIONAL:
+            finding.status = "conditional"
+
+
 def unit_line_budget() -> int:
-    from .unit import MAX_TOTAL_LINES
     return MAX_TOTAL_LINES
 
 
 def _scan_text(unit: Unit, relpath: str, text: str,
-               line_matches: dict | None = None) -> list[Finding]:
+               line_matches: dict | None = None,
+               invoked: bool = False) -> list[Finding]:
     out: list[Finding] = []
     lines = text.splitlines()
-    positions = pos.classify_lines(relpath, text)
+    positions = pos.classify_lines(relpath, text, invoked)
     is_md = Path(relpath).suffix.lower() in _MD_SUFFIXES
 
-    base_position = pos.file_base_position(relpath)
+    base_position = pos.file_base_position(relpath, invoked)
     hidden = ev.invisible_counts(text)
     total_hidden = sum(hidden.values())
     if total_hidden > 0:
@@ -205,7 +171,7 @@ def _scan_text(unit: Unit, relpath: str, text: str,
         out.append(Finding(
             id="AGT-006", severity=severity, confidence="high", status="active",
             disclosure="undeclared", capability=R.HIDDEN,
-            location=ev.sanitize_path(relpath), line=1, position=base_position,
+            location=relpath, line=1, position=base_position,
             detects="Hidden characters: " + ", ".join(f"{k}x{v}" for k, v in sorted(hidden.items())),
             evidence=f"{total_hidden} invisible characters across the file",
             impact="Content the human reviewer never sees but the model does.",
@@ -242,7 +208,7 @@ def _scan_text(unit: Unit, relpath: str, text: str,
             out.append(Finding(
                 id=rule.id, severity=rule.severity, confidence=confidence,
                 status="active", disclosure="undeclared", capability=rule.capability,
-                location=ev.sanitize_path(relpath), line=idx + 1,
+                location=relpath, line=idx + 1,
                 detects=rule.detects,
                 evidence=ev.sanitize(line, centre=(match.start(), match.end())),
                 impact=rule.impact, legitimate_use=rule.legitimate,
@@ -255,7 +221,7 @@ def _binary_finding(entry) -> Finding:
     return Finding(
         id="EXE-001", severity="MEDIUM", confidence="high", status="active",
         disclosure="undeclared", capability=R.REMOTE_EXEC,
-        location=ev.sanitize_path(entry.relpath), line=1,
+        location=entry.relpath, line=1,
         detects=f"Bundled non-text file ({entry.binary_kind})",
         evidence=f"{entry.binary_kind}, {entry.size} bytes",
         impact="Contents cannot be reviewed by reading the bundle.",
@@ -268,7 +234,7 @@ def _exec_bit_finding(entry) -> Finding:
     return Finding(
         id="EXE-002", severity="MEDIUM", confidence="high", status="active",
         disclosure="undeclared", capability=R.REMOTE_EXEC,
-        location=ev.sanitize_path(entry.relpath), line=1,
+        location=entry.relpath, line=1,
         detects="File ships with the executable bit set",
         evidence="mode +x",
         impact="Ready-to-run payload shipped with the unit.",
@@ -302,7 +268,7 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
             out.append(Finding(
                 id="BND-001", severity="MEDIUM", confidence="high", status="dormant",
                 disclosure="undeclared", capability=R.REMOTE_EXEC,
-                location=ev.sanitize_path(relpath), line=1,
+                location=relpath, line=1,
                 detects="File in the bundle is referenced by nothing",
                 evidence="no path from any entry point",
                 impact="Dormant payload: shipped but not wired up. Severity comes "
@@ -316,7 +282,7 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
                 id="BND-003", severity="MEDIUM", confidence="high",
                 status="conditional", disclosure="undeclared",
                 capability=R.INSTRUCTION,
-                location=ev.sanitize_path(relpath), line=1,
+                location=relpath, line=1,
                 detects="File loaded only under a runtime condition",
                 evidence=f"reached conditionally from {ev.sanitize_path(source)}",
                 impact="The human reviews the entry point; the model loads this "
@@ -329,7 +295,7 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
         out.append(Finding(
             id="BND-002", severity="HIGH", confidence="medium", status="active",
             disclosure="undeclared", capability=R.REMOTE_EXEC,
-            location=ev.sanitize_path(path), line=line,
+            location=path, line=line,
             detects="Reference to a bundle path that does not exist",
             evidence=ev.sanitize(raw_ref),
             impact="The file arrives after your audit, or is fetched at runtime.",
@@ -337,6 +303,41 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
             what_to_check="Does anything create this path later?",
             position=pos.file_base_position(path), specificity=75))
 
+    return out
+
+
+def _unread_findings(graph, unread: list[tuple[str, str]]) -> list[Finding]:
+    """BND-005 — a file the audit could not read in full, that something runs.
+
+    The scanner used to drop oversized files entirely, which made padding a
+    payload past the size cap a complete evasion: zero findings, one line in
+    NOT ANALYZED, and nothing anywhere saying the unread file was also the file
+    the entry point invokes.
+
+    Reporting every unread file would be noise — bundles legitimately ship large
+    vendored data. What is NOT ordinary is an unread file that the bundle wires
+    up, so reachability decides. A dormant one stays in NOT ANALYZED where it
+    belongs.
+    """
+    out: list[Finding] = []
+    for relpath, reason in unread:
+        status = graph.status.get(relpath, reachability.DORMANT)
+        if status == reachability.DORMANT:
+            continue
+        out.append(Finding(
+            id="BND-005", severity="HIGH", confidence="high",
+            status="conditional" if status == reachability.CONDITIONAL else "active",
+            disclosure="undeclared", capability=R.REMOTE_EXEC,
+            location=relpath, line=1,
+            detects="Reachable file the audit could not read in full",
+            evidence=ev.sanitize(reason),
+            impact="The unread part of this file was never analyzed, and an "
+                   "entry point runs it. Padding a payload past the read cap "
+                   "is the cheapest way to hide it.",
+            legitimate_use="Large vendored data, generated bundles, minified "
+                           "assets — all common, all worth confirming.",
+            what_to_check="Read this file yourself, or split it, and rescan.",
+            position=pos.file_base_position(relpath), specificity=95))
     return out
 
 
@@ -364,7 +365,7 @@ def _supersede(raw: list[Finding], chains: list) -> list[Finding]:
         out.append(Finding(
             id="CHN-001", severity="CRITICAL", confidence="high", status="active",
             disclosure="undeclared", capability=R.NETWORK,
-            location=ev.sanitize_path(chain.file), line=chain.sink_line,
+            location=chain.file, line=chain.sink_line,
             detects=f"Data flow: a secret read reaches an outbound sink "
                     f"via {chain.channel}",
             evidence=ev.sanitize(chain.sink_evidence),
@@ -388,17 +389,33 @@ def _supersede(raw: list[Finding], chains: list) -> list[Finding]:
 
 def _dedupe(raw: list[Finding]) -> list[Finding]:
     """Section 7: group by (file, line, capability). Most specific rule wins;
-    the rest collapse into related_rules and are not counted separately."""
+    the rest collapse into related_rules and are not counted separately.
+
+    Structural findings are keyed by rule id as well, because they describe a
+    whole config file and every one of them carries line=1. Without the id, a
+    settings.json defining hooks AND registering an MCP server AND lowering
+    permissions collapsed into a SINGLE finding: the MCP server name, the
+    permission grants, and the warning that the file can neutralize this auditor
+    all vanished into bare rule ids on an "also matched" line, and
+    severity_counts under-reported the unit. Line-level dedupe exists to merge
+    rules that fired on the SAME text; these did not.
+    """
     buckets: dict[tuple, list[Finding]] = {}
     for finding in raw:
-        key = (finding.location, finding.line, finding.capability)
+        key = (finding.location, finding.line, finding.capability,
+               finding.id if finding.structural else "")
         buckets.setdefault(key, []).append(finding)
 
     out: list[Finding] = []
     for group in buckets.values():
         group.sort(key=lambda f: (-f.specificity, SEVERITY_ORDER.get(f.severity, 9)))
         winner = group[0]
-        winner.related_rules = sorted({f.id for f in group[1:]} - {winner.id})
+        # MERGE, never overwrite. `_supersede` builds CHN-001's component list
+        # (the rules the chain absorbed) before this runs, and assigning here
+        # erased it — the report then showed a taint chain with no record of
+        # which findings it was made of.
+        winner.related_rules = sorted(
+            (set(winner.related_rules) | {f.id for f in group[1:]}) - {winner.id})
         out.append(winner)
     return out
 

@@ -14,8 +14,29 @@ import re
 
 from . import evidence as ev
 from . import rules as R
-from .engine import Finding
+from .finding import Finding, headline
 from .unit import Unit
+
+
+def group_headline(gap: list[Finding]) -> list[tuple[Finding, list[Finding]]]:
+    """Collapse one fact repeated across sibling files into a single lead.
+
+    A plugin shipping the same MCP server in five platform manifests is not five
+    decisions to a human, and printing it five times buries the other four.
+
+    Returns (lead, rest) pairs in first-seen order, so the caller can report the
+    group size without losing which file it saw first.
+    """
+    groups: list[tuple[Finding, list[Finding]]] = []
+    index: dict[tuple, int] = {}
+    for f in gap:
+        key = (f.id, f.capability, f.severity)
+        if key in index:
+            groups[index[key]][1].append(f)
+        else:
+            index[key] = len(groups)
+            groups.append((f, []))
+    return groups
 
 CAPABILITY_LABELS = {
     R.NETWORK: "Network",
@@ -112,21 +133,9 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
         w(f"TOOLS     {', '.join(unit.declared_tools)}")
     w("")
 
-    from .engine import headline
     gap = headline(findings)
     if gap:
-        # One fact repeated across sibling files is one line. A plugin shipping
-        # the same MCP server in five platform manifests is not five decisions
-        # to a human, and printing it five times buries the other four.
-        groups: list[tuple[Finding, list[Finding]]] = []
-        index: dict[tuple, int] = {}
-        for f in gap:
-            key = (f.id, f.capability, f.severity)
-            if key in index:
-                groups[index[key]][1].append(f)
-            else:
-                index[key] = len(groups)
-                groups.append((f, []))
+        groups = group_headline(gap)
 
         undeclared = sum(1 for lead, rest in groups
                          if any(f.disclosure != "declared" for f in (lead, *rest)))
@@ -140,7 +149,7 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
             tag = "" if any(f.disclosure != "declared" for f in members) \
                 else "  [author declared it]"
             if not rest:
-                label, where = lead.detects, f"{lead.location}:{lead.line}"
+                label, where = lead.detects, f"{ev.sanitize_path(lead.location)}:{lead.line}"
             else:
                 # Members of a group can differ in wording (one manifest points
                 # at an .mcp.json, another inlines it). Showing one member's
@@ -148,7 +157,7 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
                 variants = {f.detects for f in members}
                 label = (lead.detects if len(variants) == 1
                          else RULE_SUMMARY.get(lead.id, lead.detects.split(":")[0]))
-                where = f"{len(members)} files, e.g. {lead.location}"
+                where = f"{len(members)} files, e.g. {ev.sanitize_path(lead.location)}"
             w(f"   - {label[:56]:<56} {lead.severity:<8} "
               f"{lead.confidence:<6} {where}{tag}")
         if len(groups) > 12:
@@ -189,7 +198,7 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
         w(f"LOW CONFIDENCE ({len(heuristic)}) — heuristics, grouped so they do not dilute the rest")
         limit = len(heuristic) if verbose else 10
         for f in heuristic[:limit]:
-            w(f"  {f.id:<9} {f.severity:<8} {f.location}:{f.line}  {f.detects[:70]}")
+            w(f"  {f.id:<9} {f.severity:<8} {ev.sanitize_path(f.location)}:{f.line}  {f.detects[:70]}")
         if len(heuristic) > limit:
             w(f"  ... {len(heuristic) - limit} more (use --verbose)")
         w("")
@@ -221,7 +230,7 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
 
 
 def _emit(w, f: Finding) -> None:
-    w(f"  [{f.severity}/{f.confidence}] {f.id}  {f.location}:{f.line}"
+    w(f"  [{f.severity}/{f.confidence}] {f.id}  {ev.sanitize_path(f.location)}:{f.line}"
       f"   status={f.status} disclosure={f.disclosure}")
     w(f"      {f.detects}")
     w(f"      evidence   {f.evidence}")

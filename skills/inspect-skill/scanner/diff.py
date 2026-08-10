@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 from . import evidence as ev
 from . import rules as R
-from .engine import Finding, headline
+from .finding import Finding
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
@@ -122,7 +122,7 @@ def to_text(delta: Delta) -> str:
         w("    The update gained reach without saying so. This is the shape of a")
         w("    supply-chain update — review it before letting it install.")
         for f in escalation[:10]:
-            w(f"    + {f.detects[:58]:<58} {f.severity:<8} {f.location}:{f.line}")
+            w(f"    + {f.detects[:58]:<58} {f.severity:<8} {ev.sanitize_path(f.location)}:{f.line}")
         w("")
 
     if delta.new_capabilities:
@@ -135,7 +135,7 @@ def to_text(delta: Delta) -> str:
     if delta.new_findings:
         w(f"NEW FINDINGS ({len(delta.new_findings)})")
         for f in delta.new_findings[:20]:
-            w(f"  + [{f.severity}/{f.confidence}] {f.id:<9} {f.location}:{f.line}"
+            w(f"  + [{f.severity}/{f.confidence}] {f.id:<9} {ev.sanitize_path(f.location)}:{f.line}"
               f"  {f.detects[:52]}")
         if len(delta.new_findings) > 20:
             w(f"  ... and {len(delta.new_findings) - 20} more")

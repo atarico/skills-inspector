@@ -27,7 +27,14 @@ from . import rules as R
 SOURCE_CAPABILITIES = {R.SECRETS, R.RECON}
 SINK_CAPABILITIES = {R.NETWORK}
 
-_SHELL_SUFFIXES = {".sh", ".bash", ".zsh", ".fish", "", ".ksh"}
+_SHELL_SUFFIXES = {".sh", ".bash", ".zsh", ".fish", ".ksh"}
+
+# An extensionless file is shell only if it says so. The empty string used to be
+# in the set above, which made every Makefile, Dockerfile, LICENSE and README
+# without a suffix take the shell branch: `$VAR` reference syntax instead of the
+# language-neutral one, and — worse — a skipped `literal_demotion` probe, since
+# that check is guarded by `not shell`.
+_SHEBANG = re.compile(r"^#!.*\b(?:ba|z|k|da)?sh\b")
 
 # VAR=..., export VAR=..., const/let/var v = ..., v: T = ...
 _ASSIGN = re.compile(
@@ -88,8 +95,11 @@ def _matching_rules(line: str) -> list[R.Rule]:
     return [rule for rule in R.RULES if rule.pattern.search(line)]
 
 
-def _is_shell(relpath: str) -> bool:
-    return PurePosixPath(relpath).suffix.lower() in _SHELL_SUFFIXES
+def _is_shell(relpath: str, text: str = "") -> bool:
+    suffix = PurePosixPath(relpath).suffix.lower()
+    if suffix:
+        return suffix in _SHELL_SUFFIXES
+    return bool(_SHEBANG.match(text.partition("\n")[0]))
 
 
 def _references_var(line: str, var: str, shell: bool) -> bool:
@@ -123,7 +133,7 @@ def analyze(relpath: str, text: str, positions: list[tuple[str, str]],
     Recomputing it here re-ran all 68 patterns over every line a second time —
     a third of the total regex work on a large bundle, for no new information.
     """
-    shell = _is_shell(relpath)
+    shell = _is_shell(relpath, text)
     lines = text.splitlines()
     tainted_vars: dict[str, Origin] = {}
     tainted_files: dict[str, Origin] = {}
@@ -239,13 +249,17 @@ def analyze(relpath: str, text: str, positions: list[tuple[str, str]],
             tainted_vars[var] = Origin(lineno, kind, origin_rule.id, snippet)
             continue
 
-        for match in (_REDIRECT.search(line), _WRITE_CALL.search(line)):
-            if not match:
-                continue
+        # Every destination on the line, not the first one. Two bugs lived here:
+        # `search` returned only the first redirect, and the `break` sat OUTSIDE
+        # the target guard — so a redirect to an ignored target consumed the
+        # iteration and nothing else was examined. Together they meant
+        # `cat secret | tee /dev/tty > /tmp/steal` recorded no tainted file at
+        # all and the chain was never built: /dev/tty was matched, skipped as
+        # uninteresting, and took the real destination down with it.
+        for match in [*_REDIRECT.finditer(line), *_WRITE_CALL.finditer(line)]:
             target = next((g for g in match.groups() if g), None)
             if target and not target.startswith(("&", "/dev/")):
                 tainted_files[_normalize(target)] = Origin(
                     lineno, "filesystem", origin_rule.id, snippet)
-            break
 
     return chains

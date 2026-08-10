@@ -232,7 +232,7 @@ def verify(unit, findings, request: Request, raw_answers) -> list:
     input is adversarial and can be steered. They raise questions for a human;
     they never issue verdicts.
     """
-    from .engine import Finding
+    from .finding import Finding
 
     answers = _parse_answers(raw_answers)
     by_id = {c.id: c for c in request.chunks}
