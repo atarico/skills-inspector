@@ -402,6 +402,45 @@ Computed after all rules run. Chains, not patterns.
 
 ---
 
+### 6.x Deferred — documented here, not implemented
+
+This document's contract is that **a coverage gap is always declared**. It was
+broken: the IDs below were written up above as though the scanner enforced them,
+and it does not. A rule catalogue that overstates its own coverage is the same
+failure this tool reports on — a capability claimed but not present, which is
+the mirror image of a capability present but not declared.
+
+They stay documented because the write-up is the specification a future
+implementation follows. They are listed here so nobody reads their presence
+above as a guarantee.
+
+| ID | Why it is not implemented yet |
+|---|---|
+| `AGT-007`, `AGT-009` | Instruction-surface shapes with no deterministic signature. Prose, not pattern — the semantic pass (§8) is the honest route |
+| `AGT-011` | Reviewer-fatigue padding. Largely superseded by `BND-003`, which is a sharper signal for the same attack |
+| `AUT-006`, `AUT-007` | Auto-execution surfaces not yet parsed. Needs a config reader per ecosystem, and each one needs its own corpus measurement first |
+| `BND-004` | Instruction-bearing content in a data file. Requires the semantic pass to tell imperative prose from a template |
+| `CHN-002` | Bundled binary plus a reachability edge. The graph already knows this; the escalation is simply not wired |
+| `CHN-003` | Implemented as the capability profile, deliberately **not** as a finding. Co-occurrence is reported and never escalated |
+| `EXE-009` | Needs archive extraction, which means executing a parser on hostile input inside the auditor. Not worth the trade at v0 |
+| `HOK-005` | Control-plane surface not yet parsed |
+| `NET-002` | CRITICAL and genuinely missing. The highest-value entry on this list |
+| `SUP-001`…`SUP-006` | Supply-chain provenance: lockfiles, registries, signatures, install scripts. A whole subsystem, not a pattern |
+
+Two rules run in the opposite direction — implemented, and only documented
+elsewhere until now:
+
+| ID | Where it lives |
+|---|---|
+| `BND-005` | A reachable file the audit could not read in full. Reported so that padding a payload past the read cap cannot produce a clean scan |
+| `BND-006` | Structural analysis threw on a file. Previously swallowed, which made the fuzz suite vacuous for `structural.py` — an empty result was indistinguishable from a clean file |
+| `SEM-001`…`SEM-004` | The semantic pass, specified in §8 and in `skills/inspect-skill/references/semantic-pass.md` |
+
+`tests/unit_test.py` pins this table against the implementation, so the two
+cannot drift apart again without a test failing.
+
+---
+
 ## 7. Deduplication and precedence
 
 One `curl … | bash` line matches `EXE-003`, `EXE-010`, `NET-001` and `NET-010`.
