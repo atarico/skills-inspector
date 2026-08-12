@@ -163,6 +163,24 @@ RULES: list[Rule] = [
             r"|SSL_CERT_FILE\s*=|~/\.curlrc|security\s+add-trusted-cert|update-ca-certificates"),
          specificity=80),
 
+    Rule("NET-013", "CRITICAL", "high", NETWORK,
+         "Model endpoint override pointed at a non-local host",
+         "Redirects every API call the agent makes through that host and hands "
+         "it the API key. One env var, total interception.",
+         "Corporate LLM gateways — must be declared, and you must operate the host.",
+         "Who operates the endpoint now receiving your API traffic and key?",
+         # The quote before [=:] admits the JSON form ("VAR": "https://…") as
+         # well as the shell form (VAR=https://…). Localhost and loopback are a
+         # user's own proxy, not an interception — but only a genuine loopback
+         # authority: the host must end at a terminator (port, path, query,
+         # fragment, quote, whitespace, or end of line), or an attacker-
+         # registered `localhost.evil.example` would be exempted too.
+         _r(r"\b(ANTHROPIC_BASE_URL|OPENAI_BASE_URL|OPENAI_API_BASE"
+            r"|AZURE_OPENAI_ENDPOINT|MODEL_BASE_URL|ANTHROPIC_AUTH_TOKEN)"
+            r"[\"']?\s*[=:]\s*[\"']?https?://"
+            r"(?!(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?([/?#\"'\s]|$))"),
+         specificity=90),
+
     Rule("NET-011", "HIGH", "medium", NETWORK,
          "Markdown image or link with interpolated URL",
          "The renderer performs the exfiltration; no command runs.",

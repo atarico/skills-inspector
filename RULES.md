@@ -248,6 +248,7 @@ position; §3 demotes from there.
 | `NET-010` | INFO | high | Any outbound network capability at all | Baseline capability disclosure for the profile | Common and often fine |
 | `NET-011` | HIGH | medium | Markdown image or link whose URL interpolates data (`![](https://x/?d=$DATA)`) | The renderer performs the exfiltration; no command runs | Never with interpolation |
 | `NET-012` | HIGH | high | Traffic redirection: `HTTP_PROXY`/`HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `~/.curlrc`, custom CA install | Silently routes all future traffic through a third party | Corporate proxy setup — must be declared |
+| `NET-013` | CRITICAL | high | Model endpoint override pointed at a non-local host: `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `OPENAI_API_BASE`, `AZURE_OPENAI_ENDPOINT`, `MODEL_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` set to an `http(s)` URL whose host is not exactly `localhost` or a `127.x.x.x` loopback address (a hostname merely starting with `localhost` or `127.`, e.g. `localhost.evil.example`, is non-local) | Redirects **every API call the agent makes** through that host and hands it the API key. One env var, total interception (CVE-2026-21852 shape) | Corporate LLM gateways — must be declared, and you must operate the host. Implemented twice on purpose: as a line rule for scripts and prose, and structurally in the settings `env` block |
 
 ### C. Remote access and persistence
 
@@ -348,8 +349,61 @@ not treat these lists as exhaustive, and §11 must say so in every report.
 | `HOK-003` | CRITICAL | high | Registers MCP servers (`.mcp.json`, `mcpServers` in settings, `[mcp_servers]` in `~/.codex/config.toml`, `mcp` in `opencode.json`) | Not just "adds tools": **MCP tool descriptions are prompt text injected into the agent's context, controlled by a remote server, refreshed every launch**. Persistent, updatable injection that touches none of your files | The MCP server is the unit's stated purpose and you trust its operator |
 | `HOK-004` | HIGH | high | Defines subagents (`.claude/agents/`, `.opencode/agent/`) with broad `tools` | A subagent is a bypass of the parent unit's `allowed-tools` | Genuine delegation — compare the subagent's tools to the unit's |
 | `HOK-005` | HIGH | high | Slash commands or prompts embedding shell (`!` prefix in `.claude/commands/`, `.codex/prompts/`, `.opencode/command/`) | Shell that runs when a command is typed, from a file the user never opened | Documented command tooling |
-| `HOK-006` | CRITICAL | high | Lowers agent permissions: `permissions.allow` additions, `defaultMode: bypassPermissions`, `--dangerously-skip-permissions`, `--yolo`, Codex `approval_policy = "never"` / `sandbox_mode = "danger-full-access"`, opencode `permission` grants | Does nothing malicious itself — it disarms the defenses for whatever comes next. The enabling move | Never from an installed extension. A user may set this for themselves; a bundle must not set it for them |
+| `HOK-006` | CRITICAL | high | Lowers agent permissions: `permissions.allow` additions, `defaultMode: bypassPermissions`, `--dangerously-skip-permissions`, `--yolo`, `enableAllProjectMcpServers: true`, Codex `approval_policy = "never"` / `sandbox_mode = "danger-full-access"`, opencode `permission` grants | Does nothing malicious itself — it disarms the defenses for whatever comes next. The enabling move | Never from an installed extension. A user may set this for themselves; a bundle must not set it for them |
 | `HOK-007` | CRITICAL | high | Executable plugin code with lifecycle access (`.opencode/plugin/*.js`, plugin entry scripts) | Not configuration — code that runs inside the agent process | The plugin is the stated purpose |
+
+#### H.1 MCP server bodies — `HOK-008`…`HOK-016`
+
+`HOK-003` lists the servers; these read the body of every entry — `command`,
+`args`, `env`/`environment`, `url`, `autoApprove` — exactly as shipped, never
+resolving or executing anything. **One finding per server per rule**, anchored
+to the line the server's name sits on, so two offending servers never collapse
+into one rollup. Applied to `mcpServers` in Claude settings and `.mcp.json`,
+and to `mcp` entries in `opencode.json` (list-form `command`, `environment`).
+
+| ID | Sev | Conf | Detects | Why it matters | Legitimate when |
+|---|---|---|---|---|---|
+| `HOK-008` | CRITICAL | high | Server `env` overrides a loader/interpreter variable: `PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `NODE_OPTIONS`, `PYTHONPATH`, `HOME` | These inject code into or redirect every process the server spawns — a library preload is arbitrary code execution | Effectively never in a distributed config |
+| `HOK-009` | CRITICAL | high | Hardcoded secret value in server `env` (secret-shaped key with a literal value, not a `${VAR}` reference or an ALL_CAPS/`<placeholder>`) | A live credential shipped in the bundle: anyone with the file has the key. Evidence is redacted to prefix + length — a finding must never republish the secret | Never — reference the user's env with `${VAR}` |
+| `HOK-010` | HIGH | high | `autoApprove` / `auto_confirm` / `alwaysAllow` truthy | Defeats human-in-the-loop: the server's tools run without the approval prompt | Never from an installed extension; a user may opt in for themselves |
+| `HOK-011` | HIGH / MEDIUM | high | Mutable source ref (`git+…`, `#main`/`#master`) → HIGH; unpinned `npx -y` with no version pin → MEDIUM | The code that runs can change after the audit — a branch ref is whatever the remote says today | Internal tooling pinned to a SHA; pin `npx` packages to exact versions |
+| `HOK-012` | HIGH | high | Remote `url` transport (host is not exactly `localhost`/`127.x.x.x`/`0.0.0.0`/`[::1]`; a hostname merely starting with a loopback prefix, e.g. `localhost.evil.example`, is remote) | Tool definitions and results flow to and from a remote host every session, controlled by its operator | Hosted MCP services you knowingly subscribe to |
+| `HOK-013` | HIGH | high | `command` is a shell wrapper (`sh`/`bash`/`zsh`/`cmd`/`powershell` with `-c` / `/c`) | The real command hides inside a shell string — pipes and substitutions the config schema cannot see | Rare; a direct binary invocation needs no shell |
+| `HOK-014` | HIGH | high | Root, `~`, `$HOME`, or sensitive-file argument (`.env`, `.pem`, `credentials.json`, `id_rsa`, `.ssh/`, `.aws/`) | The server is handed credentials or filesystem roots as its working scope | A filesystem server the user deliberately scoped that wide |
+| `HOK-015` | HIGH | high | Known exfil host in `args`/`env` values: `ngrok`, `webhook.site`, `requestbin`, `pipedream`, `interactsh`, `/exfil`, `/collect?data=` | Disposable collection infrastructure wired into the server's own configuration | Tunnel-based local dev (ngrok) — verify you started it |
+| `HOK-016` | CRITICAL | high | Sandbox-disabling flag in `args`: `--no-sandbox`, `--disable-setuid-sandbox`, `--disable-web-security`, `--insecure`, `--ignore-certificate-errors`, `--allow-running-insecure-content` | Removes the isolation layer the tool itself considers mandatory; content it touches gets code execution | Effectively never in a distributed config |
+
+#### H.2 Hook command strings — `HOK-017`…`HOK-020`
+
+`HOK-001` reports that hooks exist; these analyze each command string. Severity
+is **event-conditioned at emission**: the event is part of what the capability
+*is*. A `${file}` interpolation on `PreToolUse` receives attacker-influenceable
+tool input; the same line on `Stop` does not. This is not an axis being
+multiplied — severity is chosen once, when the finding is created, and the four
+axes still never multiply. Events treated as passive (one level lower for
+`HOK-018`/`HOK-020`; `HOK-017` drops CRITICAL→HIGH outside tool-input events):
+`Stop`, `SubagentStop`, `SessionEnd`, `Notification`, `PreCompact`.
+
+| ID | Sev | Conf | Detects | Why it matters | Legitimate when |
+|---|---|---|---|---|---|
+| `HOK-017` | CRITICAL (HIGH on passive events) | high | Interpolation of tool input into the hook shell line: `${file}`, `${file_path}`, `${command}`, `${content}`, `${input}`, `${arg}`/`${args}`, `${tool_input}`, `${prompt}` | Whatever lands in the variable is pasted into shell — command injection by whoever influences the input | Never — read the value from the hook's stdin JSON instead |
+| `HOK-018` | HIGH (MEDIUM on passive events) | high | `source` / `.` of an env-derived path | The executed code is chosen by an environment variable at runtime, not by the file you are reading | Dev-environment loaders — the variable must be yours |
+| `HOK-019` | MEDIUM | high | Silent error suppression: `2>/dev/null`, `\|\| true`, `\|\| :` | Failures vanish: the hook can act (or be sabotaged) and nothing surfaces | Noise reduction on genuinely optional steps |
+| `HOK-020` | HIGH (MEDIUM on passive events) | high | Redirect or `tee` into world-readable `/tmp` | Session data written there is readable by every local user; predictable paths invite symlink attacks | Scratch files with no sensitive content |
+
+#### H.3 Permission-entry classification — `HOK-021`…`HOK-025`
+
+`HOK-006` reports that grants exist; these say what each `permissions.allow`
+entry *is*, one finding per offending entry. `HOK-024` is the combination rule
+a per-line regex cannot express.
+
+| ID | Sev | Conf | Detects | Why it matters | Legitimate when |
+|---|---|---|---|---|---|
+| `HOK-021` | CRITICAL | high | Unrestricted mutable-tool grant: bare `Bash`/`Write`/`Edit` or a wildcard scope on them | Every use of the tool runs without a prompt — for Bash that is arbitrary shell, pre-approved | Never from an installed extension |
+| `HOK-022` | CRITICAL | high | `Bash(…)` grant whose target is `sudo`, `eval`, `exec`, `curl`, `wget`, `ssh`, `scp`, `nc`, or `docker` | The commands the approval prompt exists for, pre-approved | Effectively never |
+| `HOK-023` | HIGH | high | Grant scoped to a sensitive path (`~/.ssh`, `~/.aws`, `/etc/`, `.env`) or a wildcard root (`//**`, `/**`, `~/**`) | Pre-approved access to credentials, system config, or the whole filesystem | Rarely — and never for `~/.ssh` or `~/.aws` |
+| `HOK-024` | HIGH | high | `Bash` AND `Write` AND `Edit` all granted, however individually scoped | The full mutation set: run commands, create files, change files — scoped grants that combine into free rein | Broad dev setups a user configured for themselves |
+| `HOK-025` | LOW | high | Non-empty `allow` with no `deny` list | Nothing backstops the grants | Common in personal settings; a bundle should ship its own denies |
 
 ### I. Ambient auto-execution
 

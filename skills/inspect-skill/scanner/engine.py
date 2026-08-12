@@ -401,9 +401,18 @@ def _dedupe(raw: list[Finding]) -> list[Finding]:
     rules that fired on the SAME text; these did not.
     """
     buckets: dict[tuple, list[Finding]] = {}
+    # A rule that lives in BOTH the line pass and the structural parser
+    # (NET-013) sees the same line twice on a parsed settings file. The
+    # structural finding keys on its id, the line finding keyed on "" — two
+    # buckets, one fact, and severity_counts reported it twice. A line finding
+    # whose exact (location, line, capability, id) a structural finding already
+    # claims merges into that bucket instead.
+    structural_keys = {(f.location, f.line, f.capability, f.id)
+                       for f in raw if f.structural}
     for finding in raw:
-        key = (finding.location, finding.line, finding.capability,
-               finding.id if finding.structural else "")
+        full = (finding.location, finding.line, finding.capability, finding.id)
+        key = full if (finding.structural or full in structural_keys) \
+            else (finding.location, finding.line, finding.capability, "")
         buckets.setdefault(key, []).append(finding)
 
     out: list[Finding] = []
