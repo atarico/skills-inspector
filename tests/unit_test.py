@@ -790,11 +790,13 @@ for _url in NET001_LOCAL_URLS:
               "a real loopback or RFC1918 address never leaves the machine")
 
 # The userinfo scan looks FORWARD for an `@`, so its stopping rule decides how
-# much of the line it reads. It stops only where an authority really ends: at
-# whitespace, `"`, `/?#`, or `\`. Punctuation that merely LOOKS like a
+# much of the line it reads. The stop class is `[^\s"/?#]`: whitespace, a double
+# quote, `/`, `?` and `#`, and nothing else. Punctuation that merely LOOKS like a
 # delimiter to a human reader — a table pipe, an autolink bracket, a code-span
-# backtick — is legal userinfo to every client, so the scan runs through it and
-# the rule fires. Reading those as terminators is what silences the bypass.
+# backtick, a backslash — is legal userinfo to at least one client, so the scan
+# runs through it and the rule fires. Reading those as terminators is what
+# silences the bypass. A backslash is NOT a terminator here, which is exactly
+# why the backslash case below asserts True.
 NET001_TRAILING_AT_LINES = [
     ("markdown table row", "|http://127.0.0.1:8080|ops@example.com|", True),
     ("markdown autolink then contact",
@@ -1371,6 +1373,103 @@ def _rules_doc_cases() -> None:
 
 
 _rules_doc_cases()
+
+
+# ------------------------------------------------------------- precision regression
+# Promise (bench/precision.py): three outcomes, never two — measured clean,
+# measured regression, did not measure. Neither of that harness's decision
+# engines had one executable assertion, and the one that matters most was
+# unreachable: a unit that STARTS crashing is the scanner breaking on real,
+# trusted software, and it used to shrink the unit count, trip the corpus-changed
+# guard, and report the loudest failure available as "could not measure" — with
+# the crash count printed nowhere. These drive the decision on synthetic reports,
+# so they never touch the machine's own corpus.
+
+def _precision_cases() -> None:
+    import io
+    from contextlib import redirect_stdout
+
+    from bench import precision as P
+
+    def report(**over) -> dict:
+        row = {"schema": P.SCHEMA, "discovered": 10, "units": 10, "clean_units": 8,
+               "clean_pct": 80, "median": 0, "mean": 0.5, "p90": 1, "max": 3,
+               "crashes": 0, "headline_total": 5,
+               "rule_headline_counts": {"HOK-003": 3, "NET-001": 2},
+               "unit_histogram": {"0": 8, "2": 1, "3": 1}}
+        row.update(over)
+        return row
+
+    def run(base, now) -> tuple[int, str]:
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = P.verdict(base, now)
+        return code, out.getvalue()
+
+    frozen = report()
+
+    # THE defect: same corpus, one unit now raises. Discovery is unchanged, so
+    # the comparison is still valid and the crash has to reach it.
+    code, out = run(frozen, report(units=9, crashes=1, clean_units=7,
+                                   headline_total=4,
+                                   rule_headline_counts={"HOK-003": 3, "NET-001": 1}))
+    check("precision", "a newly crashing unit is a regression", code, 1,
+          "the scanner breaking on real software is a failure, not an "
+          "inability to measure")
+    check("precision", "the crash count reaches the output",
+          ("crashes 1" in out, "CRASH" in out), (True, True),
+          "an exit code nobody can explain is not a report")
+    check("precision", "a crash is never answered with re-freeze",
+          "bakes it into the baseline" in out, True,
+          "re-freezing a crash makes the broken state the new normal")
+
+    check("precision", "an unchanged corpus with no crashes is clean",
+          run(frozen, report())[0], 0, "0 is measured, never assumed")
+    check("precision", "a genuinely changed corpus did not measure",
+          run(frozen, report(discovered=11, units=11))[0], P.DID_NOT_RUN,
+          "per-rule counts only mean something against the same corpus")
+    check("precision", "a new rule on the real corpus is a regression",
+          run(frozen, report(headline_total=6,
+                             rule_headline_counts={"HOK-003": 3, "NET-001": 2,
+                                                   "FSW-002": 1}))[0], 1,
+          "a rule that starts leading on trusted software is the number this "
+          "whole benchmark defends")
+    check("precision", "a rule firing less often is not a regression",
+          run(frozen, report(headline_total=2,
+                             rule_headline_counts={"HOK-003": 3}))[0], 0,
+          "an improvement must not need justification")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "precision-baseline.json"
+        for name, text in (("truncated", '{"schema": 2, "units": 1'),
+                           ("not an object", "[]"),
+                           ("missing the counts", '{"schema": 2, "units": 10}')):
+            path.write_text(text, encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                base = P.read_baseline(path)
+            check("precision", f"an unusable baseline is refused: {name}", base, None,
+                  "a file that cannot be parsed is not a file that says zero")
+        path.unlink()
+
+        check("precision", "no usable baseline did not measure",
+              run(None, report())[0], P.DID_NOT_RUN,
+              "cannot compare is its own outcome, distinct from a clean pass")
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = P.freeze_report(report(units=0, crashes=10, clean_units=0,
+                                          clean_pct=0, headline_total=0, max=0,
+                                          rule_headline_counts={}), path)
+        check("precision", "a corpus that only crashes is never frozen",
+              (code, path.exists()), (P.DID_NOT_RUN, False),
+              "a baseline of zero successful scans makes every later run look clean")
+
+        check("precision", "an empty corpus root measures nothing",
+              P.collect_report(Path(tmp)), None,
+              "a report over nothing is not a report")
+
+
+_precision_cases()
 
 
 # ---------------------------------------------------------------------- reporting

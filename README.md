@@ -318,10 +318,20 @@ Every number below is reproducible on your own machine:
 make check      # unit + detection + semantic + fuzz + self-scan + bundle sync
 make unit       # invariant tests for the pure functions — runs first, by design
 make detect     # detection benchmark against fixtures/
+make coverage   # exact per-fixture findings, and per-family recall/precision
 make falsepos   # false positives, against the extensions you already have installed
+make precision  # diff falsepos against the frozen baseline: any NEW finding fails
 make fuzz       # malformed and hostile input: must not crash or hang
 make anomalies  # invariant sweep: is the output itself well-formed
 ```
+
+`make detect` proves the attack is caught where somebody thought to pin it.
+`make coverage` measures the two things that cannot prove: whether a rule that
+used to fire has quietly stopped (every fixture's id set is exact — missing and
+extra both fail), and whether a rule *family* is exercised by anything at all.
+`make precision` is not part of `make check`: it reads a directory of extensions
+you already trust, CI does not have one, and it exits `2` — did not run — rather
+than reporting a pass it did not measure.
 
 | Benchmark | Result |
 |---|---|

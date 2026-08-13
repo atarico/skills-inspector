@@ -329,10 +329,20 @@ Todos los números de abajo son reproducibles en tu propia máquina:
 make check      # unit + detección + semántica + fuzz + auto-escaneo + sync
 make unit       # tests de invariantes de las funciones puras — corre primero, a propósito
 make detect     # benchmark de detección contra fixtures/
+make coverage   # hallazgos exactos por fixture, y recall/precisión por familia
 make falsepos   # falsos positivos, contra las extensiones que ya tenés instaladas
+make precision  # compara falsepos contra la línea base congelada: cualquier hallazgo NUEVO falla
 make fuzz       # entrada malformada y hostil: no debe crashear ni colgarse
 make anomalies  # barrido de invariantes: ¿la salida en sí está bien formada?
 ```
+
+`make detect` prueba que el ataque se detecta donde alguien pensó en fijarlo.
+`make coverage` mide las dos cosas que eso no puede probar: si una regla que
+antes disparaba dejó de hacerlo en silencio (el conjunto de ids de cada fixture
+es exacto — faltantes y sobrantes fallan igual), y si una *familia* de reglas
+está ejercitada por algo. `make precision` no forma parte de `make check`: lee un
+directorio de extensiones que ya confiás, CI no tiene uno, y sale con `2` — no
+corrió — en vez de reportar un pass que no midió.
 
 | Benchmark | Resultado |
 |---|---|
