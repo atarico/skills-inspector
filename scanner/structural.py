@@ -39,8 +39,39 @@ _PTH_EXEC = re.compile(r"^\s*import\s+", re.MULTILINE)
 _MCP_ENV_INJECTION = {"PATH", "LD_PRELOAD", "LD_LIBRARY_PATH",
                       "DYLD_INSERT_LIBRARIES", "NODE_OPTIONS", "PYTHONPATH", "HOME"}
 _SECRETISH_KEY = re.compile(r"key|token|secret|passw|credential|auth", re.IGNORECASE)
-# `${VAR}` / `$VAR` is a reference the user resolves at launch, not a shipped value.
-_ENV_REFERENCE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$")
+# A reference the user resolves at launch, not a shipped value: shell `${VAR}` /
+# `$VAR`, Windows `%VAR%`, and the JS/Python spellings a config generator emits.
+_ENV_REFERENCE = re.compile(
+    r"^(\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"     # ${VAR}, $VAR, and malformed pairs
+    r"|%[A-Za-z_][A-Za-z0-9_]*%"
+    r"|process\.env(\.[A-Za-z_][A-Za-z0-9_]*|\[[^\]]*\])"
+    r"|os\.environ(\.get)?[\[(][^\])]*[\])])$")
+# A template slot the user is expected to fill: <token>, {{token}}, {TOKEN}.
+_TEMPLATE_SLOT = re.compile(r"^(<[^>]*>|\{\{.*\}\}|\{[^{}]*\}|\[\[.*\]\])$")
+# Explicit filler. Matched token by token over the WHOLE value, never as a
+# substring: a value is filler only when every one of its words is filler
+# vocabulary. A substring test would let an attacker launder a live key by
+# padding it with the word `example`.
+_FILLER_WORDS = {
+    "a", "add", "an", "api", "apikey", "change", "changeme", "credential",
+    "dummy", "enter", "example", "fake", "fixme", "goes", "here", "id",
+    "insert", "key", "me", "my", "na", "none", "notset", "null", "own",
+    "password", "paste", "placeholder", "real", "redacted", "replace",
+    "sample", "secret", "test", "the", "to", "todo", "token", "tbd", "unset",
+    "value", "with", "your", "yours",
+}
+_FILLER_SPLIT = re.compile(r"[-_. ]+")
+_FILLER_SHAPE = re.compile(r"x{2,}|\.+|\*+|\d{1,2}")
+# A value carrying a KNOWN credential shape is never a placeholder, whatever
+# else it looks like. `AKIAIOSFODNN7EXAMPLE` is a live AWS access key id and is
+# also entirely uppercase and digits — the shape has to win over the heuristic,
+# or the rule drops exactly the credential it was written to catch.
+_CREDENTIAL_SHAPE = re.compile(
+    r"AKIA[A-Z0-9]{16}"
+    r"|sk-ant-|sk-proj-|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_"
+    r"|AIza[A-Za-z0-9_-]{10}|xox[bprsa]-|npm_[A-Za-z0-9]{10}"
+    r"|eyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}"
+    r"|-----BEGIN [A-Z ]{0,32}PRIVATE KEY-----")
 _MUTABLE_REF = re.compile(r"git\+|#(main|master)\b", re.IGNORECASE)
 _PINNED_VERSION = re.compile(r"@\d")
 # The host must END at a real terminator (port, path, query, fragment, or end
@@ -135,6 +166,39 @@ def _fmt(value, limit: int = 160) -> str:
     return text[:limit]
 
 
+def _is_filler(stripped: str) -> bool:
+    """True when every word of the value is placeholder vocabulary.
+
+    `YOUR_API_TOKEN`, `change-me`, `insert key here`. Deliberately NOT "the
+    value is uppercase": real credential formats are uppercase-and-digits, and
+    keying on case dropped live keys — an AWS access key id is the example.
+    """
+    tokens = [t for t in _FILLER_SPLIT.split(stripped.lower()) if t]
+    return bool(tokens) and all(
+        t in _FILLER_WORDS or _FILLER_SHAPE.fullmatch(t) for t in tokens)
+
+
+def _redacted_secret(key: str, value) -> str | None:
+    """`KEY=pref…(n chars)` when the value is a live-looking credential.
+
+    The single place that decides "is this env entry a shipped secret", and the
+    single redaction format for it. HOK-009 reports it; HOK-015 asks the same
+    question before it prints a context window, because a secret must not reach
+    evidence through the rule standing next to the one that redacts it.
+    """
+    if not isinstance(value, str) or not _SECRETISH_KEY.search(key):
+        return None
+    stripped = value.strip()
+    if len(stripped) < 6:
+        return None
+    if not _CREDENTIAL_SHAPE.search(stripped) and (
+            _ENV_REFERENCE.match(stripped)
+            or _TEMPLATE_SLOT.match(stripped)
+            or _is_filler(stripped)):
+        return None  # a reference or a placeholder, not a shipped value
+    return f"{key}={stripped[:4]}…({len(stripped)} chars)"
+
+
 def _server_names(value) -> tuple[list[str], bool]:
     """Names declared by an MCP field, and whether it is a pointer to a file.
 
@@ -222,17 +286,8 @@ def _mcp_server_findings(servers, relpath: str, text: str) -> list[StructuralFin
 
         # HOK-009 — hardcoded secret value in env. Evidence is redacted to a
         # prefix and a length: a finding must never republish the secret.
-        hardcoded = []
-        for key, value in env_items:
-            if not _SECRETISH_KEY.search(key) or not isinstance(value, str):
-                continue
-            stripped = value.strip()
-            if len(stripped) < 6 or _ENV_REFERENCE.match(stripped):
-                continue
-            if (stripped.startswith("<") or stripped.startswith("{{")
-                    or re.fullmatch(r"[A-Z][A-Z0-9_]*", stripped)):
-                continue  # placeholder, not a value
-            hardcoded.append(f"{key}={stripped[:4]}…({len(stripped)} chars)")
+        hardcoded = [r for r in
+                     (_redacted_secret(k, v) for k, v in env_items) if r]
         if hardcoded:
             _add("HOK-009", "CRITICAL", R.SECRETS,
                  "hardcoded secret in env",
@@ -313,18 +368,33 @@ def _mcp_server_findings(servers, relpath: str, text: str) -> list[StructuralFin
                  "Why does this server need that path?",
                  _fmt(sensitive))
 
-        # HOK-015 — known exfil host in args or env values.
-        haystack = invocation + " " + " ".join(
-            str(v) for _k, v in env_items if isinstance(v, (str, int, float)))
-        match = _EXFIL_HOST.search(haystack)
-        if match:
+        # HOK-015 — known exfil host in args or env values. Searched field by
+        # field, never over one concatenated haystack: a context window cut
+        # across joined env VALUES republishes whatever sits next to the match,
+        # and what sits next to it is routinely the credential HOK-009 just
+        # redacted. A field that _redacted_secret() calls a live secret is
+        # named and redacted the same way here; the matched endpoint is printed
+        # from the match itself, so the finding still says which host and where.
+        fields = [("args", invocation, None)]
+        for key, value in env_items:
+            if isinstance(value, (str, int, float)):
+                fields.append((f"env.{key}", str(value),
+                               _redacted_secret(key, value)))
+        for field, value, redaction in fields:
+            match = _EXFIL_HOST.search(value)
+            if not match:
+                continue
+            where = (redaction if redaction
+                     else f"{field}: "
+                          + value[max(0, match.start() - 20):match.end() + 40])
             _add("HOK-015", "HIGH", R.NETWORK,
                  "known exfiltration endpoint in args/env",
                  "Disposable collection infrastructure wired into the server's "
                  "own configuration.",
                  "Tunnel-based local dev — verify you started the tunnel yourself.",
                  "Do you control that endpoint?",
-                 _fmt(haystack[max(0, match.start() - 20):match.end() + 40]))
+                 _fmt(f"{match.group(0)} in {where}"))
+            break
 
         # HOK-016 — sandbox-disabling flags.
         unsafe_flags = [t for t in all_tokens if _SANDBOX_FLAG.match(t)]

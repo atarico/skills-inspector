@@ -46,6 +46,30 @@ def _r(pattern: str, flags: int = re.IGNORECASE) -> re.Pattern:
     return re.compile(pattern, flags)
 
 
+# A destination is only local when the host ENDS at a real boundary. A bare
+# prefix is not one — `localhost.evil.example`, `10.evil.example` and
+# `192.168.evil.example` are all registrable names that resolve wherever their
+# owner points them, and a prefix exemption hands the attacker the entire rule.
+# Each private range is therefore spelled as a full dotted quad: `10.` must mean
+# `10.x.x.x`, not "anything starting with 10.".
+#
+# The boundary is "the authority does not continue", not a fixed terminator
+# list. An optional port is consumed first — including an interpolated one
+# (`http://127.0.0.1:${PORT}`), which is how a hook script writes a local URL —
+# and then the next character must not extend the host. `@` and `:` are in that
+# class on purpose: `http://localhost:8080@evil.example` has `localhost` as
+# USERINFO and `evil.example` as the host, so it is not local.
+_HOST_TERMINATOR = r"(:[\w${}]*)?(?![\w.\-@%:])"
+_LOOPBACK_HOST = r"localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|0\.0\.0\.0|\[::1\]"
+_PRIVATE_HOST = (r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+                 r"|192\.168\.\d{1,3}\.\d{1,3}"
+                 r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}")
+# Placed immediately after `https?://` in a pattern: consumes nothing, and
+# fails the match when the authority that follows is genuinely the user's own.
+_NOT_LOCAL = ("(?!(" + _LOOPBACK_HOST + "|" + _PRIVATE_HOST + ")"
+              + _HOST_TERMINATOR + ")")
+
+
 RULES: list[Rule] = [
     # ------------------------------------------------------------------ A. execution
     Rule("EXE-003", "CRITICAL", "high", REMOTE_EXEC,
@@ -172,13 +196,13 @@ RULES: list[Rule] = [
          # The quote before [=:] admits the JSON form ("VAR": "https://…") as
          # well as the shell form (VAR=https://…). Localhost and loopback are a
          # user's own proxy, not an interception — but only a genuine loopback
-         # authority: the host must end at a terminator (port, path, query,
-         # fragment, quote, whitespace, or end of line), or an attacker-
-         # registered `localhost.evil.example` would be exempted too.
+         # authority, so the host must end at _HOST_TERMINATOR. NET-001 shares
+         # that definition; the host SET is narrower here on purpose (an RFC1918
+         # model endpoint is still a host on your LAN, not your own process).
          _r(r"\b(ANTHROPIC_BASE_URL|OPENAI_BASE_URL|OPENAI_API_BASE"
             r"|AZURE_OPENAI_ENDPOINT|MODEL_BASE_URL|ANTHROPIC_AUTH_TOKEN)"
             r"[\"']?\s*[=:]\s*[\"']?https?://"
-            r"(?!(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?([/?#\"'\s]|$))"),
+            r"(?!(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3})" + _HOST_TERMINATOR + ")"),
          specificity=90),
 
     Rule("NET-011", "HIGH", "medium", NETWORK,
@@ -231,8 +255,8 @@ RULES: list[Rule] = [
          "Documented API the unit exists to call.",
          "Is that host in the description?",
          _r(r"\b(curl|wget|http\.request|requests\.(get|post|put)|fetch\s*\(|axios\.|urllib)"
-            r"[^\n]{0,120}https?://(?!(localhost|127\.|0\.0\.0\.0|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.))"
-            r"|https?://(?!127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)(\d{1,3}\.){3}\d{1,3}"),
+            r"[^\n]{0,120}https?://" + _NOT_LOCAL
+            + r"|https?://" + _NOT_LOCAL + r"(\d{1,3}\.){3}\d{1,3}"),
          specificity=45),
 
     Rule("NET-010", "INFO", "high", NETWORK,
