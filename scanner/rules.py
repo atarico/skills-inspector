@@ -56,18 +56,42 @@ def _r(pattern: str, flags: int = re.IGNORECASE) -> re.Pattern:
 # The boundary is "the authority does not continue", not a fixed terminator
 # list. An optional port is consumed first — including an interpolated one
 # (`http://127.0.0.1:${PORT}`), which is how a hook script writes a local URL —
-# and then the next character must not extend the host. `@` and `:` are in that
-# class on purpose: `http://localhost:8080@evil.example` has `localhost` as
-# USERINFO and `evil.example` as the host, so it is not local.
+# and then the next character must not extend the host.
 _HOST_TERMINATOR = r"(:[\w${}]*)?(?![\w.\-@%:])"
+# The other half of the boundary, and the one a terminator list cannot express.
+# Everything before an `@` in an authority is USERINFO, not the host: curl,
+# requests and fetch all connect to `evil.example` for
+# `http://localhost&@evil.example/v1`. RFC 3986 admits every sub-delimiter
+# (`&;=+,!$'()*~`) inside userinfo, and `(`, `)`, `,`, `;` and `'` double as
+# end-of-URL punctuation — so no terminator SET can separate the two spellings.
+# This assertion closes the whole family at once: the local exemption fails
+# whenever an `@` appears before the authority ends.
+#
+# The scan stops at what genuinely ends an authority — `/`, `?`, `#`, a double
+# quote or whitespace. `'` is deliberately NOT a stop: it is a legal userinfo
+# character, and `"ANTHROPIC_BASE_URL": "http://localhost'@evil.example/v1"` is
+# a valid JSON value that resolves `evil.example`. `"` stays because a minified
+# JSON object (`{"url":"http://localhost:3000","to":"a@b.example"}`) would
+# otherwise read its neighbour's address as this URL's userinfo.
+_NO_USERINFO = r"(?![^\s\"/?#]*@)"
 _LOOPBACK_HOST = r"localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|0\.0\.0\.0|\[::1\]"
 _PRIVATE_HOST = (r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
                  r"|192\.168\.\d{1,3}\.\d{1,3}"
                  r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}")
-# Placed immediately after `https?://` in a pattern: consumes nothing, and
-# fails the match when the authority that follows is genuinely the user's own.
-_NOT_LOCAL = ("(?!(" + _LOOPBACK_HOST + "|" + _PRIVATE_HOST + ")"
-              + _HOST_TERMINATOR + ")")
+
+
+def _not_local(hosts: str) -> str:
+    """Placed immediately after `https?://`: consumes nothing, and fails the
+    match when the authority that follows is genuinely the user's own.
+
+    A rule passes its own host SET — NET-013 exempts only loopback, NET-001 also
+    exempts RFC1918 — but the host BOUNDARY is defined once, here, so the two
+    can never drift apart on what counts as local.
+    """
+    return "(?!" + _NO_USERINFO + "(" + hosts + ")" + _HOST_TERMINATOR + ")"
+
+
+_NOT_LOCAL = _not_local(_LOOPBACK_HOST + "|" + _PRIVATE_HOST)
 
 
 RULES: list[Rule] = [
@@ -196,13 +220,13 @@ RULES: list[Rule] = [
          # The quote before [=:] admits the JSON form ("VAR": "https://…") as
          # well as the shell form (VAR=https://…). Localhost and loopback are a
          # user's own proxy, not an interception — but only a genuine loopback
-         # authority, so the host must end at _HOST_TERMINATOR. NET-001 shares
-         # that definition; the host SET is narrower here on purpose (an RFC1918
-         # model endpoint is still a host on your LAN, not your own process).
+         # authority, so the host boundary is _not_local()'s, shared with
+         # NET-001. The host SET is narrower here on purpose (an RFC1918 model
+         # endpoint is still a host on your LAN, not your own process).
          _r(r"\b(ANTHROPIC_BASE_URL|OPENAI_BASE_URL|OPENAI_API_BASE"
             r"|AZURE_OPENAI_ENDPOINT|MODEL_BASE_URL|ANTHROPIC_AUTH_TOKEN)"
             r"[\"']?\s*[=:]\s*[\"']?https?://"
-            r"(?!(localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3})" + _HOST_TERMINATOR + ")"),
+            + _not_local(r"localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}")),
          specificity=90),
 
     Rule("NET-011", "HIGH", "medium", NETWORK,
