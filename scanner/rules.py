@@ -67,12 +67,25 @@ _HOST_TERMINATOR = r"(:[\w${}]*)?(?![\w.\-@%:])"
 # This assertion closes the whole family at once: the local exemption fails
 # whenever an `@` appears before the authority ends.
 #
-# The scan stops at what genuinely ends an authority — `/`, `?`, `#`, a double
-# quote or whitespace. `'` is deliberately NOT a stop: it is a legal userinfo
-# character, and `"ANTHROPIC_BASE_URL": "http://localhost'@evil.example/v1"` is
-# a valid JSON value that resolves `evil.example`. `"` stays because a minified
-# JSON object (`{"url":"http://localhost:3000","to":"a@b.example"}`) would
-# otherwise read its neighbour's address as this URL's userinfo.
+# The scan stops at `/`, `?`, `#`, a double quote and whitespace, and at
+# nothing else. Everything else is still userinfo: a backtick, `|`, `<`, `>`
+# and `^` are percent-encoded into userinfo by browsers, Node's `new URL` and
+# fetch, and passed through by curl and urllib, so
+# `"ANTHROPIC_BASE_URL": "http://localhost`@evil.example"` reaches
+# `evil.example`. A class restricted to RFC 3986's authority alphabet looks
+# more correct and is not: it stops early and goes silent on all five.
+#
+# A backslash is the one case the parsers disagree on. WHATWG normalises it to
+# `/` for http(s), so Node and browsers read `http://localhost\@evil.example`
+# as a path on localhost; curl and urllib.parse still resolve `evil.example`.
+# It stays scanned-through, because a false positive costs a second look and a
+# false negative costs the audit.
+#
+# `'` is deliberately NOT a stop: it is a legal userinfo character,
+# and `"ANTHROPIC_BASE_URL": "http://localhost'@evil.example/v1"` is a valid
+# JSON value that resolves `evil.example`. `"` stays a stop because a
+# minified JSON object (`{"url":"http://localhost:3000","to":"a@b.example"}`)
+# would otherwise read its neighbour's address as this URL's userinfo.
 _NO_USERINFO = r"(?![^\s\"/?#]*@)"
 _LOOPBACK_HOST = r"localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|0\.0\.0\.0|\[::1\]"
 _PRIVATE_HOST = (r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
