@@ -341,20 +341,20 @@ directory of extensions you already trust, CI does not have one, and it exits
 
 | Benchmark | Result |
 |---|---|
-| Invariant unit tests | **99/99** — every case pins a promise a docstring makes |
+| Invariant unit tests | **461/461** — every case pins a promise a docstring makes |
 | Detection, against `fixtures/` | **38/38**, plus **5/5** semantic cross-checks |
 | Documented blind spots, confirmed still open | **1** (prose exfiltration) |
 | Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **26/26** survived, no crash or hang |
-| Headline findings across 71 real installed extensions | **77% completely silent** (55/71), median **0**, p90 **1** |
+| Headline findings across 76 real installed extensions | **76% completely silent** (58/76), median **0**, p90 **3** |
 
-### That 77% is not a false-positive rate, and it should not be 100%
+### That 76% is not a false-positive rate, and it should not be 100%
 
-It is tempting to read the last row as "23% false positives" and to treat
+It is tempting to read the last row as "24% false positives" and to treat
 driving it to zero as the goal. Both readings are wrong, and acting on them
 would gut the tool.
 
 A headline finding means *"a capability that needs your decision"* — not
-*"a bug"*. Of the 16 units that produce one, the single most common finding is
+*"a bug"*. Of the 18 units that produce one, the single most common finding is
 `HOK-003`: the extension registers an MCP server. The Discord bridge really does
 register an MCP server. That is a true statement about a real capability, and
 suppressing it because the plugin is popular would mean deciding on the user's

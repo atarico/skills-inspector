@@ -55,7 +55,16 @@ class Rule:
     # promotion above. Detection is untouched — the finding is still REPORTED,
     # at the position its line earned. Narrowing the PATTERN buys the same
     # quiet by going silent, which is what this field exists to avoid.
+    #
+    # It is a claim about the OBJECT of the match, not about the span: write it
+    # to match the shape that leaves the object unbound, never the bare pronoun.
+    # A veto that fires on the pronoun anywhere in the span prices the headline
+    # at one spliced word.
     ambiguous_object: re.Pattern | None = None
+    # …and the other half of the same question. When the match ALSO names an
+    # object outright, the pronoun beside it is no longer unbound and the veto
+    # does not apply. Both are read from `match.group(0)`, never from the line.
+    explicit_object: re.Pattern | None = None
 
 
 def _r(pattern: str, flags: int = re.IGNORECASE) -> re.Pattern:
@@ -121,6 +130,18 @@ def _not_local(hosts: str) -> str:
 
 
 _NOT_LOCAL = _not_local(_LOOPBACK_HOST + "|" + _PRIVATE_HOST)
+
+# AGT-002's first alternation branch, up to but not including its object: a
+# negated concealment verb within a few words of what it conceals. Named because
+# TWO things need this exact shape — the rule itself and the `ambiguous_object`
+# veto that declines to LEAD with the pronoun form of the same branch — and a
+# veto that drifts out of shape with the branch it scopes either stops
+# suppressing a measured false positive or starts suppressing something else.
+# See the AGT-002 comment for what the veto may and may not reach.
+_CONCEAL_DIRECTIVE = (
+    r"(do\s+not|don'?t|never|avoid)\s+(\w+\s+){0,3}"
+    r"(mention|tell|inform|notify|show|display|report|reveal|disclose|log)"
+    r"\s+(\w+\s+){0,2}")
 
 
 RULES: list[Rule] = [
@@ -727,19 +748,34 @@ RULES: list[Rule] = [
     # concealment, user named by pronoun) are the same bytes, and both carry a
     # clause-initial directive. Deleting the word suppressed both. A pronoun is
     # weaker evidence about WHO, never about the phrase being concealment.
+    #
+    # The veto below is the SAME shape as this branch with the object alternation
+    # narrowed to `them` — one string, so the two cannot drift apart — and that
+    # is the whole of its scope, deliberately:
+    #
+    # * it is a concealment DIRECTIVE with an unbound pronoun, not the word
+    #   `them` anywhere inside the matched span. Every corpus false positive it
+    #   was measured on ("Don't log them", "Don't include them in tool results")
+    #   is this branch. Scoping it to the span instead let one spliced word
+    #   demote a directive that names its object outright — "do not tell them
+    #   THE USER which files were removed" — and buy a place below the fold.
+    # * the second branch is a different idiom: there the phrase itself names
+    #   the party being kept in the dark, RULES.md §6 advertises "without
+    #   telling *them*" as a canonical example of what this rule catches, and no
+    #   unit in the corpus writes it. Its verbs are gerunds, so this branch's
+    #   base forms cannot reach them even by accident.
     Rule("AGT-002", "CRITICAL", "medium", INSTRUCTION,
          "Concealment with the user or the log as the object",
          "The user losing visibility is the whole point of the attack.",
          "Requires verb+object proximity. Bare 'silently' is ordinary technical prose.",
          "Who is being kept in the dark, and about what?",
-         _r(r"(do\s+not|don'?t|never|avoid)\s+(\w+\s+){0,3}"
-            r"(mention|tell|inform|notify|show|display|report|reveal|disclose|log)"
-            r"\s+(\w+\s+){0,2}(the\s+)?(user|human|them|operator|owner|it|this)"
+         _r(_CONCEAL_DIRECTIVE + r"(the\s+)?(user|human|them|operator|owner|it|this)"
             r"|without\s+(telling|informing|notifying|alerting)\s+(the\s+)?(user|them|anyone)"
             r"|hide\s+(this|it|the\s+\w+)\s+from\s+(the\s+)?(user|human|output|log)"
             r"|suppress\s+the\s+(output|log|message|warning)"),
          specificity=90, instruction_surface=True,
-         ambiguous_object=_r(r"\bthem\b")),
+         ambiguous_object=_r(_CONCEAL_DIRECTIVE + r"them\b"),
+         explicit_object=_r(r"\b(user|human|operator|owner)\b")),
 
     Rule("AGT-004", "CRITICAL", "medium", INSTRUCTION,
          "Instruction to read local context and transmit it",

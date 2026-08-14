@@ -353,20 +353,20 @@ corrió — en vez de reportar un pass que no midió.
 
 | Benchmark | Resultado |
 |---|---|
-| Tests unitarios de invariantes | **99/99** — cada caso fija una promesa que hace un docstring |
+| Tests unitarios de invariantes | **461/461** — cada caso fija una promesa que hace un docstring |
 | Detección, contra `fixtures/` | **38/38**, más **5/5** contrastes semánticos |
 | Puntos ciegos documentados, confirmados aún abiertos | **1** (exfiltración por prosa) |
 | Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **26/26** sobrevividos, sin crash ni cuelgue |
-| Hallazgos de titular sobre 71 extensiones reales instaladas | **77% completamente silenciosas** (55/71), mediana **0**, p90 **1** |
+| Hallazgos de titular sobre 76 extensiones reales instaladas | **76% completamente silenciosas** (58/76), mediana **0**, p90 **3** |
 
-### Ese 77% no es una tasa de falsos positivos, y no debería llegar a 100%
+### Ese 76% no es una tasa de falsos positivos, y no debería llegar a 100%
 
-Es tentador leer la última fila como "23% de falsos positivos" y tomar como
+Es tentador leer la última fila como "24% de falsos positivos" y tomar como
 objetivo llevarla a cero. Las dos lecturas son incorrectas, y actuar sobre ellas
 vaciaría la herramienta.
 
 Un hallazgo de titular significa *"una capacidad sobre la que tenés que
-decidir"*, no *"un bug"*. De las 16 unidades que producen uno, el hallazgo más
+decidir"*, no *"un bug"*. De las 18 unidades que producen uno, el hallazgo más
 frecuente es `HOK-003`: la extensión registra un servidor MCP. El puente de
 Discord realmente registra un servidor MCP. Es una afirmación verdadera sobre una
 capacidad real, y suprimirla porque el plugin es popular sería decidir en nombre
