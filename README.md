@@ -320,7 +320,7 @@ make unit       # invariant tests for the pure functions — runs first, by desi
 make detect     # detection benchmark against fixtures/
 make coverage   # exact per-fixture findings, and per-family recall/precision
 make falsepos   # false positives, against the extensions you already have installed
-make precision  # diff falsepos against the frozen baseline: any NEW finding fails
+make drift      # diff falsepos against the frozen report: a finding GAINED or LOST fails
 make fuzz       # malformed and hostile input: must not crash or hang
 make anomalies  # invariant sweep: is the output itself well-formed
 ```
@@ -329,9 +329,15 @@ make anomalies  # invariant sweep: is the output itself well-formed
 `make coverage` measures the two things that cannot prove: whether a rule that
 used to fire has quietly stopped (every fixture's id set is exact — missing and
 extra both fail), and whether a rule *family* is exercised by anything at all.
-`make precision` is not part of `make check`: it reads a directory of extensions
-you already trust, CI does not have one, and it exits `2` — did not run — rather
-than reporting a pass it did not measure.
+`make drift` asks the same two questions of the real corpus instead of the
+fixtures, and it fails in both directions: a rule that starts firing on trusted
+software is noise, and a rule that stops firing is a detection this tool no
+longer makes — the second one is why it is not called `precision` any more. It
+counts every finding it reports, not only the ones that lead, because the
+detection that once disappeared unnoticed was reported at low confidence and no
+headline number could see it go. It is not part of `make check`: it reads a
+directory of extensions you already trust, CI does not have one, and it exits
+`2` — did not run — rather than reporting a pass it did not measure.
 
 | Benchmark | Result |
 |---|---|

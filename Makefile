@@ -1,5 +1,5 @@
-.PHONY: help check unit detect coverage semantic fuzz falsepos falsepos-freeze \
-	precision anomalies selftest fixtures expected sync
+.PHONY: help check unit detect coverage semantic fuzz falsepos drift-freeze \
+	drift anomalies selftest fixtures expected sync
 
 help:
 	@echo "make check      run everything (detection + self-scan + sync check)"
@@ -9,8 +9,9 @@ help:
 	@echo "make semantic   semantic cross-check tests (synthetic panel)"
 	@echo "make fuzz       malformed and hostile inputs: must not crash or hang"
 	@echo "make falsepos   false-positive benchmark against installed extensions"
-	@echo "make precision  diff that benchmark against the frozen baseline"
-	@echo "make falsepos-freeze  re-record the frozen baseline (review the diff)"
+	@echo "make drift      diff that corpus against the frozen report: any finding"
+	@echo "                gained OR lost fails, and a crash is its own failure"
+	@echo "make drift-freeze     re-record the frozen report (review the diff)"
 	@echo "make anomalies  invariant sweep: is the OUTPUT well-formed"
 	@echo "make selftest   scan this repo with its own scanner"
 	@echo "make fixtures   regenerate fixtures/ from tests/make_fixtures.py"
@@ -53,17 +54,24 @@ fuzz:
 falsepos:
 	@python3 -m bench.corpus $${CORPUS:-$$HOME/.claude}
 
+# ONE target, one scan, one frozen file — because precision and recall are two
+# readings of the same measurement, and splitting them into `precision` and
+# `recall` would rescan 76 units twice and let two baselines disagree about
+# which corpus they describe. It is not called `precision` any more for the
+# reason this half was built: that name promised half of what the file checks,
+# and a rule that STOPPED firing on real software passed it clean.
+#
 # Deliberately NOT part of `check`. It reads a machine-specific directory that
-# CI does not have, and a precision check that reports success when it measured
-# nothing is the failure mode the whole benchmark exists to catch. So it stands
-# alone and exits 2 — "did not run" — when the corpus is absent, empty, or a
-# different size than the one the baseline was frozen on. 0 pass, 1 regression,
-# 2 unmeasured: three outcomes, never two.
-precision:
-	@python3 -m bench.precision $${CORPUS:-$$HOME/.claude}
+# CI does not have, and a check that reports success when it measured nothing is
+# the failure mode the whole benchmark exists to catch. So it stands alone and
+# exits 2 — "did not run" — when the corpus is absent, empty, or a different
+# size than the one the report was frozen on. 0 pass, 1 regression, 2
+# unmeasured: three outcomes, never two.
+drift:
+	@python3 -m bench.drift $${CORPUS:-$$HOME/.claude}
 
-falsepos-freeze:
-	@python3 -m bench.precision --freeze $${CORPUS:-$$HOME/.claude}
+drift-freeze:
+	@python3 -m bench.drift --freeze $${CORPUS:-$$HOME/.claude}
 
 # Asks a different question than falsepos: not "is the verdict noisy" but
 # "is the output well-formed". Every hand-found bug so far was this shape.
