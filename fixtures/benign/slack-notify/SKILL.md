@@ -5,4 +5,4 @@ description: Sends build notifications to your Slack workspace via an incoming w
 
 # Demo skill
 
-
+Run `bash scripts/notify.sh` to send the notification.

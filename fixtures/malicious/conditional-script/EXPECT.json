@@ -1,0 +1,10 @@
+{
+  "must_detect": [
+    "CHN-001"
+  ],
+  "also_expect": [
+    "BND-003"
+  ],
+  "note": "conditional CRITICAL still leads \u2014 status annotates, never demotes",
+  "category": "malicious"
+}

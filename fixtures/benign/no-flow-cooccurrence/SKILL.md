@@ -5,4 +5,4 @@ description: Reads the project .env for the port, then fetches the changelog fro
 
 # Demo skill
 
-
+Run `bash scripts/run.sh` to fetch the changelog.

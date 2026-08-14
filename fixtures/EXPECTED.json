@@ -1,13 +1,12 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report. Exact match: a missing id is a rule that stopped firing, an extra id is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 40,
+    "fixtures": 41,
     "known_miss": 1
   },
   "fixtures": {
     "benign/distinct-files-same-name": {
       "findings": [
-        "BND-001",
         "CRD-002",
         "NET-001",
         "NET-010"
@@ -18,14 +17,12 @@
     },
     "benign/localhost-dev": {
       "findings": [
-        "BND-001",
         "NET-010"
       ],
       "headline": []
     },
     "benign/no-flow-cooccurrence": {
       "findings": [
-        "BND-001",
         "CRD-003",
         "NET-001",
         "NET-010"
@@ -38,7 +35,6 @@
     },
     "benign/security-tool": {
       "findings": [
-        "BND-001",
         "EXE-005",
         "NET-010"
       ],
@@ -46,7 +42,6 @@
     },
     "benign/slack-notify": {
       "findings": [
-        "BND-001",
         "NET-001",
         "NET-003",
         "NET-010"
@@ -55,7 +50,6 @@
     },
     "benign/taint-reassigned": {
       "findings": [
-        "BND-001",
         "CRD-001",
         "NET-001",
         "NET-010"
@@ -78,7 +72,6 @@
     },
     "malicious/base64-payload": {
       "findings": [
-        "BND-001",
         "EXE-006"
       ],
       "headline": [
@@ -87,7 +80,6 @@
     },
     "malicious/bashrc-persist": {
       "findings": [
-        "BND-001",
         "EXE-003",
         "FSW-001",
         "NET-001",
@@ -103,7 +95,6 @@
     },
     "malicious/cloud-cred-theft": {
       "findings": [
-        "BND-001",
         "CRD-002",
         "NET-001",
         "NET-009",
@@ -132,11 +123,22 @@
         "CRD-002"
       ]
     },
+    "malicious/conditional-script": {
+      "findings": [
+        "BND-003",
+        "CHN-001",
+        "CRD-002",
+        "NET-001",
+        "NET-010"
+      ],
+      "headline": [
+        "CHN-001"
+      ]
+    },
     "malicious/cross-agent-write": {
       "findings": [
         "AGT-003",
-        "AGT-015",
-        "BND-001"
+        "AGT-015"
       ],
       "headline": [
         "AGT-015"
@@ -144,7 +146,6 @@
     },
     "malicious/curl-pipe-bash": {
       "findings": [
-        "BND-001",
         "EXE-003",
         "NET-001",
         "NET-010"
@@ -176,7 +177,6 @@
     },
     "malicious/env-exfil": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-003",
         "NET-001",
@@ -201,7 +201,6 @@
     },
     "malicious/exfil-webhook": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-008",
         "NET-001",
@@ -214,7 +213,6 @@
     },
     "malicious/git-hook-backdoor": {
       "findings": [
-        "BND-001",
         "PER-003"
       ],
       "headline": [
@@ -274,7 +272,6 @@
     },
     "malicious/persistence-cron": {
       "findings": [
-        "BND-001",
         "EXE-003",
         "NET-001",
         "NET-010",
@@ -308,7 +305,6 @@
     },
     "malicious/reverse-shell": {
       "findings": [
-        "BND-001",
         "NET-008",
         "RSH-001"
       ],
@@ -318,7 +314,6 @@
     },
     "malicious/ssh-key-theft": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-001",
         "NET-001",
@@ -331,7 +326,6 @@
     },
     "malicious/taint-env-export": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-011",
         "NET-001",
@@ -343,7 +337,6 @@
     },
     "malicious/taint-python": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-003",
         "NET-001",
@@ -355,7 +348,6 @@
     },
     "malicious/taint-tempfile": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-002",
         "NET-001",
@@ -367,7 +359,6 @@
     },
     "malicious/taint-var-rename": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-001",
         "NET-001",
@@ -379,7 +370,6 @@
     },
     "malicious/taint-variable": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-001",
         "NET-001",
@@ -391,7 +381,6 @@
     },
     "malicious/triple-quote-evasion": {
       "findings": [
-        "BND-001",
         "CHN-001",
         "CRD-001",
         "NET-001",
