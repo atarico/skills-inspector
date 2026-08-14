@@ -72,7 +72,9 @@
       "findings": [
         "AGT-012"
       ],
-      "headline": []
+      "headline": [
+        "AGT-012"
+      ]
     },
     "malicious/base64-payload": {
       "findings": [
@@ -117,7 +119,9 @@
       "findings": [
         "AGT-002"
       ],
-      "headline": []
+      "headline": [
+        "AGT-002"
+      ]
     },
     "malicious/conditional-payload": {
       "findings": [
@@ -298,7 +302,9 @@
       "findings": [
         "AGT-001"
       ],
-      "headline": []
+      "headline": [
+        "AGT-001"
+      ]
     },
     "malicious/reverse-shell": {
       "findings": [

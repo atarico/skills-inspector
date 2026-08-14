@@ -40,6 +40,22 @@ class Rule:
     specificity: int = 50  # section 7 precedence; higher wins
     markdown_only: bool = False
     code_only: bool = False
+    # Section G: this rule's pattern IS an instruction aimed at the reading
+    # agent, so it carries its own position signal. On a markdown prose line
+    # that issues a directive (`position.is_agent_directive`), the match counts
+    # as active even though the line does not open with one of the global
+    # imperative verbs. See `engine._scan_text` and `position._AGENT_DIRECTIVE`.
+    #
+    # Reserved for patterns that are directives by construction, never for
+    # patterns that merely name a dangerous capability: AGT-003 matches
+    # "auto-approve", which this repo's own README uses to DESCRIBE what a hook
+    # can do, and the corpus shows the same shape in three other extensions.
+    instruction_surface: bool = False
+    # Matched text that makes an instruction-surface hit ineligible for the
+    # promotion above. Detection is untouched — the finding is still REPORTED,
+    # at the position its line earned. Narrowing the PATTERN buys the same
+    # quiet by going silent, which is what this field exists to avoid.
+    ambiguous_object: re.Pattern | None = None
 
 
 def _r(pattern: str, flags: int = re.IGNORECASE) -> re.Pattern:
@@ -687,7 +703,7 @@ RULES: list[Rule] = [
             r"|you\s+are\s+now\s+(a|an|the)\s|new\s+instructions?\s*:"
             r"|override\s+(your|the)\s+(system|previous|prior)"
             r"|olvid[áa]\s+(las\s+)?instrucciones|ignor[áa]\s+(las\s+)?instrucciones"),
-         specificity=92),
+         specificity=92, instruction_surface=True),
 
     Rule("AGT-012", "CRITICAL", "medium", INSTRUCTION,
          "Instruction targeting the auditor",
@@ -699,9 +715,19 @@ RULES: list[Rule] = [
             r"|(mark|treat)\s+(this|it)\s+as\s+(safe|a\s+false\s+positive)"
             r"|do\s+not\s+(flag|report|analy[sz]e)\s+(this|the\s+following)"
             r"|no\s+security\s+(concerns?|issues?)\s+(here|in\s+this)"),
-         specificity=93),
+         specificity=93, instruction_surface=True),
 
-    Rule("AGT-002", "CRITICAL", "low", INSTRUCTION,
+    # `medium`, not `low`. RULES.md justified the old `low` with the risk that
+    # bare "silently" or "hide" would fire on ordinary prose — a risk the
+    # implemented pattern already discharges by requiring verb+object proximity.
+    #
+    # `them` stays IN the pattern and out of the headline: two decisions, not
+    # one. "Don't log them" (an MCP security guide in the corpus, said of
+    # secrets) and "do not tell them which files were removed" (the fixture's
+    # concealment, user named by pronoun) are the same bytes, and both carry a
+    # clause-initial directive. Deleting the word suppressed both. A pronoun is
+    # weaker evidence about WHO, never about the phrase being concealment.
+    Rule("AGT-002", "CRITICAL", "medium", INSTRUCTION,
          "Concealment with the user or the log as the object",
          "The user losing visibility is the whole point of the attack.",
          "Requires verb+object proximity. Bare 'silently' is ordinary technical prose.",
@@ -712,7 +738,8 @@ RULES: list[Rule] = [
             r"|without\s+(telling|informing|notifying|alerting)\s+(the\s+)?(user|them|anyone)"
             r"|hide\s+(this|it|the\s+\w+)\s+from\s+(the\s+)?(user|human|output|log)"
             r"|suppress\s+the\s+(output|log|message|warning)"),
-         specificity=90),
+         specificity=90, instruction_surface=True,
+         ambiguous_object=_r(r"\bthem\b")),
 
     Rule("AGT-004", "CRITICAL", "medium", INSTRUCTION,
          "Instruction to read local context and transmit it",

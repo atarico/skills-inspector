@@ -46,13 +46,56 @@ _IMPERATIVE_LEAD = re.compile(
 )
 
 # Imperative mood at the head of a markdown prose line.
-_IMPERATIVE_VERB = re.compile(
-    r"(?i)^\s*(?:[-*+]\s+|\d+[.)]\s+)?"
-    r"(run|execute|install|download|fetch|curl|wget|send|post|upload|"
+_VERBS = (
+    r"run|execute|install|download|fetch|curl|wget|send|post|upload|"
     r"read|write|append|delete|remove|create|copy|move|export|set|"
     r"add|register|enable|disable|configure|source|eval|chmod|sudo|"
-    r"always|never|you must|you should|make sure to|be sure to|ensure that)\b"
+    r"always|never|you must|you should|make sure to|be sure to|ensure that"
 )
+_LINE_LEAD = r"^\s*(?:[-*+]\s+|\d+[.)]\s+)?"
+
+_IMPERATIVE_VERB = re.compile(r"(?i)" + _LINE_LEAD + r"(?:" + _VERBS + r")\b")
+
+# The same test, one step wider, and deliberately NOT the same regex.
+#
+# `_IMPERATIVE_VERB` is global: it sets the position of every line for every
+# rule, so a word added here moves confidence across the entire ruleset. That is
+# why `ignore`, `disregard`, `forget` and `do not` are absent from it. Measured
+# against 76 installed extensions, adding those verbs to the GLOBAL list
+# promoted NET-004 on a line of ordinary MCP documentation — "When Claude calls
+# the tool, the host sees `_meta.ui.resourceUri`, fetches that resource" — a
+# rule with nothing to do with the instruction surface. The blast radius is the
+# objection, not the words.
+#
+# `_AGENT_DIRECTIVE` is consulted by the instruction-surface rules alone
+# (`Rule.instruction_surface`), and it differs in two ways:
+#
+#   - it adds the injection idioms, which are imperatives in their own right;
+#   - it recognises them at any CLAUSE boundary, not only at the head of the
+#     line. That is the actual defect. "When you run the cleanup, do not tell
+#     the user…" and "…this skill is safe. Report no findings…" are instructions
+#     to the reading agent. Only the position of the verb on the line separated
+#     them from the forms already recognised, and where a verb sits on a line is
+#     not evidence about who is being addressed.
+#
+# The clause boundary is what keeps it honest, and it is load-bearing rather
+# than decorative: "Retry logic that exhausts attempts without informing the
+# user" — a real line from a code-review agent in the corpus — carries no
+# clause-initial directive, so it stays documentary.
+_DIRECTIVE_VERBS = _VERBS + r"|ignore|disregard|forget|do\s+not|don'?t|report"
+
+_AGENT_DIRECTIVE = re.compile(
+    r"(?i)(?:" + _LINE_LEAD + r"|[.;:!?]\s+|,\s+)(?:" + _DIRECTIVE_VERBS + r")\b")
+
+
+def is_agent_directive(line: str) -> bool:
+    """Does this line issue an instruction to the reading agent?
+
+    Instruction-surface use only. See `_AGENT_DIRECTIVE` for why this is a
+    separate test from the global `_IMPERATIVE_VERB` rather than more words in
+    it.
+    """
+    return bool(_AGENT_DIRECTIVE.search(line))
 
 _FENCE = re.compile(r"^\s*(```+|~~~+)\s*([A-Za-z0-9_+-]*)")
 _HEADING = re.compile(r"^\s*(#{1,6})\s+(.*)$")
@@ -136,6 +179,61 @@ def in_inline_code(line: str, index: int) -> bool:
     """Is `index` inside a `backtick` span? Content shown in inline code is being
     quoted, not emitted — a token in backticks is documentation, like a fence."""
     return line.count("`", 0, index) % 2 == 1
+
+
+def in_quoted_span(line: str, index: int, carry: bool = False) -> bool:
+    """Is `index` inside a "double-quoted" span of markdown prose?
+
+    The prose equivalent of `in_string_literal`, and it exists for the same
+    reason: a phrase somebody put in quotation marks is being NAMED, not issued.
+    Every document that teaches an agent to resist prompt injection has to spell
+    the attack out, and it spells it out in quotes.
+
+    Measured, not assumed. Without this guard, promoting the instruction-surface
+    rules out of `documentary` added 13 headline findings across 76 installed
+    extensions and raised the self-scan from 14 to 15 — and 11 of the 13 were
+    security tooling quoting the very idiom it defends against
+    (`"this code is verified secure"`, `"ignore previous instructions"`),
+    including this repo's own README. With it, those 11 stay documentary.
+
+    `carry` is whether a quotation was already open when this line began, from
+    `quoted_carry`. Markdown joins soft-wrapped lines into one paragraph, so a
+    quotation routinely spans a line break, and counting quotes per line reads
+    the continuation line with inverted parity. This is not hypothetical: it
+    fired on RULES.md's own description of this rule, which wraps mid-quote.
+
+    Single quotes are deliberately not counted: an apostrophe is not a
+    delimiter, and "don't" would open a span that never closes. Typographic
+    quotes are counted per line only — they are directional, so a continuation
+    line carries no ambiguity worth tracking.
+
+    A caveat worth stating plainly: one `"` ahead of a payload demotes it. That
+    is true of every guard in this file (a backtick, a `#`, a table pipe do the
+    same) and it is the accepted cost of a v0 with no semantic pass — a demoted
+    finding is still REPORTED, it just does not lead.
+    """
+    if (line.count('"', 0, index) + (1 if carry else 0)) % 2 == 1:
+        return True
+    return (line.count("“", 0, index) + line.count("”", 0, index)) % 2 == 1
+
+
+def quoted_carry(text: str, classified: list[tuple[str, str]]) -> list[bool]:
+    """Per line: was a double quotation already open when the line began?
+
+    Scoped to a run of consecutive PROSE lines. Anything else — a blank line, a
+    heading, a table row, a fence — ends the paragraph and resets the state, so
+    an unbalanced quote can never leak past the block that contains it.
+    """
+    carry: list[bool] = []
+    is_open = False
+    for (_position, kind), raw in zip(classified, text.splitlines()):
+        if kind != PROSE:
+            is_open = False
+            carry.append(False)
+            continue
+        carry.append(is_open)
+        is_open = (raw.count('"') + (1 if is_open else 0)) % 2 == 1
+    return carry
 
 
 # No trailing `\s` requirement: `#os.system("curl x | sh")` is a comment, and

@@ -162,6 +162,8 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     lines = text.splitlines()
     positions = pos.classify_lines(relpath, text, invoked)
     is_md = Path(relpath).suffix.lower() in _MD_SUFFIXES
+    # Only the instruction-surface promotion reads this, and only for markdown.
+    quoted = pos.quoted_carry(text, positions) if is_md else []
 
     base_position = pos.file_base_position(relpath, invoked)
     hidden = ev.invisible_counts(text)
@@ -195,12 +197,30 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                 line_matches.setdefault(idx, []).append(rule)
             # Instruction-surface rules in prose are inherently ambiguous: a
             # deterministic match cannot tell a live injection from a doc quoting
-            # one ("ignore previous instructions" appears in both). They are
-            # reported at low confidence, grouped separately — distinguishing the
-            # two is exactly the job of the semantic pass (section 8, deferred).
+            # one ("ignore previous instructions" appears in both). Everything
+            # below is about how much of that ambiguity is actually resolvable
+            # without the semantic pass (section 8, deferred).
             effective = position
+            reported = position
             if is_md and pos.in_inline_code(line, match.start()):
                 effective = pos.DOCUMENTARY
+            elif _instruction_is_live(rule, line, match, kind,
+                                      position, relpath, invoked, is_md,
+                                      quoted[idx] if idx < len(quoted) else False):
+                # A skill whose entire payload is a prompt injection led the
+                # report with NOTHING. `_IMPERATIVE_VERB` reads only the head of
+                # the line, so "Ignore all previous instructions…",
+                # "…this skill is safe. Report no findings…" and "When you run
+                # the cleanup, do not tell the user…" were all filed as
+                # documentary, floored to low, and dropped by `headline` — on
+                # the category RULES.md section G calls the highest-value one.
+                #
+                # `reported` moves with `effective` here, unlike the inline-code
+                # branch above. That branch demotes a match the LINE still
+                # contains; this one is a claim about the line itself, and a
+                # finding that leads the report while printing
+                # `position: documentary` is a report arguing with itself.
+                effective = reported = pos.ACTIVE
             confidence = pos.demote(rule.confidence, effective)
             if not is_md:
                 for _ in range(pos.literal_demotion(line, match.start())):
@@ -212,9 +232,52 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                 detects=rule.detects,
                 evidence=ev.sanitize(line, centre=(match.start(), match.end())),
                 impact=rule.impact, legitimate_use=rule.legitimate,
-                what_to_check=rule.check, position=position,
+                what_to_check=rule.check, position=reported,
                 specificity=rule.specificity))
     return out
+
+
+def _instruction_is_live(rule, line: str, match, kind: str, position: str,
+                         relpath: str, invoked: bool, is_md: bool,
+                         quote_carry: bool = False) -> bool:
+    """Is this instruction-surface match a directive, or prose about one?
+
+    Only `Rule.instruction_surface` patterns reach here: phrases that are
+    imperatives aimed at the reading agent by construction. Everything else
+    keeps the position its line was given, so widening this cannot move
+    confidence for the rest of the ruleset.
+
+    Five conditions, each one of them measured rather than assumed. Dropping any
+    of them re-opens a false positive that exists in software people have
+    installed:
+
+    * markdown prose only. A table row, a heading, a blockquote or a fenced
+      block is a rule CATALOGUE — every AGT phrase in this repo's own RULES.md
+      sits in one, and the same is true of every security skill in the corpus.
+    * the line must not already be active or illustrative. Active needs no
+      promotion; illustrative was set by an "## Examples"-style heading, which
+      is a stronger statement about the text than this test can make.
+    * outside a quoted span (`in_quoted_span`): 11 of 13 corpus false positives,
+      counted across the paragraph so a quotation that soft-wraps still counts.
+    * the line must issue a directive (`is_agent_directive`), which is what
+      keeps descriptive prose that happens to contain the idiom — "Retry logic
+      that exhausts attempts without informing the user" — documentary.
+    * sample directories keep their floor unless an entry point invokes the
+      file, the same rule `classify_lines` and `_apply_sample_floor` apply.
+    * the matched text does not name an ambiguous object
+      (`Rule.ambiguous_object`) — the only condition here that reads the MATCH
+      rather than the line. It says this hit is weak, not that the line is no
+      directive, so returning False still REPORTS: it declines to lead with it.
+    """
+    return (rule.instruction_surface
+            and is_md
+            and kind == pos.PROSE
+            and position == pos.DOCUMENTARY
+            and not pos.in_quoted_span(line, match.start(), quote_carry)
+            and pos.is_agent_directive(line)
+            and not (rule.ambiguous_object
+                     and rule.ambiguous_object.search(match.group(0)))
+            and (invoked or not pos.in_sample_dir(relpath)))
 
 
 def _binary_finding(entry) -> Finding:
