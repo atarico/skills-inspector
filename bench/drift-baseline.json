@@ -5,12 +5,13 @@
   "clean_units": 58,
   "clean_pct": 76,
   "median": 0,
-  "mean": 1.64,
+  "mean": 1.67,
   "p90": 3,
   "max": 41,
   "crashes": 0,
-  "headline_total": 125,
+  "headline_total": 127,
   "rule_headline_counts": {
+    "BND-001": 2,
     "CHN-001": 8,
     "CRD-004": 10,
     "CRD-006": 1,
@@ -99,7 +100,7 @@
     "5": 1,
     "7": 1,
     "14": 3,
-    "15": 1,
+    "17": 1,
     "41": 1
   }
 }

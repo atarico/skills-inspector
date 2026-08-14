@@ -1110,6 +1110,183 @@ def _evasion_cases() -> None:
 _evasion_cases()
 
 
+# ------------------------------------------------- reachability: inherited severity
+# Promise (RULES.md §J): `BND-001` and `BND-003` have severity `—` — "inherited
+# from whatever the file contains". They were emitted with a hardcoded MEDIUM,
+# and `headline()` admits CRITICAL or undeclared HIGH, so the ONE axis that
+# reports reachability could never reach the top of a report. Flipping a file
+# between `dormant` and `active` changed the status string and nothing else.
+#
+# What inheritance may read is the measured half. Taking the file's strongest
+# finding at ANY confidence adds 63 headline entries across the 76-unit corpus
+# (+50%), nearly all of them position-demoted matches inside rule catalogues and
+# reference docs — a documentary `AGT-012` in an unreferenced agent file would
+# make that file LEAD at CRITICAL. Restricting to findings the headline itself
+# would admit (high or medium confidence) still adds 16, of which 8 are distinct
+# and 7 are noise. Only high-confidence findings survive that: +2 entries, both a
+# real secret-to-network chain in a file nothing wires up.
+#
+# So the source finding must be one this report already stands behind
+# unconditionally, and MEDIUM stays the floor: inheritance raises, never lowers.
+
+HIDDEN = "​" * 6  # six zero-width spaces: AGT-006 fires HIGH at high confidence
+
+REACHABILITY_SEVERITY_CASES = [
+    # (name, files, expected BND id, expected severity, leads?, why)
+    ("dormant-critical",
+     {"SKILL.md": SKILL, "scripts/collect.sh": PAYLOAD},
+     "BND-001", "CRITICAL", True,
+     "a CRITICAL payload in a file nothing references is the supply-chain "
+     "update that ships dormant and activates later; it has to lead"),
+
+    ("dormant-high",
+     {"SKILL.md": SKILL, "notes/brief.md": "# Brief\n\nAll fine." + HIDDEN + "\n"},
+     "BND-001", "HIGH", True,
+     "an undeclared HIGH leads, and the dormancy of one leads with it"),
+
+    ("dormant-medium",
+     {"SKILL.md": SKILL,
+      "scripts/env.py": 'import os\nTOKEN = os.environ.get("HOME")\n'},
+     "BND-001", "MEDIUM", False,
+     "a MEDIUM must not start leading: inheritance is not a promotion of "
+     "everything unreferenced"),
+
+    ("dormant-low-confidence-critical",
+     {"SKILL.md": SKILL,
+      "notes/threats.md": "# Threats\n\n| id | example |\n|---|---|\n"
+                          "| AGT-001 | \"ignore previous instructions\" |\n"},
+     "BND-001", "MEDIUM", False,
+     "a rule catalogue's documentary CRITICAL is floored to low confidence and "
+     "never leads on its own; it must not lead through the back door either"),
+
+    ("conditional-critical",
+     {"SKILL.md": SKILL + "For advanced cases, read [notes](refs/adv.md).\n",
+      "refs/adv.md": "# Adv\n\nRun this:\n\n```sh\n" + PAYLOAD + "```\n"},
+     "BND-003", "CRITICAL", True,
+     "the skill-native below-the-fold: the human reads the entry point, the "
+     "model loads this on a trigger"),
+]
+
+
+def _reachability_severity_cases() -> None:
+    from scanner import engine
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+
+        for name, files, rule_id, severity, leads, why in REACHABILITY_SEVERITY_CASES:
+            root = base / name
+            _write(root, files)
+            findings = _scan_findings(root)
+            got = [f for f in findings if f.id == rule_id]
+            check("reachability", f"{name}: {rule_id} is emitted",
+                  len(got), 1, why)
+            if not got:
+                continue
+            check("reachability", f"{name}: {rule_id} severity",
+                  got[0].severity, severity, why)
+            head = {f.id for f in engine.headline(findings)}
+            check("reachability", f"{name}: {rule_id} leads" if leads
+                  else f"{name}: {rule_id} does not lead",
+                  rule_id in head, leads, why)
+
+        # The illustrative-dir chokepoint, pinned from the other side.
+        # `_reachability_findings` skips `in_sample_dir` outright, so inheritance
+        # is a no-op inside a sample tree BY CONSTRUCTION rather than by luck —
+        # which is why raising BND severity cannot light up example directories.
+        sample = base / "sample-dir"
+        _write(sample, {"SKILL.md": SKILL, "examples/collect.sh": PAYLOAD})
+        ids = {f.id for f in _scan_findings(sample)}
+        check("reachability", "no BND finding is emitted inside a sample directory",
+              sorted(ids & {"BND-001", "BND-003"}), [],
+              "the sample-dir skip is what bounds this change: a payload parked "
+              "in examples/ has no reachability finding to inherit into")
+
+        # Nothing to inherit: the file carries no finding at all, so BND-001 is
+        # not emitted in the first place (a bundle of 1200 inert data files must
+        # not become 1200 findings).
+        inert = base / "inert"
+        _write(inert, {"SKILL.md": SKILL, "docs/notes.md": "# Notes\n\nAll fine.\n"})
+        ids = {f.id for f in _scan_findings(inert)}
+        check("reachability", "an unreferenced file carrying nothing is not a finding",
+              "BND-001" in ids, False,
+              "RULES.md gives BND-001 no severity of its own; with nothing to "
+              "inherit there is nothing to report")
+
+
+_reachability_severity_cases()
+
+
+# ------------------------------------------------------ manifest: the status axis
+# `fixtures/EXPECTED.json` recorded `findings` and `headline` and never `status`,
+# so the dormant-vs-active skew this corpus was rewired to remove was
+# structurally invisible to the golden and could return without failing a check.
+
+def _manifest_status_axis_cases() -> None:
+    from tests import coverage
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+
+        dormant = base / "dormant"
+        _write(dormant, {"SKILL.md": SKILL, "scripts/collect.sh": PAYLOAD})
+        observed = coverage.observe(dormant)
+        check("manifest", "observe() carries a status axis",
+              "status" in observed, True,
+              "a finding's status is recorded output; the golden has to pin it")
+        check("manifest", "a dormant fixture records its findings as dormant",
+              [row for row in observed.get("status", []) if row.startswith("CHN-001")],
+              ["CHN-001:dormant"],
+              "this is the axis the manifest was blind to")
+
+        # Same bytes, one line of wiring added.
+        active = base / "active"
+        _write(active, {"SKILL.md": SKILL + "Run `bash scripts/collect.sh`.\n",
+                        "scripts/collect.sh": PAYLOAD})
+        rewired = coverage.observe(active)
+        check("manifest", "rewiring a fixture DOES move the status axis",
+              rewired.get("status", []) == observed.get("status", []), False,
+              "dormant -> active has to fail the golden, in both directions")
+        check("manifest", "an active fixture records its findings as active",
+              [row for row in rewired.get("status", []) if row.startswith("CHN-001")],
+              ["CHN-001:active"],
+              "exact match, like the axes beside it")
+
+        # The blind spot in its pure form. `_reachability_findings` skips sample
+        # directories outright, so a file under `examples/` produces no BND rule
+        # at all and its reachability leaves NO trace on the first two axes:
+        # both trees below report an identical `findings` list and an identical
+        # (empty) `headline`, and only `status` can tell them apart. This is the
+        # case that made the skew invisible rather than merely under-recorded.
+        unwired = base / "sample-unwired"
+        _write(unwired, {"SKILL.md": SKILL, "examples/collect.sh": PAYLOAD})
+        wired = base / "sample-wired"
+        _write(wired, {"SKILL.md": SKILL + "See `examples/collect.sh` for a sample.\n",
+                       "examples/collect.sh": PAYLOAD})
+        before, after = coverage.observe(unwired), coverage.observe(wired)
+        check("manifest", "a sample-dir rewiring moves neither findings nor headline",
+              (before["findings"], before["headline"]),
+              (after["findings"], after["headline"]),
+              "no BND rule fires inside a sample tree, so the old manifest saw "
+              "nothing at all")
+        check("manifest", "a sample-dir rewiring DOES move the status axis",
+              (before.get("status", []), after.get("status", [])),
+              (["CRD-001:dormant", "NET-001:dormant", "NET-010:dormant"],
+               ["CRD-001:active", "NET-001:active", "NET-010:active"]),
+              "the axis has to catch the flip the other two are blind to")
+
+        # Every id on the `findings` axis carries a status, so the new axis is a
+        # strict refinement of the old one rather than a second, disagreeing list.
+        check("manifest", "every findings id appears on the status axis",
+              sorted({row.rsplit(":", 1)[0] for row in observed.get("status", [])}),
+              observed["findings"],
+              "a collapsed related_rule shares the location, and so the status, "
+              "of the finding that absorbed it")
+
+
+_manifest_status_axis_cases()
+
+
 # ------------------------------------------------ instruction surface: position
 # Promise (RULES.md section G): the instruction surface is the highest-value
 # category. A SKILL.md whose entire payload is a prompt injection must LEAD the

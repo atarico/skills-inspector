@@ -1,5 +1,5 @@
 {
-  "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report. Exact match: a missing id is a rule that stopped firing, an extra id is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
+  "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
     "fixtures": 41,
     "known_miss": 1
@@ -13,13 +13,21 @@
       ],
       "headline": [
         "CRD-002"
+      ],
+      "status": [
+        "CRD-002:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "benign/localhost-dev": {
       "findings": [
         "NET-010"
       ],
-      "headline": []
+      "headline": [],
+      "status": [
+        "NET-010:active"
+      ]
     },
     "benign/no-flow-cooccurrence": {
       "findings": [
@@ -27,18 +35,28 @@
         "NET-001",
         "NET-010"
       ],
-      "headline": []
+      "headline": [],
+      "status": [
+        "CRD-003:active",
+        "NET-001:active",
+        "NET-010:active"
+      ]
     },
     "benign/pure-formatter": {
       "findings": [],
-      "headline": []
+      "headline": [],
+      "status": []
     },
     "benign/security-tool": {
       "findings": [
         "EXE-005",
         "NET-010"
       ],
-      "headline": []
+      "headline": [],
+      "status": [
+        "EXE-005:active",
+        "NET-010:active"
+      ]
     },
     "benign/slack-notify": {
       "findings": [
@@ -46,7 +64,12 @@
         "NET-003",
         "NET-010"
       ],
-      "headline": []
+      "headline": [],
+      "status": [
+        "NET-001:active",
+        "NET-003:active",
+        "NET-010:active"
+      ]
     },
     "benign/taint-reassigned": {
       "findings": [
@@ -56,11 +79,17 @@
       ],
       "headline": [
         "CRD-001"
+      ],
+      "status": [
+        "CRD-001:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "known-miss/prose-exfil": {
       "findings": [],
-      "headline": []
+      "headline": [],
+      "status": []
     },
     "malicious/auditor-attack": {
       "findings": [
@@ -68,6 +97,9 @@
       ],
       "headline": [
         "AGT-012"
+      ],
+      "status": [
+        "AGT-012:active"
       ]
     },
     "malicious/base64-payload": {
@@ -76,6 +108,9 @@
       ],
       "headline": [
         "EXE-006"
+      ],
+      "status": [
+        "EXE-006:active"
       ]
     },
     "malicious/bashrc-persist": {
@@ -91,6 +126,13 @@
         "FSW-001",
         "NET-001",
         "PER-002"
+      ],
+      "status": [
+        "EXE-003:active",
+        "FSW-001:active",
+        "NET-001:active",
+        "NET-010:active",
+        "PER-002:active"
       ]
     },
     "malicious/cloud-cred-theft": {
@@ -104,6 +146,12 @@
         "CRD-002",
         "NET-001",
         "NET-009"
+      ],
+      "status": [
+        "CRD-002:active",
+        "NET-001:active",
+        "NET-009:active",
+        "NET-010:active"
       ]
     },
     "malicious/conceal-from-user": {
@@ -112,6 +160,9 @@
       ],
       "headline": [
         "AGT-002"
+      ],
+      "status": [
+        "AGT-002:active"
       ]
     },
     "malicious/conditional-payload": {
@@ -120,7 +171,12 @@
         "CRD-002"
       ],
       "headline": [
+        "BND-003",
         "CRD-002"
+      ],
+      "status": [
+        "BND-003:conditional",
+        "CRD-002:conditional"
       ]
     },
     "malicious/conditional-script": {
@@ -132,7 +188,15 @@
         "NET-010"
       ],
       "headline": [
+        "BND-003",
         "CHN-001"
+      ],
+      "status": [
+        "BND-003:conditional",
+        "CHN-001:conditional",
+        "CRD-002:conditional",
+        "NET-001:conditional",
+        "NET-010:conditional"
       ]
     },
     "malicious/cross-agent-write": {
@@ -142,6 +206,10 @@
       ],
       "headline": [
         "AGT-015"
+      ],
+      "status": [
+        "AGT-003:active",
+        "AGT-015:active"
       ]
     },
     "malicious/curl-pipe-bash": {
@@ -153,6 +221,11 @@
       "headline": [
         "EXE-003",
         "NET-001"
+      ],
+      "status": [
+        "EXE-003:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/dangling-reference": {
@@ -161,6 +234,9 @@
       ],
       "headline": [
         "BND-002"
+      ],
+      "status": [
+        "BND-002:active"
       ]
     },
     "malicious/dormant-payload": {
@@ -172,7 +248,15 @@
         "NET-010"
       ],
       "headline": [
+        "BND-001",
         "CHN-001"
+      ],
+      "status": [
+        "BND-001:dormant",
+        "CHN-001:dormant",
+        "CRD-001:dormant",
+        "NET-001:dormant",
+        "NET-010:dormant"
       ]
     },
     "malicious/env-exfil": {
@@ -184,6 +268,12 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-003:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/envrc-payload": {
@@ -197,6 +287,12 @@
         "AUT-002",
         "EXE-003",
         "NET-001"
+      ],
+      "status": [
+        "AUT-002:active",
+        "EXE-003:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/exfil-webhook": {
@@ -209,6 +305,13 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-008:active",
+        "NET-001:active",
+        "NET-003:active",
+        "NET-010:active"
       ]
     },
     "malicious/git-hook-backdoor": {
@@ -217,6 +320,9 @@
       ],
       "headline": [
         "PER-003"
+      ],
+      "status": [
+        "PER-003:active"
       ]
     },
     "malicious/hidden-unicode": {
@@ -225,6 +331,9 @@
       ],
       "headline": [
         "AGT-006"
+      ],
+      "status": [
+        "AGT-006:active"
       ]
     },
     "malicious/hook-backdoor": {
@@ -240,6 +349,13 @@
         "HOK-001",
         "HOK-002",
         "NET-001"
+      ],
+      "status": [
+        "EXE-003:active",
+        "HOK-001:active",
+        "HOK-002:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/label-injection": {
@@ -251,6 +367,11 @@
       "headline": [
         "AGT-016",
         "HOK-003"
+      ],
+      "status": [
+        "AGT-001:active",
+        "AGT-016:active",
+        "HOK-003:active"
       ]
     },
     "malicious/mcp-inject": {
@@ -260,6 +381,10 @@
       ],
       "headline": [
         "HOK-003"
+      ],
+      "status": [
+        "HOK-003:active",
+        "HOK-011:active"
       ]
     },
     "malicious/permission-lower": {
@@ -268,6 +393,9 @@
       ],
       "headline": [
         "HOK-006"
+      ],
+      "status": [
+        "HOK-006:active"
       ]
     },
     "malicious/persistence-cron": {
@@ -280,6 +408,12 @@
       "headline": [
         "EXE-003",
         "NET-001"
+      ],
+      "status": [
+        "EXE-003:active",
+        "NET-001:active",
+        "NET-010:active",
+        "PER-001:active"
       ]
     },
     "malicious/postinstall-payload": {
@@ -293,6 +427,12 @@
         "AUT-001",
         "EXE-003",
         "NET-001"
+      ],
+      "status": [
+        "AUT-001:active",
+        "EXE-003:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/prompt-injection": {
@@ -301,6 +441,9 @@
       ],
       "headline": [
         "AGT-001"
+      ],
+      "status": [
+        "AGT-001:active"
       ]
     },
     "malicious/reverse-shell": {
@@ -310,6 +453,10 @@
       ],
       "headline": [
         "RSH-001"
+      ],
+      "status": [
+        "NET-008:active",
+        "RSH-001:active"
       ]
     },
     "malicious/ssh-key-theft": {
@@ -322,6 +469,13 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-001:active",
+        "NET-001:active",
+        "NET-003:active",
+        "NET-010:active"
       ]
     },
     "malicious/taint-env-export": {
@@ -333,6 +487,12 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-011:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/taint-python": {
@@ -344,6 +504,12 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-003:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/taint-tempfile": {
@@ -355,6 +521,12 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-002:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/taint-var-rename": {
@@ -366,6 +538,12 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-001:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/taint-variable": {
@@ -377,6 +555,12 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-001:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "malicious/triple-quote-evasion": {
@@ -388,11 +572,18 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-001:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     },
     "update/telemetry-v1": {
       "findings": [],
-      "headline": []
+      "headline": [],
+      "status": []
     },
     "update/telemetry-v2": {
       "findings": [
@@ -403,6 +594,12 @@
       ],
       "headline": [
         "CHN-001"
+      ],
+      "status": [
+        "CHN-001:active",
+        "CRD-004:active",
+        "NET-001:active",
+        "NET-010:active"
       ]
     }
   }

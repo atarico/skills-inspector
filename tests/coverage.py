@@ -65,10 +65,16 @@ GREEN, RED, YELLOW, DIM, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[2m", 
 MANIFEST_NOTE = (
     "Recorded scanner output, one entry per fixture. `findings` is every rule id "
     "the scan produces including ids collapsed into related_rules; `headline` is "
-    "the primary id of every finding that leads the report. Exact match: a "
-    "missing id is a rule that stopped firing, an extra id is a rule that "
+    "the primary id of every finding that leads the report; `status` is those "
+    "same ids paired with the reachability status they were reported under "
+    "(`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a "
+    "missing entry is a rule that stopped firing, an extra one is a rule that "
     "started over-firing. Regenerate with: python -m tests.coverage --update"
 )
+
+# Axes compared exactly, in both directions. Listed once so adding a fourth is
+# one edit rather than three that have to agree.
+AXES = ("findings", "headline", "status")
 
 
 # ----------------------------------------------------------------- rule families
@@ -139,23 +145,42 @@ def implemented_ids() -> set[str]:
 # ----------------------------------------------------------------- scanning
 
 def observe(base: Path) -> dict:
-    """The two id sets a fixture must reproduce.
+    """The three id sets a fixture must reproduce.
 
     `findings` folds in `related_rules` because dedup (RULES.md section 7)
     collapses a rule into another finding without meaning it stopped matching —
     the same reason `truepos.detected_ids` does it. `headline` deliberately does
     NOT: it records which rule LEADS the report, and a rule absorbed into
     another finding's `related_rules` is not leading anything.
+
+    `status` is the reachability axis (RULES.md section 2.3), and it exists
+    because the first two are blind to it. Nothing here recorded whether a
+    finding was reported `active`, `dormant` or `conditional`, so rewiring the
+    corpus — which is what the fixtures were rebuilt to do — moved no axis a
+    check reads, and the skew could come back without failing anything. A file
+    that is reachable only through a sample directory is the sharpest case:
+    `_reachability_findings` skips those outright, so its status can flip in
+    either direction while `findings` and `headline` stay byte-identical.
+
+    It is recorded as `id:status` pairs so it stays in the same vocabulary as
+    the axes beside it and stays a strict refinement of `findings`: every id
+    there appears here exactly once per status it was reported under. A rule
+    collapsed into `related_rules` shares the winning finding's location, and
+    therefore its status, so it is recorded with it rather than dropped.
     """
     unit = collect(base)
     findings, _ = engine.scan(unit)
     ids: set[str] = set()
+    status: set[str] = set()
     for finding in findings:
         ids.add(finding.id)
         ids.update(finding.related_rules)
+        for rule_id in (finding.id, *finding.related_rules):
+            status.add(f"{rule_id}:{finding.status}")
     return {
         "findings": sorted(ids),
         "headline": sorted({f.id for f in headline(findings)}),
+        "status": sorted(status),
     }
 
 
@@ -319,7 +344,7 @@ def main(argv: list[str]) -> int:
 
         want = recorded[key]
         broken = []
-        for axis in ("findings", "headline"):
+        for axis in AXES:
             missing = sorted(set(want.get(axis, [])) - set(observed[axis]))
             extra = sorted(set(observed[axis]) - set(want.get(axis, [])))
             if missing:

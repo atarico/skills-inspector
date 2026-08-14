@@ -106,6 +106,11 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
     raw = _supersede(raw, chains)
 
     _apply_sample_floor(raw, graph)
+    # After the floor, and after supersession, so that what a reachability
+    # finding inherits is the FINAL strength of the file it describes: a chain
+    # that replaced its own components, at the confidence the position rules
+    # actually left it with.
+    _inherit_reachability_severity(raw)
     _annotate_status(raw, graph)
 
     findings = _dedupe(raw)
@@ -135,6 +140,77 @@ def _apply_sample_floor(raw: list[Finding], graph) -> None:
     for finding in raw:
         if pos.in_sample_dir(finding.location) and finding.location not in graph.invoked:
             finding.confidence = "low"
+
+
+# The two rules RULES.md section J gives severity `—`: "inherited from whatever
+# the file contains". Everything else in the BND family makes a claim of its own.
+_INHERIT_SEVERITY = ("BND-001", "BND-003")
+
+
+def _inherit_reachability_severity(raw: list[Finding]) -> None:
+    """Give BND-001 and BND-003 the severity of what they are describing.
+
+    RULES.md section J writes their severity as `—`, and the impact line this
+    file already prints says "Severity comes from whatever the file contains".
+    Neither was true: both were emitted with a hardcoded MEDIUM, which
+    `headline()` does not admit — it takes CRITICAL, or HIGH that the
+    description never declared. The consequence was that the whole reachability
+    axis could not reach the top of a report. Flipping a file from `dormant` to
+    `active` moved the status string and whether BND-001 fired, and nothing
+    else: not severity, not confidence, not headline membership. "This CRITICAL
+    payload sits in a file nothing references" — a supply-chain update that
+    ships dormant and activates on a later trigger — could not lead.
+
+    WHAT MAY BE INHERITED FROM, which is the measured part of this rule.
+
+    The obvious reading is the file's strongest finding at any confidence, and
+    it does not survive contact with the corpus: across 76 installed extensions
+    it adds 63 headline entries to 125, and nearly every one inherits from a
+    position-demoted match — an `AGT-012` quoted in an unreferenced agent
+    file's prose, a `CRD-003` named in a table. Those findings are floored to
+    `low` precisely because the scanner does not stand behind them, and
+    laundering one through a reachability finding that carries `high` of its own
+    would be a promotion the evidence never earned.
+
+    Restricting to findings the headline itself admits (high OR medium) still
+    adds 16 entries; read one by one, 7 of the 8 distinct facts behind them are
+    noise, most of it inherited from a `declared` finding that does not lead in
+    its own right.
+
+    So: only findings this report backs unconditionally — high confidence. On
+    the same corpus that is +2, both of them a secret-to-network chain sitting
+    in a file the bundle never wires up, which is the exact shape this axis
+    exists to surface.
+
+    MEDIUM is a FLOOR, never a ceiling reached from above. RULES.md gives these
+    two rules no severity of their own, so the existing MEDIUM is the "nothing
+    stronger was found" default; letting inheritance also LOWER it would quietly
+    reduce a level that is already reported, and no benchmark here can see a
+    severity move — `bench/drift.py` counts rule ids, not levels.
+
+    The BND family cannot feed itself. A reachability finding is a statement
+    about the bundle's wiring rather than the file's content, and letting one
+    lend severity to another would make the axis inherit from itself: a
+    conditionally-loaded file too large to read carries both BND-003 and
+    BND-005, and BND-005's HIGH is a claim that the content is UNKNOWN.
+    """
+    strongest: dict[str, str] = {}
+    for finding in raw:
+        if finding.id.startswith("BND-") or finding.confidence != "high":
+            continue
+        rank = SEVERITY_ORDER.get(finding.severity, 9)
+        best = strongest.get(finding.location)
+        if best is None or rank < SEVERITY_ORDER.get(best, 9):
+            strongest[finding.location] = finding.severity
+
+    for finding in raw:
+        if finding.id not in _INHERIT_SEVERITY:
+            continue
+        inherited = strongest.get(finding.location)
+        if inherited is None:
+            continue
+        if SEVERITY_ORDER[inherited] < SEVERITY_ORDER.get(finding.severity, 9):
+            finding.severity = inherited
 
 
 def _annotate_status(raw: list[Finding], graph) -> None:

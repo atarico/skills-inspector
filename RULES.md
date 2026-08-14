@@ -482,6 +482,25 @@ a per-line regex cannot express.
 | `BND-003` | — | high | A file reachable only under a runtime condition stated in prose | The human reviews the entry point; the model loads this on a trigger. The skill-native "below the fold" | Genuine progressive disclosure — the point is to make it visible |
 | `BND-004` | MEDIUM | high | Instruction-bearing content in a file whose extension implies data (`.json`, `.txt`, `.csv` containing imperative prose) | Instructions hidden where a reviewer expects data | Templates and fixtures |
 
+`BND-001` and `BND-003` are the two rules with no severity of their own, and what
+`—` means in their rows is worth stating exactly, because the obvious reading does
+not survive measurement. Each takes **the highest severity among the findings that
+same file carries at high confidence**, floored at MEDIUM.
+
+The confidence gate is the measured part. Inheriting from the file's strongest
+finding at *any* confidence adds 63 headline findings across a 76-unit corpus of
+extensions known to be fine — nearly all of them inherited from position-demoted
+matches inside rule catalogues and reference docs, which are floored to `low`
+precisely because the scanner does not stand behind them. Widening the gate one
+step, to the confidences `headline` itself admits, still adds 16. Only
+high-confidence sources hold: +2, both of them a real chain in a file the bundle
+never wires up.
+
+MEDIUM is a floor rather than a starting point: inheritance may raise the level
+these rules report at, never lower it. And nothing in the `BND` family may feed
+another — a reachability finding describes the bundle's *wiring*, not the file's
+content, and `BND-005` in particular is a claim that the content is **unknown**.
+
 ### K. Provenance — optional, off by default
 
 The scanner must work **offline against a directory**. These require network or git
