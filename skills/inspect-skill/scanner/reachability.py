@@ -34,6 +34,34 @@ _ENTRY_NAMES = {
 _ENTRY_DIRS = {".claude/commands", ".claude/agents", ".codex/prompts",
                ".opencode/command", ".opencode/agent", ".opencode/plugin"}
 
+# A Claude Code PLUGIN auto-discovers these at its own root, with no `.claude/`
+# prefix and nothing in the bundle referencing them: `commands/deploy.md` is the
+# `/deploy` command, `agents/reviewer.md` is a subagent. RULES.md section 5
+# already calls "every registered command file" and "every subagent definition"
+# an entry point; only the plugin-root spelling was missing, and it accounted
+# for 31 of the 92 BND-001 findings across the 76 installed extensions.
+#
+# THREE NARROWINGS, and each one is what keeps this from being a way out of
+# `dormant` rather than a fix.
+#
+# Only under a plugin root. These names are ordinary English, and a skill
+# bundle's `commands/` is loaded by nobody. Without the manifest requirement,
+# "rename the directory to commands/" is a one-word laundering of any payload.
+# On this corpus every unit with a root-level `commands/`, `agents/` or `hooks/`
+# is a plugin, so the requirement costs nothing and bounds the claim.
+#
+# Only the extensions the harness registers. Commands and subagents are Markdown;
+# a `commands/helper.sh` sitting beside them is registered by nothing and is
+# exactly the dormant payload this axis exists to report.
+#
+# Only `hooks/hooks.json` by name. The harness loads that one file; the scripts
+# it wires are reached THROUGH it, as config references, which is already how
+# `_config_refs` works. Treating all of `hooks/` as entry would have skipped the
+# question of whether the hook config actually names the script.
+_PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
+_PLUGIN_ENTRY_DIRS = {"commands": {".md"}, "agents": {".md"}}
+_PLUGIN_ENTRY_FILES = {("hooks", "hooks.json")}
+
 # Paths mentioned in prose, code, or config.
 _REF_PATTERNS = [
     re.compile(r"!?\[[^\]]*\]\(\s*<?([^)>\s#]+)"),                 # markdown link
@@ -89,12 +117,48 @@ class Graph:
     invoked: set[str] = field(default_factory=set)
 
 
-def _is_entry(relpath: str) -> bool:
+def _plugin_roots(known: set[str]) -> set[str]:
+    """Every directory in the bundle that is a Claude Code plugin root.
+
+    Usually one — the bundle root, since `unit.resolve` widens to the manifest.
+    A marketplace ships several below its own root (`plugins/<name>/`), and
+    those plugins auto-discover their commands exactly the same way, so the
+    answer follows the manifests rather than the bundle root.
+    """
+    roots = set()
+    for path in known:
+        if path == _PLUGIN_MANIFEST:
+            roots.add("")
+        elif path.endswith("/" + _PLUGIN_MANIFEST):
+            roots.add(path[:-len(_PLUGIN_MANIFEST) - 1])
+    return roots
+
+
+def _is_plugin_entry(relpath: str, plugin_roots: set[str]) -> bool:
+    for root in plugin_roots:
+        prefix = f"{root}/" if root else ""
+        if not relpath.startswith(prefix):
+            continue
+        parts = PurePosixPath(relpath[len(prefix):]).parts
+        if len(parts) < 2:
+            continue
+        # commands/ and agents/ nest: `commands/git/commit.md` is `/git:commit`.
+        suffixes = _PLUGIN_ENTRY_DIRS.get(parts[0])
+        if suffixes and PurePosixPath(parts[-1]).suffix.lower() in suffixes:
+            return True
+        if len(parts) == 2 and (parts[0], parts[1]) in _PLUGIN_ENTRY_FILES:
+            return True
+    return False
+
+
+def _is_entry(relpath: str, plugin_roots: set[str] = frozenset()) -> bool:
     p = PurePosixPath(relpath)
     if p.name in _ENTRY_NAMES:
         return True
     parent = str(p.parent).replace("\\", "/")
-    return any(parent.endswith(d) for d in _ENTRY_DIRS)
+    if any(parent.endswith(d) for d in _ENTRY_DIRS):
+        return True
+    return _is_plugin_entry(relpath, plugin_roots)
 
 
 def _basename_index(known: set[str]) -> dict[str, list[str]]:
@@ -176,6 +240,137 @@ def _invocation_refs(text: str, relpath: str, known: set[str],
     return out
 
 
+# Python's import syntax carries no quotes, so `_REF_PATTERNS[4]` — which
+# requires them — matched none of it. `from . import rules as R` and
+# `from .position import ACTIVE` produced no edge at all, and every module of
+# this scanner's own package therefore read as `dormant`.
+#
+# Both forms are anchored at the start of a line, because that is the difference
+# between a statement and a sentence. "We do not import config.settings here" is
+# prose about a module; only a line that BEGINS an import statement loads one.
+_PY_FROM = re.compile(r"^[ \t]*from[ \t]+(\.*)([A-Za-z_][\w.]*)?[ \t]+import[ \t]+"
+                      r"(\*|[\w,()\[\] \t]+)")
+_PY_IMPORT = re.compile(r"^[ \t]*import[ \t]+([A-Za-z_][\w.]*"
+                        r"(?:[ \t]*,[ \t]*[A-Za-z_][\w.]*)*)")
+_PY_SUFFIXES = (".py", ".pyi", ".pyw")
+
+
+def _module_file(base: str, dotted: str, known: set[str]) -> str | None:
+    """`base/a/b` -> `base/a/b.py`, or the package's `base/a/b/__init__.py`.
+
+    Exact construction only: no basename fallback. `_candidates` would happily
+    resolve `import json` to a unique `json.py` buried anywhere in the bundle,
+    and an import is not a path — it is a name looked up on `sys.path`.
+    """
+    parts = [p for p in base.split("/") if p] + [p for p in dotted.split(".") if p]
+    if not parts:
+        return None
+    stem = "/".join(parts)
+    for candidate in (f"{stem}.py", f"{stem}/__init__.py"):
+        if candidate in known:
+            return candidate
+    return None
+
+
+def _python_imports(text: str, relpath: str, known: set[str]) -> list[tuple[str, bool, int, str]]:
+    """Import edges, resolved the way Python resolves them.
+
+    RELATIVE: the leading dots count packages, not directories. One dot is the
+    containing package (the file's own directory), and each extra dot walks one
+    level up; running past the bundle root resolves to nothing rather than
+    wrapping around. `from .pkg import thing` resolves `pkg` — and, only when
+    `pkg` turned out to be a package with an `__init__.py`, also `pkg.thing`,
+    because that is the one case where the imported NAME may be a module of its
+    own rather than an attribute.
+
+    ABSOLUTE: tried against the file's own directory and against the bundle
+    root, the two entries a real bundle puts on `sys.path` — a launcher doing
+    `sys.path.insert(0, Path(__file__).parent)` is how `skills/inspect-skill/
+    scan.py` reaches its bundled `scanner/`. A name that resolves to no bundle
+    file is a third-party or stdlib package and produces no edge.
+
+    DELIBERATELY NOT RESOLVED, each because the alternative claims more than the
+    evidence supports:
+
+    * Imports in anything but a Python file. A `from .secret import run` inside
+      a fenced block in `SKILL.md` is a tutorial naming a module, the same
+      distinction `_STRICT_REF_PATTERNS` already draws for paths in prose.
+    * Dynamic imports — `importlib.import_module(name)`, `__import__`, a module
+      assembled from a variable. Statically it resolves to nothing, and the
+      quoted spelling is already `_REF_PATTERNS[4]`'s job.
+    * Unresolvable imports as DANGLING references. `import requests` names a
+      package that is supposed to be absent from the bundle; feeding that to
+      BND-002 would report every third-party dependency as a missing file.
+    * Attribute imports: `from .mod import CONST` never yields `mod/CONST.py`
+      unless `mod` is a package and that file genuinely exists.
+    * Conditionality. `_CONDITIONAL` reads prose ("for advanced cases, read..."),
+      and no import line is written that way; an import inside a function is
+      still wiring the module that contains it holds.
+
+    The edges also stay OUT of `graph.invoked` on purpose. That set lifts the
+    sample-directory confidence floor and has to mean "an entry point tells
+    something to run this"; a helper imported by a fixture is still a fixture.
+    """
+    if not relpath.endswith(_PY_SUFFIXES):
+        return []
+    here = str(PurePosixPath(relpath).parent)
+    here = "" if here == "." else here
+    out: list[tuple[str, bool, int, str]] = []
+
+    def add(target: str | None, line: int, raw: str) -> None:
+        if target and target != relpath:
+            out.append((target, False, line, raw))
+
+    for idx, line in enumerate(text.splitlines(), start=1):
+        match = _PY_FROM.match(line)
+        if match:
+            dots, module, names = match.group(1), match.group(2) or "", match.group(3)
+            if dots:
+                # One dot is this file's own package; every extra one walks up.
+                base_parts = [p for p in here.split("/") if p]
+                up = len(dots) - 1
+                if up > len(base_parts):
+                    continue
+                bases = ["/".join(base_parts[:len(base_parts) - up] if up else base_parts)]
+            else:
+                bases = [here, ""] if here else [""]
+            for base in bases:
+                target = _module_file(base, module, known) if module else None
+                if module and target is None:
+                    continue
+                if target:
+                    add(target, idx, f"{dots}{module}")
+                # `from . import a, b` names modules outright; `from .pkg import
+                # a` may name submodules, but only when pkg really is a package.
+                if not module or (target and target.endswith("/__init__.py")):
+                    package = f"{base}/{module}".strip("/") if module else base
+                    # One name per comma clause, and it is the FIRST: in
+                    # `a as b`, `b` is a local binding that names nothing on
+                    # disk, and resolving it fabricates an edge — which in this
+                    # model is a claim that some file is reachable.
+                    for clause in names.split(","):
+                        first = re.search(r"[A-Za-z_]\w*", clause)
+                        if not first:
+                            continue
+                        name = first.group()
+                        add(_module_file(package, name, known), idx,
+                            f"{dots}{module}.{name}" if module else f"{dots}{name}")
+                if target:
+                    break
+            continue
+
+        match = _PY_IMPORT.match(line)
+        if match:
+            for dotted in match.group(1).split(","):
+                dotted = dotted.strip()
+                for base in ([here, ""] if here else [""]):
+                    target = _module_file(base, dotted, known)
+                    if target:
+                        add(target, idx, dotted)
+                        break
+    return out
+
+
 def _config_refs(text: str, relpath: str, known: set[str], index=None) -> list[tuple[str, bool, int, str]]:
     """JSON config: any string value that resolves to a bundle file."""
     try:
@@ -213,6 +408,7 @@ def build(files: list) -> Graph:
     known = {f.relpath for f in files}
     known_dirs = {str(PurePosixPath(k).parent) for k in known} - {"."}
     index = _basename_index(known)
+    plugin_roots = _plugin_roots(known)
     texts = {f.relpath: f.text for f in files if f.text is not None}
     graph = Graph()
 
@@ -223,6 +419,8 @@ def build(files: list) -> Graph:
         refs = _extract(text, relpath, known, index)
         if relpath.endswith((".json",)):
             refs += _config_refs(text, relpath, known, index)
+        if relpath.endswith(_PY_SUFFIXES):
+            refs += _python_imports(text, relpath, known)
         edges[relpath] = [(target, cond) for target, cond, _l, _r in refs]
 
         graph.invoked.update(_invocation_refs(text, relpath, known, index))
@@ -255,7 +453,7 @@ def build(files: list) -> Graph:
                         continue
                     referenced_raw.setdefault(raw, set()).add(f"{relpath}:{idx}")
 
-    entries = [f.relpath for f in files if _is_entry(f.relpath)]
+    entries = [f.relpath for f in files if _is_entry(f.relpath, plugin_roots)]
     for relpath in known:
         graph.status[relpath] = DORMANT
     for relpath in entries:

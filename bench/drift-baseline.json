@@ -32,7 +32,7 @@
     "RSH-003": 5,
     "RSH-004": 1
   },
-  "finding_total": 1415,
+  "finding_total": 1334,
   "rule_finding_counts": {
     "AGT-001": 15,
     "AGT-002": 5,
@@ -44,8 +44,8 @@
     "AGT-010": 12,
     "AGT-012": 6,
     "AGT-015": 11,
-    "BND-001": 92,
-    "BND-003": 18,
+    "BND-001": 16,
+    "BND-003": 13,
     "CHN-001": 8,
     "CRD-001": 2,
     "CRD-002": 1,
