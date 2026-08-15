@@ -295,6 +295,16 @@ def _python_imports(text: str, relpath: str, known: set[str]) -> list[tuple[str,
     * Imports in anything but a Python file. A `from .secret import run` inside
       a fenced block in `SKILL.md` is a tutorial naming a module, the same
       distinction `_STRICT_REF_PATTERNS` already draws for paths in prose.
+    * Imports inside a STRING LITERAL, which is that same sentence one level in.
+      A triple-quoted block in a `.py` file is a fenced block by another
+      spelling — a docstring, a usage example, a quoted snippet — and quoting an
+      import statement does not execute it. The line anchor alone stopped the
+      single-line spellings (`# from . import x` and `DOC = 'from . import x'`
+      both put a character in the column the statement needs) but a literal that
+      spans lines puts its body at column zero, so `position.string_literal_carry`
+      supplies the state the anchor cannot see. Driven on the defect, a two-line
+      docstring naming an orphaned payload produced a real edge and BND-001
+      disappeared from the report entirely.
     * Dynamic imports — `importlib.import_module(name)`, `__import__`, a module
       assembled from a variable. Statically it resolves to nothing, and the
       quoted spelling is already `_REF_PATTERNS[4]`'s job.
@@ -321,7 +331,12 @@ def _python_imports(text: str, relpath: str, known: set[str]) -> list[tuple[str,
         if target and target != relpath:
             out.append((target, False, line, raw))
 
+    carry = position.string_literal_carry(text)
     for idx, line in enumerate(text.splitlines(), start=1):
+        # Quoted text is not a statement. `carry` is per file, so an
+        # unterminated literal never reaches the next one.
+        if carry[idx - 1]:
+            continue
         match = _PY_FROM.match(line)
         if match:
             dots, module, names = match.group(1), match.group(2) or "", match.group(3)

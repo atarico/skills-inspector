@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "BND-001"
+  ],
+  "note": "an import quoted in a docstring is not an import; a fabricated edge would delete this finding rather than add one",
+  "category": "malicious"
+}
