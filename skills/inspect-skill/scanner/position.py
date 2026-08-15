@@ -160,19 +160,28 @@ def _literal_after(line: str, open_delim: str | None) -> str | None:
     i, n = 0, len(line)
     while i < n:
         if open_delim is not None:
-            if len(open_delim) == 3:
-                closer = line.find(open_delim, i)
-                if closer < 0:
-                    return open_delim
-                i = closer + 3
-                open_delim = None
-                continue
-            ch = line[i]
-            if ch == "\\":
+            # One walk for both widths, because the escape rule is one rule.
+            # A backslash shields the next character in a triple-quoted span
+            # exactly as it does in a one-character one: Python reads `\` then
+            # the delimiter as an escaped quote that does NOT terminate the
+            # literal, and the prefix does not change that — in an r-string the
+            # backslash survives into the value and still suppresses the close.
+            # Searching for the bare delimiter instead left the span one
+            # character early, which hands the rest of the literal back to
+            # whatever reads live code: an import written there fabricates the
+            # reachability edge this state exists to deny.
+            #
+            # `\\` is the boundary in the other direction. The backslash is
+            # itself escaped, so the delimiter behind it is live and does close
+            # — which falls out of the same skip, and must, or one stray
+            # backslash would carry the span over the rest of the file.
+            if line[i] == "\\":
                 i += 2
                 continue
-            if ch == open_delim:
+            if line.startswith(open_delim, i):
+                i += len(open_delim)
                 open_delim = None
+                continue
             i += 1
             continue
         ch = line[i]
