@@ -422,9 +422,18 @@ def _config_refs(text: str, relpath: str, known: set[str], index=None) -> list[t
 # is prose about the bundle, and prose names a path the way a sentence does.
 #
 # `command` and `args` are the hook entry and the MCP server; `commands`,
-# `agents` and `hooks` are the plugin manifest naming its own files. A
+# `agents`, `hooks` and `mcpServers` are the plugin manifest naming its own
+# files; `bin` and `main` are the package's executable and its entry module. A
 # `description`, a `name`, a `note`, a `matcher` — none of them wire anything.
-_WIRING_KEYS = {"command", "args", "commands", "agents", "hooks", "scripts"}
+#
+# The list is closed, so a key missing from it silently loses invocation the way
+# the old any-string walk never did, and that is a false negative pointing the
+# other way. Every name here was counted in the frozen corpus holding a real
+# bundle path: `"mcpServers": "./agents/cursor/mcp.json"` and `"bin":
+# "./server.ts"` are there 12 and 4 times, next to a `"logo":
+# "./assets/logo.svg"` that is an asset and stays out.
+_WIRING_KEYS = {"command", "args", "commands", "agents", "hooks", "scripts",
+                "mcpServers", "bin", "main"}
 # `package.json` spells the pair the other way round: under `scripts` the KEY is
 # the script's name and the value is the command, so the wiring word sits one
 # level above the string rather than directly over it.
