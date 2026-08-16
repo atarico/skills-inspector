@@ -1760,7 +1760,8 @@ def _config_wiring_cases() -> None:
             _write(root, {"SKILL.md": SKILL,
                           relpath: json.dumps(config, indent=2),
                           "scripts/payload.sh": PAYLOAD})
-            check("reachability", f"{name}: scripts/payload.sh is invoked",
+            wired = "is invoked" if want else "is not invoked"
+            check("reachability", f"{name}: scripts/payload.sh {wired}",
                   "scripts/payload.sh" in _invoked(root), want, why)
 
         # End to end, through the floor this set exists to lift. The markdown
@@ -1794,6 +1795,91 @@ def _config_wiring_cases() -> None:
 
 
 _config_wiring_cases()
+
+
+# ------------------------------------- reachability: the quoting shapes that WIRE
+# Promise (`_invocation_refs` docstring): the set means "an entry point wired
+# this up". Three quoting shapes put an invocation inside text, and this module
+# answers them DIFFERENTLY on purpose — which is exactly the kind of asymmetry
+# that gets flattened by a later reader who sees only two of the three.
+#
+# The split is not a principle, and the docstring says so: all three shapes can
+# run one hop later, so each answer is a trade made on measurement. The Python
+# literal is excluded because the false positive was real — a docstring naming
+# an orphan fabricated an edge and deleted BND-001, pinned further down this
+# file. The heredoc and the template literal are kept because the same check
+# over the frozen corpus came back empty, leaving nothing to trade away.
+#
+# These cases pin the asymmetry, not an endorsement of it. If the answer ever
+# changes, it changes here first, deliberately.
+
+QUOTED_INVOCATION_CASES = [
+    # (name, referring file, its text, expected invoked, why)
+    ("heredoc-body", "setup.sh",
+     "cat > README.txt <<'EOF'\n"
+     "To clean up, run bash scripts/payload.sh\n"
+     "EOF\n",
+     True,
+     "kept, and this fixture is deliberately the BENIGN half — the body lands "
+     "in README.txt and never runs. The edge survives anyway, because the "
+     "scanner cannot see where a heredoc body goes: swap the destination for "
+     "a script the caller executes and the same bytes are a real invocation. "
+     "Nothing here is a false positive worth trading that away for"),
+
+    ("template-literal", "run.js",
+     "const help = `\nusage: bash scripts/payload.sh\n`;\nconsole.log(help);\n",
+     True,
+     "kept for the same reason as the heredoc, and pinned separately because "
+     "the two share a rationale but not a single line of code"),
+
+    ("python-literal", "run.py",
+     'HELP = """\nbash scripts/payload.sh\n"""\nprint(HELP)\n',
+     False,
+     "excluded, and NOT because a literal cannot run — `os.system(HELP)` runs "
+     "this one. It is excluded because the false positive was measured: a "
+     "docstring naming an orphan fabricated an edge and deleted BND-001 from "
+     "the report. The gap this leaves is real and named in the docstring"),
+
+    ("live-invocation", "setup.sh",
+     "bash scripts/payload.sh\n",
+     True,
+     "the control the other three are measured against: with no quoting at "
+     "all the edge must survive, or the exclusions above are just a way out "
+     "of `invoked`"),
+
+    ("python-line-not-in-literal", "run.py",
+     "# generated\nbash scripts/payload.sh\n",
+     True,
+     "the control WITHOUT which `python-literal` passes vacuously, and it has "
+     "to be the SAME BYTES: `bash scripts/payload.sh` outside the literal and "
+     "the same line inside it. Only the quoting differs, so the pair isolates "
+     "the one thing under test. A control using a different invocation shape "
+     "would leave 'no .py file ever produces an edge' as a live explanation "
+     "for the negative, and the negative would pin nothing"),
+]
+
+
+def _quoted_invocation_cases() -> None:
+    runner = {"setup.sh": "Run `bash setup.sh`.\n",
+              "run.js": "Run `node run.js`.\n",
+              "run.py": "Run `python3 run.py`.\n"}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        for name, relpath, text, want, why in QUOTED_INVOCATION_CASES:
+            root = base / f"quoted-invocation-{name}"
+            _write(root, {"SKILL.md": SKILL + runner[relpath],
+                          relpath: text,
+                          "scripts/payload.sh": PAYLOAD})
+            # The label carries the expectation, because a failure line reading
+            # "reads as invoked" under a case that pins the opposite describes
+            # the regression as if it were the contract.
+            reads = "reads as invoked" if want else "does not read as invoked"
+            check("reachability", f"{name}: scripts/payload.sh {reads}",
+                  "scripts/payload.sh" in _invoked(root), want, why)
+
+
+_quoted_invocation_cases()
 
 
 # ------------------------------------------------- string literals across lines

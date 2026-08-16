@@ -227,6 +227,37 @@ def _invocation_refs(text: str, relpath: str, known: set[str],
 
     The result lifts the sample-directory confidence floor, so it has to mean
     "an entry point wired this up", not "someone typed this path once".
+
+    DELIBERATELY NOT NARROWED: a shell heredoc body and a JS template literal.
+    Both still produce the edge. A multi-line literal in a `.py` file does not,
+    and the three are NOT split by a principle — say so plainly, because the
+    shape of the argument invites one.
+
+    All three are text on its way to somewhere else, and all three can be run
+    one hop later: a heredoc writes a script the next line executes, and
+    `os.system(HELP)` executes a triple-quoted string just as happily. Telling
+    that apart from a help message is not a question about position, it is a
+    question about what happens to the bytes afterwards — dataflow this module
+    does not have. So neither answer is derivable, and each one is a trade.
+
+    The Python literal is excluded because the false positive was MEASURED: a
+    docstring naming an orphaned payload fabricated an edge and deleted BND-001
+    from the report outright, and `tests/unit_test.py` pins that defect. The
+    heredoc and the template literal are kept because the same measurement came
+    back empty — every file in the frozen corpus carrying such a body was
+    checked, and not one puts an invocation inside one. There is no false
+    positive there to trade away, so suppressing the shape blind would sell the
+    transitive case for nothing.
+
+    What this leaves open, on purpose and with no evidence either way: a
+    payload reached only through `os.system(SOME_LITERAL)` is invisible to this
+    set. Re-measure over `bench/drift.py`'s corpus before revisiting any of the
+    three — the answer is what these decisions rest on, not the count on any
+    one day.
+
+    Each spelling, and the control that keeps its opposite honest, is pinned in
+    `tests/unit_test.py`, so changing any of them stays a decision rather than
+    an accident.
     """
     out: set[str] = set()
     positions = position.classify_lines(relpath, text)
