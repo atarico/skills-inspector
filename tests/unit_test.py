@@ -21,6 +21,7 @@ Two rules for adding cases here:
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -1669,6 +1670,130 @@ def _harness_entry_cases() -> None:
 
 
 _harness_entry_cases()
+
+
+# ----------------------------------------------- reachability: what a config WIRES
+# Promise (Graph.invoked docstring): the set holds files reached from a line that
+# is "an instruction to run the thing, not a mention of it", and it is the only
+# signal allowed to lift the sample-directory confidence floor. `build` fed it
+# from `_config_refs`, which reads EVERY string value in a JSON file, so a
+# `"description"` naming a path marked that path invoked — a sentence warning
+# against a payload was enough to promote it past the floor.
+#
+# Both directions, as this file requires. The keys the harness actually runs or
+# loads must KEEP conferring invocation, because the allowlist is closed and one
+# missing name silently loses a wiring the old any-string walk granted. Every
+# name in it was counted in the frozen corpus holding a real bundle path.
+
+def _invoked(root: Path) -> set[str]:
+    from scanner import reachability
+    from scanner.unit import collect
+
+    return reachability.build(collect(root).files).invoked
+
+
+CONFIG_WIRING_CASES = [
+    # (name, config relpath, config object, expected invoked, why)
+    ("hook-command", ".claude/settings.json",
+     {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
+         {"type": "command", "command": "bash scripts/payload.sh"}]}]}},
+     True,
+     "a hook command is the harness running the file, and it sits under two "
+     "arbitrary names — the event and the matcher — so the walk cannot stop at "
+     "the top level"),
+
+    ("mcp-args", ".mcp.json",
+     {"mcpServers": {"docs": {"command": "node", "args": ["./scripts/payload.sh"]}}},
+     True,
+     "a list is transparent: `args` names its elements, not their indices, so "
+     "the key has to survive the descent into the array"),
+
+    ("mcp-servers-path", ".claude-plugin/plugin.json",
+     {"name": "demo", "mcpServers": "./scripts/payload.sh"},
+     True,
+     "the manifest pointing at its own server file, counted 12 times in the "
+     "frozen corpus"),
+
+    ("bin-string", "package.json",
+     {"name": "u", "bin": "./scripts/payload.sh"},
+     True, "the package's executable, counted 4 times in the frozen corpus"),
+
+    ("bin-object", "package.json",
+     {"name": "u", "bin": {"cli": "./scripts/payload.sh"}},
+     True,
+     "`bin` takes both shapes, and under the object form the key above the "
+     "string is the COMMAND's name. Listing `bin` as a key alone would resolve "
+     "the string form and quietly lose this one"),
+
+    ("scripts-container", "package.json",
+     {"name": "u", "scripts": {"postinstall": "bash scripts/payload.sh"}},
+     True,
+     "`scripts` spells the pair the other way round — the key is the script's "
+     "name and the value is the command it runs"),
+
+    # ---- and the other direction: prose that NAMES a path wires nothing ----
+    ("description-warning", ".claude-plugin/plugin.json",
+     {"name": "demo", "description": "Never run scripts/payload.sh yourself."},
+     False,
+     "the defect in its purest form: a sentence warning AGAINST a payload "
+     "promoted it, because the walk read the value and never the key"),
+
+    ("prose-name", "package.json",
+     {"name": "scripts/payload.sh", "version": "1.0.0"},
+     False, "a package called after a path is still not running it"),
+
+    ("asset-path", ".claude-plugin/plugin.json",
+     {"name": "demo", "logo": "./scripts/payload.sh"},
+     False,
+     "an asset the manifest ships is not an entry point it wires. This shape "
+     "is in the frozen corpus beside the wiring keys, which is why the "
+     "allowlist is a list rather than 'any key naming a file'"),
+]
+
+
+def _config_wiring_cases() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+
+        for name, relpath, config, want, why in CONFIG_WIRING_CASES:
+            root = base / f"config-wiring-{name}"
+            _write(root, {"SKILL.md": SKILL,
+                          relpath: json.dumps(config, indent=2),
+                          "scripts/payload.sh": PAYLOAD})
+            check("reachability", f"{name}: scripts/payload.sh is invoked",
+                  "scripts/payload.sh" in _invoked(root), want, why)
+
+        # End to end, through the floor this set exists to lift. The markdown
+        # twin of both halves is already pinned under `evasion`; these are the
+        # same two claims spelled in JSON, where the defect lived.
+        wired = base / "config-wires-sample-dir"
+        _write(wired, {"SKILL.md": SKILL,
+                       ".claude/settings.json": json.dumps(
+                           {"hooks": {"SessionStart": [{"hooks": [
+                               {"type": "command",
+                                "command": "bash examples/payload.sh"}]}]}}),
+                       "examples/payload.sh": PAYLOAD})
+        head, _all = _scan_tree(wired)
+        check("reachability", "a payload in examples/ WIRED by a hook leads",
+              "CHN-001" in head, True,
+              "a directory convention must not outrank a config that runs the "
+              "file, exactly as it must not outrank an entry-point invocation")
+
+        named = base / "config-names-sample-dir"
+        _write(named, {"SKILL.md": SKILL,
+                       ".claude-plugin/plugin.json": json.dumps(
+                           {"name": "demo",
+                            "description": "Never run examples/payload.sh."}),
+                       "examples/payload.sh": PAYLOAD})
+        head, _all = _scan_tree(named)
+        check("reachability", "a payload in examples/ merely NAMED in JSON stays quiet",
+              head, set(),
+              "the floor is the whole protection for sample directories, and a "
+              "description is prose. Reading it as wiring handed any bundle a "
+              "one-field way to promote a payload out of examples/")
+
+
+_config_wiring_cases()
 
 
 # ------------------------------------------------- string literals across lines

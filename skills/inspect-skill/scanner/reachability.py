@@ -436,8 +436,11 @@ _WIRING_KEYS = {"command", "args", "commands", "agents", "hooks", "scripts",
                 "mcpServers", "bin", "main"}
 # `package.json` spells the pair the other way round: under `scripts` the KEY is
 # the script's name and the value is the command, so the wiring word sits one
-# level above the string rather than directly over it.
-_WIRING_CONTAINERS = {"scripts"}
+# level above the string rather than directly over it. `bin` takes both shapes —
+# `"bin": "./server.ts"` names the executable directly, `"bin": {"cli":
+# "./bin/cli.js"}` names it under the command's own name — so it belongs to both
+# sets, and listing it in only one would lose exactly the object form.
+_WIRING_CONTAINERS = {"scripts", "bin"}
 
 
 def _config_invocations(text: str, relpath: str, known: set[str],
