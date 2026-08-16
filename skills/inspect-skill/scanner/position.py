@@ -485,7 +485,12 @@ def classify_lines(relpath: str, text: str,
 
 # Triple-quoted / heredoc bodies are prose, not statements. A security tool that
 # documents attacks in its docstrings is the canonical false positive without this.
-_TRIPLE = re.compile(r'"""|\'\'\'')
+#
+# There is deliberately no regex for "a triple-quote marker" any more. One lived
+# here, and a regex finds markers without knowing what encloses them — which is
+# the whole defect `_triple_opener` was fixed for. Leaving it behind would have
+# left the module with two answers to "what opens a docstring", one of them the
+# wrong one, and the wrong one easier to reach.
 _TRIPLE_QUOTE_SUFFIXES = {".py", ".pyi", ".pyw"}
 
 
@@ -495,14 +500,77 @@ def _triple_opener(line: str) -> tuple[str, int] | None:
     A marker sitting inside a `#` comment does not open anything: a comment
     that merely mentions a docstring delimiter is still a comment. Without
     this check a commented marker silenced every line beneath it.
+
+    Neither does a marker inside an ORDINARY quoted string. `SEP = '\"\"\"'` is
+    a variable holding three characters, and reading it as a docstring opener
+    inverted every position below it until the next marker. Driven on the
+    defect: eleven characters in front of a live `os.system('curl | sh')` took
+    the report from `{EXE-003, NET-001}` at high confidence to an EMPTY
+    headline, both demoted to low. `_literal_after` names the same defect from
+    the other side — it is why that function spells its delimiters `ch * 3`
+    rather than writing one out, having measured 12 findings into this
+    scanner's own self-scan headline when it did.
+
+    A decoy and a real opener fit on one line, so the answer cannot be "give up
+    at the first marker": in `SEP = '\"\"\"'; DOC = \"\"\"` the second marker
+    opens exactly what the first one does not.
+
+    One left-to-right walk, the same order `_literal_after` uses, and for a
+    second reason on top of correctness. Asking `in_string_literal` per match
+    re-walks the line from column zero every time, which is quadratic in line
+    length: a single 16KB line carrying 2000 in-string markers took 3 seconds,
+    and a scanner that hangs on a hostile bundle has denied the audit just as
+    surely as one that crashes. Walking once is O(L) and answers both guards
+    from the position the scan is already at.
     """
-    for match in _TRIPLE.finditer(line):
-        before = line[:match.start()]
-        hashes = [i for i, ch in enumerate(before) if ch == "#"]
-        if any(not in_string_literal(line, i) for i in hashes):
-            return None  # the marker is inside a comment
-        return match.group(0), match.start()
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        # Outside a literal a `#` ends the line, so nothing after it opens
+        # anything. Unlike the literal guard below, this one abandons the whole
+        # line, because a comment has no far side to keep reading.
+        if ch == "#":
+            return None
+        if ch in "\"'":
+            triple = ch * 3
+            if line.startswith(triple, i):
+                return triple, i
+            # An ordinary literal: skip it whole. Every marker inside it is
+            # data — `SEP = '\"\"\"'` holds three characters and opens nothing.
+            i += 1
+            while i < n:
+                if line[i] == "\\":
+                    i += 2
+                    continue
+                if line[i] == ch:
+                    i += 1
+                    break
+                i += 1
+            continue
+        i += 1
     return None
+
+
+def _closes_literal(line: str, delim: str) -> bool:
+    """Does a line already inside a triple-quoted literal end it?
+
+    The same escape rule `_literal_after` walks, and here for the same reason:
+    `\\\"\"\"` is an escaped quote followed by two more, one short of a close.
+    A bare `delim in line` ended the span a line early, and early is not a
+    harmless direction — it reads the literal's own text as live code AND
+    hands the first real line after the literal back as documentary. The
+    payload and the prose swap places, so the evasion and the false positive
+    arrive together, from one substring test.
+    """
+    i = 0
+    while i < len(line):
+        if line[i] == "\\":
+            i += 2
+            continue
+        if line.startswith(delim, i):
+            return True
+        i += 1
+    return False
 
 
 def _classify_code(lines: list[str], base: str, suffix: str) -> list[tuple[str, str]]:
@@ -527,7 +595,7 @@ def _classify_code(lines: list[str], base: str, suffix: str) -> list[tuple[str, 
     for raw in lines:
         if in_docstring:
             positions.append((DOCUMENTARY, STRUCTURAL))
-            if delim in raw:
+            if _closes_literal(raw, delim):
                 in_docstring = False
             continue
         opener = _triple_opener(raw)
@@ -535,7 +603,12 @@ def _classify_code(lines: list[str], base: str, suffix: str) -> list[tuple[str, 
             first, index = opener
             after = raw[index + len(first):]
             # Opens and does not close on the same line -> body is documentary.
-            if first not in after:
+            # The SAME close test as the continuation branch below, because a
+            # line can end a literal in either place and the escape rule does
+            # not change with the position. A bare `first not in after` read
+            # `DOC = \"\"\"abc\\\"\"\"` as opened-and-closed, so the docstring
+            # that Python keeps open never opened here at all.
+            if not _closes_literal(after, first):
                 in_docstring = True
                 delim = first
                 positions.append((DOCUMENTARY, STRUCTURAL))

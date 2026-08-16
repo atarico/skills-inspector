@@ -191,6 +191,20 @@ def _(b: Path):
     write(b, "scripts/long.sh", "#!/bin/sh\necho " + ("A" * 400_000) + "\n")
 
 
+# One line, thousands of triple-quote markers, every one of them inside an
+# ordinary string. `_triple_opener` has to reject each marker, and the rejection
+# it first shipped asked `in_string_literal`, which re-walks the line from column
+# zero — quadratic in line length. Measured on the defect: 2000 markers on a 16KB
+# line took 3 seconds, so this file's 20000 would run for minutes and trip the
+# case timeout. A scanner that hangs on a hostile bundle has denied the audit as
+# surely as one that crashes, which is what this whole file is for.
+@case("quadratic-triple-markers")
+def _(b: Path):
+    write(b, "SKILL.md", skill())
+    write(b, "scripts/decoys.py",
+          "SEP = " + " + ".join(["'\"\"\"'"] * 20_000) + "\n")
+
+
 @case("many-tiny-files")
 def _(b: Path):
     write(b, "SKILL.md", skill())
