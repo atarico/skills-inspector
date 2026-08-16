@@ -418,6 +418,62 @@ def _config_refs(text: str, relpath: str, known: set[str], index=None) -> list[t
     return found
 
 
+# Keys whose string value the harness RUNS or LOADS. Everything else in a config
+# is prose about the bundle, and prose names a path the way a sentence does.
+#
+# `command` and `args` are the hook entry and the MCP server; `commands`,
+# `agents` and `hooks` are the plugin manifest naming its own files. A
+# `description`, a `name`, a `note`, a `matcher` — none of them wire anything.
+_WIRING_KEYS = {"command", "args", "commands", "agents", "hooks", "scripts"}
+# `package.json` spells the pair the other way round: under `scripts` the KEY is
+# the script's name and the value is the command, so the wiring word sits one
+# level above the string rather than directly over it.
+_WIRING_CONTAINERS = {"scripts"}
+
+
+def _config_invocations(text: str, relpath: str, known: set[str],
+                        index=None) -> set[str]:
+    """Targets a JSON config WIRES, as opposed to targets it merely names.
+
+    `_config_refs` reads every string value, and that is right for edges: a path
+    named anywhere in a config is a path someone can reach. It was NOT right for
+    `graph.invoked`, which lifts the sample-directory confidence floor and is
+    documented as "an entry point tells something to run this". Reading any
+    string value as wiring meant `"description": "do not use scripts/payload.sh"`
+    marked that payload invoked — a sentence warning against a file promoted it,
+    which is the same fabricated edge shape as an import inside a docstring.
+
+    Which key holds the string is the whole difference, so the walk carries it.
+    Lists are transparent: `args` names its elements, not their indices.
+    """
+    try:
+        data = json.loads(text)
+    except Exception:
+        return set()
+    out: set[str] = set()
+
+    def walk(node, key: str | None, parent: str | None, depth=0):
+        if depth > 40:
+            return
+        if isinstance(node, str):
+            if key not in _WIRING_KEYS and parent not in _WIRING_CONTAINERS:
+                return
+            for token in re.findall(r"[A-Za-z0-9_./${}-]+\.[A-Za-z0-9]{1,6}", node):
+                target = _candidates(token.replace("${CLAUDE_PLUGIN_ROOT}/", ""),
+                                     relpath, known, index)
+                if target and target != relpath:
+                    out.add(target)
+        elif isinstance(node, dict):
+            for name, value in node.items():
+                walk(value, name, key, depth + 1)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, key, parent, depth + 1)
+
+    walk(data, None, None)
+    return out
+
+
 def build(files: list) -> Graph:
     """files: FileEntry list. Returns per-file status plus dangling references."""
     known = {f.relpath for f in files}
@@ -440,9 +496,9 @@ def build(files: list) -> Graph:
 
         graph.invoked.update(_invocation_refs(text, relpath, known, index))
         if relpath.endswith((".json",)):
-            # A config that wires a file is not mentioning it, it is wiring it.
-            graph.invoked.update(t for t, _c, _l, _r in
-                                 _config_refs(text, relpath, known, index))
+            # A config that wires a file is not mentioning it, it is wiring it —
+            # and the key is what tells the two apart.
+            graph.invoked.update(_config_invocations(text, relpath, known, index))
 
         # dangling: a STRUCTURAL reference that resolves to nothing
         for idx, line in enumerate(text.splitlines(), start=1):
