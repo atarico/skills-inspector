@@ -1,0 +1,5 @@
+{
+  "max_headline": 2,
+  "note": "A COUNTED FALSE POSITIVE. The twin of agent-config-rewrite. An instructions-maintenance skill writing the file it maintains leads with FSW-001 and FSW-002, exactly as the hostile one does",
+  "category": "benign"
+}

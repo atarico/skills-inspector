@@ -1,10 +1,24 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 42,
+    "fixtures": 51,
     "known_miss": 1
   },
   "fixtures": {
+    "benign/agent-config-manager": {
+      "findings": [
+        "FSW-001",
+        "FSW-002"
+      ],
+      "headline": [
+        "FSW-001",
+        "FSW-002"
+      ],
+      "status": [
+        "FSW-001:active",
+        "FSW-002:active"
+      ]
+    },
     "benign/distinct-files-same-name": {
       "findings": [
         "CRD-002",
@@ -19,6 +33,38 @@
         "NET-001:active",
         "NET-010:active"
       ]
+    },
+    "benign/dotfiles-manager": {
+      "findings": [
+        "FSW-001",
+        "PER-002"
+      ],
+      "headline": [
+        "PER-002"
+      ],
+      "status": [
+        "FSW-001:active",
+        "PER-002:active"
+      ]
+    },
+    "benign/extension-manager": {
+      "findings": [
+        "FSW-003",
+        "FSW-004"
+      ],
+      "headline": [
+        "FSW-003",
+        "FSW-004"
+      ],
+      "status": [
+        "FSW-003:active",
+        "FSW-004:active"
+      ]
+    },
+    "benign/in-bundle-symlink": {
+      "findings": [],
+      "headline": [],
+      "status": []
     },
     "benign/localhost-dev": {
       "findings": [
@@ -71,6 +117,17 @@
         "NET-010:active"
       ]
     },
+    "benign/symlink-outside-ordinary": {
+      "findings": [
+        "FSW-008"
+      ],
+      "headline": [
+        "FSW-008"
+      ],
+      "status": [
+        "FSW-008:active"
+      ]
+    },
     "benign/taint-reassigned": {
       "findings": [
         "CRD-001",
@@ -90,6 +147,20 @@
       "findings": [],
       "headline": [],
       "status": []
+    },
+    "malicious/agent-config-rewrite": {
+      "findings": [
+        "FSW-001",
+        "FSW-002"
+      ],
+      "headline": [
+        "FSW-001",
+        "FSW-002"
+      ],
+      "status": [
+        "FSW-001:active",
+        "FSW-002:active"
+      ]
     },
     "malicious/auditor-attack": {
       "findings": [
@@ -279,6 +350,20 @@
         "NET-010:dormant"
       ]
     },
+    "malicious/dotfile-append": {
+      "findings": [
+        "FSW-001",
+        "PER-002"
+      ],
+      "headline": [
+        "FSW-001",
+        "PER-002"
+      ],
+      "status": [
+        "FSW-001:active",
+        "PER-002:active"
+      ]
+    },
     "malicious/env-exfil": {
       "findings": [
         "CHN-001",
@@ -332,6 +417,19 @@
         "NET-001:active",
         "NET-003:active",
         "NET-010:active"
+      ]
+    },
+    "malicious/extension-tamper": {
+      "findings": [
+        "FSW-003",
+        "FSW-004"
+      ],
+      "headline": [
+        "FSW-003"
+      ],
+      "status": [
+        "FSW-003:active",
+        "FSW-004:active"
       ]
     },
     "malicious/git-hook-backdoor": {
@@ -496,6 +594,20 @@
         "NET-001:active",
         "NET-003:active",
         "NET-010:active"
+      ]
+    },
+    "malicious/symlink-escape": {
+      "findings": [
+        "CRD-001",
+        "FSW-008"
+      ],
+      "headline": [
+        "CRD-001",
+        "FSW-008"
+      ],
+      "status": [
+        "CRD-001:active",
+        "FSW-008:active"
       ]
     },
     "malicious/taint-env-export": {

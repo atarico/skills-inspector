@@ -1,0 +1,8 @@
+{
+  "must_detect": [
+    "FSW-003",
+    "FSW-004"
+  ],
+  "note": "deleting the auditor is the move that hides every other finding. FSW-004 is declared here too: the `rm -rf` matches the destructive pattern as well, and a rule guarded only by the regenerable baseline is a rule `make expected` can absorb on the day it stops firing",
+  "category": "malicious"
+}

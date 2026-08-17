@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "FSW-008"
+  ],
+  "note": "the link is the setup; the write through it happens later",
+  "category": "malicious"
+}

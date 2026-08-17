@@ -1,0 +1,5 @@
+{
+  "max_headline": 1,
+  "note": "A COUNTED FALSE POSITIVE, and the only true minimal pair here: byte-identical script to dotfile-append, declared purpose. Same findings; the headline is narrower by one (PER-002 alone, not FSW-001 with it), so disclosure moves something and not enough",
+  "category": "benign"
+}

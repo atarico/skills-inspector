@@ -1,0 +1,5 @@
+{
+  "max_headline": 1,
+  "note": "not benign so much as the middle rung of a three-step ladder that moves ONE token at a time. All three link into the same `./assets/key` destination, so the destination name cannot be the cause of anything: outside+credential gives CRD-001+FSW-008, outside+ordinary (here) gives FSW-008 alone, inside+ordinary gives nothing. The first step isolates the credential, the second the location",
+  "category": "benign"
+}

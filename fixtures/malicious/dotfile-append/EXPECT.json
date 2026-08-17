@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "FSW-001"
+  ],
+  "note": "a backup skill has no business editing your shell startup",
+  "category": "malicious"
+}

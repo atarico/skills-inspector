@@ -1,0 +1,5 @@
+{
+  "max_headline": 2,
+  "note": "A COUNTED FALSE POSITIVE, and the widest of them: FSW-003 AND FSW-004 both lead. The rule's own `legitimate` note says 'extension-management tooling only' \u2014 which is precisely this bundle, and it is led with anyway",
+  "category": "benign"
+}
