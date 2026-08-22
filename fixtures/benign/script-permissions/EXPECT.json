@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "one token from permission-widen and no more: same description, same body, same `-R`, same `/opt/app`, and the mode 777 -> 755. The finding disappears, so the boundary FSW-005 holds IS the mode \u2014 not the recursion flag and not the absolute path, which an earlier draft of this pair varied at the same time and could not have told apart. Its OTHER axis is unpinned \u2014 see the FSW-005 row in the batch comment",
+  "category": "benign"
+}

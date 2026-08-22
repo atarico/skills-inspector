@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "FSW-007"
+  ],
+  "note": "reads nothing and steals nothing \u2014 it is the survey that picks the target, shipped inside a formatter",
+  "category": "malicious"
+}

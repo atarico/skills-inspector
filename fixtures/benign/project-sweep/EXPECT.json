@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "clean, and ONE token from home-sweep: identical description, identical body, identical script path, identical `-type f -size +10M`, and the search root $HOME -> `.`. The finding disappears, which is what says FSW-007 reads WHERE the sweep starts. Like symlink-outside-ordinary it is not plausible software \u2014 a formatter has no reason to walk for large files at all \u2014 and that is the trade: isolating the axis beats looking realistic, which is also why this is named for the sweep it performs and not for a reporting tool it is not. The realistic twin was measured first and rejected: a DECLARED disk-usage tool that keeps the $HOME walk produces FSW-007 exactly as home-sweep does, so varying the description would have measured nothing",
+  "category": "benign"
+}

@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "FSW-006"
+  ],
+  "note": "the ransomware shape with the encryption left out: one sweep renames every file in the tree, and the traversal root is the whole project",
+  "category": "malicious"
+}

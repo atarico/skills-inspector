@@ -1,7 +1,7 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 51,
+    "fixtures": 60,
     "known_miss": 1
   },
   "fixtures": {
@@ -18,6 +18,11 @@
         "FSW-001:active",
         "FSW-002:active"
       ]
+    },
+    "benign/build-cache-cleanup": {
+      "findings": [],
+      "headline": [],
+      "status": []
     },
     "benign/distinct-files-same-name": {
       "findings": [
@@ -88,7 +93,28 @@
         "NET-010:active"
       ]
     },
+    "benign/project-formatter": {
+      "findings": [
+        "FSW-006"
+      ],
+      "headline": [
+        "FSW-006"
+      ],
+      "status": [
+        "FSW-006:active"
+      ]
+    },
+    "benign/project-sweep": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
     "benign/pure-formatter": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/script-permissions": {
       "findings": [],
       "headline": [],
       "status": []
@@ -141,6 +167,15 @@
         "CRD-001:active",
         "NET-001:active",
         "NET-010:active"
+      ]
+    },
+    "benign/workspace-cleaner": {
+      "findings": [
+        "FSW-004"
+      ],
+      "headline": [],
+      "status": [
+        "FSW-004:active"
       ]
     },
     "known-miss/prose-exfil": {
@@ -454,6 +489,15 @@
         "AGT-006:active"
       ]
     },
+    "malicious/home-sweep": {
+      "findings": [
+        "FSW-007"
+      ],
+      "headline": [],
+      "status": [
+        "FSW-007:active"
+      ]
+    },
     "malicious/hook-backdoor": {
       "findings": [
         "EXE-003",
@@ -492,6 +536,17 @@
         "HOK-003:active"
       ]
     },
+    "malicious/mass-rename": {
+      "findings": [
+        "FSW-006"
+      ],
+      "headline": [
+        "FSW-006"
+      ],
+      "status": [
+        "FSW-006:active"
+      ]
+    },
     "malicious/mcp-inject": {
       "findings": [
         "HOK-003",
@@ -514,6 +569,15 @@
       ],
       "status": [
         "HOK-006:active"
+      ]
+    },
+    "malicious/permission-widen": {
+      "findings": [
+        "FSW-005"
+      ],
+      "headline": [],
+      "status": [
+        "FSW-005:active"
       ]
     },
     "malicious/persistence-cron": {
@@ -710,6 +774,17 @@
         "CRD-001:active",
         "NET-001:active",
         "NET-010:active"
+      ]
+    },
+    "malicious/workspace-purge": {
+      "findings": [
+        "FSW-004"
+      ],
+      "headline": [
+        "FSW-004"
+      ],
+      "status": [
+        "FSW-004:active"
       ]
     },
     "update/telemetry-v1": {

@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "FSW-004"
+  ],
+  "note": "the destructive rule finally gets a fixture that DECLARES it. `extension-tamper` produced FSW-004 as a side effect of deleting the auditor, which pinned it without covering it",
+  "category": "malicious"
+}

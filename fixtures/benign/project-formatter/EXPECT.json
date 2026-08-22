@@ -1,0 +1,5 @@
+{
+  "max_headline": 1,
+  "note": "A COUNTED FALSE POSITIVE. A codemod bounded to ./src and declared as one still LEADS with FSW-006, and at the granularity EXPECTED.json records \u2014 the rule id in `findings` and `headline`, and `FSW-006:active` in `status` \u2014 its entry is identical to mass-rename, which renames the entire tree. The golden captures no severity, confidence or disclosure, so this note claims none. The pair also varies traversal root, filter and mutating command at once, so what it pins is the joint result, not which of the three FSW-006 ignores. The rule's own what_to_check asks `What is the traversal root?` and the recorded output does not answer it",
+  "category": "benign"
+}

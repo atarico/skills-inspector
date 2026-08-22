@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "rung 3, and clean outright \u2014 not demoted, ABSENT, so it is gone from `findings` and not merely out of the headline. The `description`, the body line and the script filename are identical to rung 2. What this does NOT establish is why: `\"$WORKSPACE\"/* -> /tmp/build-cache` drops the variable expansion, its quoting and the trailing `/*` together, and any one of the three could carry the result. RULES.md names interpolation as the discriminant; this pair pins the joint outcome and does not confirm that attribution",
+  "category": "benign"
+}

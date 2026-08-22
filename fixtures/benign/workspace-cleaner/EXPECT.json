@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "rung 2, and the ONE place in the FSW family where disclosure does what the docstring promises. Script and body line are byte-identical to workspace-purge; the `description` is the only token that moves, and it drops FSW-004 out of the headline while leaving it in `findings`. Contrast dotfiles-manager, where the same move changed nothing",
+  "category": "benign"
+}

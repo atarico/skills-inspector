@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "FSW-005"
+  ],
+  "note": "world-writable and recursive, on a path the skill never mentions installing into",
+  "category": "malicious"
+}
