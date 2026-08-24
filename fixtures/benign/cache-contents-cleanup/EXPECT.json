@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "rung 3, and the middle the ladder was missing. There is no interpolation anywhere in this bundle and FSW-004 fires anyway \u2014 that is the whole claim, and it is read off this ONE fixture, not off its distance from rung 2, which moves the expansion and its quoting together and so isolates nothing. Interpolation is not necessary. Whether it is sufficient is a different question and a different fixture. It also stands against the rule's own `legitimate_use`, which calls a literal narrow path under a temp dir the acceptable case \u2014 this is exactly that, at HIGH. That field is left alone here on purpose: what counts as legitimate cannot be settled before the gaps in what the rule catches are, and those are pinned in RULE_PATTERN_CASES",
+  "category": "benign"
+}

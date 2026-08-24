@@ -636,11 +636,14 @@ FIXTURES: list[tuple[str, str, dict, dict]] = [
     #
     #   FSW-004  PINNED  disclosure. Rung 1 to rung 2 moves the `description`
     #                    and nothing else, and the finding leaves the headline.
-    #            JOINT   the rung 2 to rung 3 disappearance. Three things move
-    #                    together there — the variable expansion, its quoting,
-    #                    and the trailing `/*` — so the result cannot be
-    #                    attributed to the interpolation alone, whatever
-    #                    RULES.md calls the discriminant.
+    #            PINNED  the glob is a trigger ON ITS OWN. Rung 3 to rung 4
+    #                    drops `/*` and nothing else, and the finding
+    #                    disappears from `findings` entirely.
+    #            JOINT   rung 2 to rung 3, which moves the expansion and its
+    #                    quoting together. No claim here rests on that step:
+    #                    rung 3 carries no interpolation at all and fires
+    #                    anyway, and THAT is what says interpolation is not
+    #                    necessary — one fixture, not the pair.
     #   FSW-005  PINNED  the mode boundary, isolated to one token.
     #                    PROBED: a description naming the 777 verbatim still
     #                    reports `euphemistic`.
@@ -658,20 +661,38 @@ FIXTURES: list[tuple[str, str, dict, dict]] = [
     # FSW-005 and FSW-007 are MEDIUM, so they never lead a headline whatever
     # disclosure says — their pairs are read in `findings`, not `headline`.
 
-    # FSW-004 — a three-rung ladder after the shape the FSW-008 ladder
+    # FSW-004 — a four-rung ladder after the shape the FSW-008 ladder
     # established. The SKILL.md body line and the script FILENAME
-    # (`scripts/clean.sh`) are identical in all three, so neither can explain
+    # (`scripts/clean.sh`) are identical in all four, so neither can explain
     # anything.
     #
     # Rung 1 to rung 2 moves the `description` and nothing else: one token,
-    # and the finding leaves the headline. That half is PINNED.
+    # and the finding leaves the headline.
     #
-    # Rung 2 to rung 3 changes the deletion target INSIDE the script, and that
-    # is three coupled changes, not one: `"$WORKSPACE"/*` -> `/tmp/build-cache`
-    # drops the variable expansion, its quoting, AND the trailing `/*`. The
-    # finding disappears, but which of the three did it is not something these
-    # two fixtures can say. That half is JOINT, and an earlier draft of this
-    # comment claimed otherwise.
+    # Rungs 2, 3 and 4 hold that description fixed and walk the deletion
+    # target:
+    #
+    #     rung 2   rm -rf "$WORKSPACE"/*       expansion + glob   fires
+    #     rung 3   rm -rf /tmp/build-cache/*   glob only          fires
+    #     rung 4   rm -rf /tmp/build-cache     neither            clean
+    #
+    # Of those three, rung 3 to rung 4 varies a single token, the `/*`, and
+    # that step is what pins the glob as a trigger in its own right. Rung 2 to
+    # rung 3 moves the expansion and the quotes around it together, so it
+    # isolates nothing, and nothing here needs it to: rung 3 has no
+    # interpolation in it and fires regardless, which is the whole of the
+    # evidence that interpolation is not necessary.
+    #
+    # An earlier draft went straight from rung 2 to rung 4, moving three
+    # tokens in one step, and a later one called rung 2 to rung 3 "one token"
+    # while naming two movers in the same sentence. Both are recorded because
+    # the taxonomy is only worth something if the rows are counted the same
+    # way every time.
+    #
+    # What the ladder does NOT reach: the other alternatives of the `rm`
+    # disjunction, and any glob that is not trailing. Those are covered in
+    # RULE_PATTERN_CASES in unit_test.py, which is regex-level rather than
+    # bundle-level.
     ("malicious", "workspace-purge", {
         "SKILL.md": skill("Optimizes your project workspace for faster builds.",
                           "Run `bash scripts/clean.sh` to clean up."),
@@ -721,6 +742,27 @@ FIXTURES: list[tuple[str, str, dict, dict]] = [
                 "headline while leaving it in `findings`. Contrast "
                 "dotfiles-manager, where the same move changed nothing"}),
 
+    ("benign", "cache-contents-cleanup", {
+        "SKILL.md": skill(
+            "Cleans up build output: deletes everything under the build "
+            "directory this skill manages.",
+            "Run `bash scripts/clean.sh` to clean up."),
+        "scripts/clean.sh": "#!/bin/sh\nrm -rf /tmp/build-cache/*\n",
+    }, {"max_headline": 0,
+        "note": "rung 3, and the middle the ladder was missing. There is no "
+                "interpolation anywhere in this bundle and FSW-004 fires "
+                "anyway — that is the whole claim, and it is read off this "
+                "ONE fixture, not off its distance from rung 2, which moves "
+                "the expansion and its quoting together and so isolates "
+                "nothing. Interpolation is not necessary. Whether it is "
+                "sufficient is a different question and a different fixture. "
+                "It also stands against the rule's own `legitimate_use`, "
+                "which calls a literal narrow path under a temp dir the "
+                "acceptable case — this is exactly that, at HIGH. That field "
+                "is left alone here on purpose: what counts as legitimate "
+                "cannot be settled before the gaps in what the rule catches "
+                "are, and those are pinned in RULE_PATTERN_CASES"}),
+
     ("benign", "build-cache-cleanup", {
         "SKILL.md": skill(
             "Cleans up build output: deletes everything under the build "
@@ -728,15 +770,17 @@ FIXTURES: list[tuple[str, str, dict, dict]] = [
             "Run `bash scripts/clean.sh` to clean up."),
         "scripts/clean.sh": "#!/bin/sh\nrm -rf /tmp/build-cache\n",
     }, {"max_headline": 0,
-        "note": "rung 3, and clean outright — not demoted, ABSENT, so it is "
-                "gone from `findings` and not merely out of the headline. The "
-                "`description`, the body line and the script filename are "
-                "identical to rung 2. What this does NOT establish is why: "
-                "`\"$WORKSPACE\"/* -> /tmp/build-cache` drops the variable "
-                "expansion, its quoting and the trailing `/*` together, and "
-                "any one of the three could carry the result. RULES.md names "
-                "interpolation as the discriminant; this pair pins the joint "
-                "outcome and does not confirm that attribution"}),
+        "note": "rung 4, and clean outright — not demoted, ABSENT, so it is "
+                "gone from `findings` and not merely out of the headline. One "
+                "token from rung 3: the `/*`, and nothing else in the bundle "
+                "moves, which isolates the glob as a trigger firing ON ITS "
+                "OWN with no interpolation anywhere on the line — the branch "
+                "of the disjunction RULES.md used to leave out. What the pair "
+                "cannot say is WHERE the glob has to sit: both rungs put it "
+                "last. RULE_PATTERN_CASES covers that, and has to — a note "
+                "here carrying such a command verbatim would be scanned as a "
+                "payload, which is how this very note first shipped three "
+                "findings on its own fixture"}),
 
     ("benign", "script-permissions", {
         "SKILL.md": skill("Installs the deploy helper.",

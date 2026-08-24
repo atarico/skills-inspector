@@ -338,6 +338,42 @@ RULE_PATTERN_CASES = [
     ("FSW-002", "settings.json", 'echo x > ~/.claude/settings.json', True),
     ("FSW-002", "CLAUDE.md", 'echo evil >> CLAUDE.md', True),
     ("FSW-002", "mcp config", 'echo x > .mcp.json', True),
+
+    # FSW-004's `rm` branch is a disjunction, not the single discriminant
+    # RULES.md used to name. There is a case per alternative of
+    # `(\$\{?\w|\$\(|`|~|/\*)` below, so deleting one fails here instead of
+    # passing silently — an earlier draft covered two of them and claimed to
+    # guard the whole thing.
+    #
+    # The glob alternative needs the cases below because no fixture reaches
+    # them, and two of those cases are GAPS rather than behaviour worth
+    # keeping. They are pinned anyway: an evasion nobody recorded is one
+    # nobody notices closing or widening.
+    ("FSW-004", "a variable expansion fires, with no glob",
+     'rm -rf "$WORKSPACE"', True),
+    ("FSW-004", "a brace-form variable fires", "rm -rf ${WORKSPACE}", True),
+    ("FSW-004", "a command substitution fires", "rm -rf $(cat targets.txt)", True),
+    ("FSW-004", "a backtick substitution fires", "rm -rf `cat targets.txt`", True),
+    ("FSW-004", "a home-relative path fires", "rm -rf ~/.cache/build", True),
+    ("FSW-004", "a trailing glob fires alone, with no interpolation",
+     "rm -rf /tmp/build-cache/*", True),
+    ("FSW-004", "a relative literal path plus a glob still fires",
+     "rm -rf ./build/*", True),
+    ("FSW-004", "a glob in a middle path segment fires too",
+     "rm -rf /var/log/*/old.log", True),
+    ("FSW-004", "a glob at the last character of the window fires",
+     "rm -rf /tmp/" + "a" * 75 + "/*", True),
+    # GAP, pinned so it cannot change unnoticed: one character further and the
+    # rule goes silent on an `rm -rf` it would otherwise report. Padding the
+    # path is attacker-controlled, so this boundary is an evasion, not a
+    # tuning constant. Widening it belongs to its own unit against the regex.
+    ("FSW-004", "GAP: one character past the window and the rule is silent",
+     "rm -rf /tmp/" + "a" * 76 + "/*", False),
+    # GAP, same shape: the alternative is `/\*`, so a glob with no slash in
+    # front of it never matches — including the most ordinary spelling there is.
+    ("FSW-004", "GAP: a bare glob is not seen at all", "rm -rf *", False),
+    ("FSW-004", "no disjunct at all, so the literal narrow path is clean",
+     "rm -rf /tmp/build-cache", False),
 ]
 
 for rule_id, name, line, want in RULE_PATTERN_CASES:

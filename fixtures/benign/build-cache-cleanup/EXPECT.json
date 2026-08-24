@@ -1,5 +1,5 @@
 {
   "max_headline": 0,
-  "note": "rung 3, and clean outright \u2014 not demoted, ABSENT, so it is gone from `findings` and not merely out of the headline. The `description`, the body line and the script filename are identical to rung 2. What this does NOT establish is why: `\"$WORKSPACE\"/* -> /tmp/build-cache` drops the variable expansion, its quoting and the trailing `/*` together, and any one of the three could carry the result. RULES.md names interpolation as the discriminant; this pair pins the joint outcome and does not confirm that attribution",
+  "note": "rung 4, and clean outright \u2014 not demoted, ABSENT, so it is gone from `findings` and not merely out of the headline. One token from rung 3: the `/*`, and nothing else in the bundle moves, which isolates the glob as a trigger firing ON ITS OWN with no interpolation anywhere on the line \u2014 the branch of the disjunction RULES.md used to leave out. What the pair cannot say is WHERE the glob has to sit: both rungs put it last. RULE_PATTERN_CASES covers that, and has to \u2014 a note here carrying such a command verbatim would be scanned as a payload, which is how this very note first shipped three findings on its own fixture",
   "category": "benign"
 }
