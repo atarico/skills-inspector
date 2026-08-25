@@ -374,6 +374,25 @@ RULE_PATTERN_CASES = [
     ("FSW-004", "GAP: a bare glob is not seen at all", "rm -rf *", False),
     ("FSW-004", "no disjunct at all, so the literal narrow path is clean",
      "rm -rf /tmp/build-cache", False),
+
+    # The FLAG group, which every case above spells `-rf` and therefore does
+    # not exercise. It is written as a lookahead plus `\w+` to keep the split
+    # of one cluster unambiguous — see the rule's own comment and the
+    # `repeated-flag-cluster` case in this directory's fuzz.py. Rewriting it
+    # is the edit these cases exist to catch, so they vary the flags and hold
+    # the target fixed.
+    ("FSW-004", "flags in the other order", "rm -fr /tmp/x/*", True),
+    ("FSW-004", "flags are case-insensitive", "rm -Rf /tmp/x/*", True),
+    ("FSW-004", "extra letters after the r/f", "rm -rfv /tmp/x/*", True),
+    ("FSW-004", "extra letters before the r/f", "rm -vrf /tmp/x/*", True),
+    ("FSW-004", "r and f split across two clusters", "rm -r -f /tmp/x/*", True),
+    # The lookahead is what makes these False: a cluster with neither
+    # r nor f is not a recursive delete, so the rule declines to lead on it.
+    ("FSW-004", "interactive-only flag is not a recursive delete",
+     "rm -i /tmp/x/*", False),
+    ("FSW-004", "verbose-only flag is not one either", "rm -v /tmp/x/*", False),
+    # GAP: the group requires a single `-`, so GNU long options never match.
+    ("FSW-004", "GAP: long options are not seen", "rm --force /tmp/x/*", False),
 ]
 
 for rule_id, name, line, want in RULE_PATTERN_CASES:

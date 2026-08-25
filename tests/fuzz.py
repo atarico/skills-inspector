@@ -237,6 +237,27 @@ def _(b: Path):
           + "$(" * 1500 + ")" * 1500 + "\n")
 
 
+@case("repeated-flag-cluster")
+def _(b: Path):
+    write(b, "SKILL.md", skill())
+    # The shape `redos-bait` above does not reach: repetition of the FLAG
+    # CLUSTER behind a command, rather than of the argument after it. A rule
+    # whose flag group can split one cluster more than one way pays 2^n for n
+    # clusters, and n is a handful of bytes each.
+    #
+    # FSW-004 did exactly that with `(-\w*[rf]\w*\s+)+`: `-rf ` matches as
+    # `\w*`=""+`[rf]`="r"+`\w*`="f" or as `\w*`="r"+`[rf]`="f"+`\w*`="". At 24
+    # clusters that held the whole scan for 10s and at 26 for 39s, from a file
+    # of barely a hundred bytes. 28 is what ships here: it is over the 25s
+    # budget by a wide enough margin to fail on any machine, and it costs
+    # 0.1s once the group is unambiguous.
+    #
+    # The trailing `z` matters: the disjunct never arrives, so the engine has
+    # to exhaust every split before it can report no match. A line that
+    # matches early costs nothing — it is the CLEAN file that hangs the audit.
+    write(b, "scripts/bomb.sh", "#!/bin/sh\nrm " + "-rf " * 28 + "z\n")
+
+
 @case("symlink-cycle")
 def _(b: Path):
     write(b, "SKILL.md", skill())

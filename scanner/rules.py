@@ -574,7 +574,15 @@ RULES: list[Rule] = [
          "Irreversible data loss.",
          "Literal narrow path under a temp dir.",
          "Is the path interpolated? An unset variable makes this catastrophic.",
-         _r(r"\brm\s+(-\w*[rf]\w*\s+)+[^\n]{0,80}(\$\{?\w|\$\(|`|~|/\*)"
+         # The flag group is a lookahead plus a plain `\w+`, and it has to
+         # stay that way. Written the obvious way — `-\w*[rf]\w*\s+` — the
+         # body splits `-rf ` two ways, and the outer `+` pays 2^n for n
+         # clusters: 24 of them held one scan for 10s and 26 for 39s, from a
+         # file of barely a hundred bytes. `repeated-flag-cluster` in
+         # tests/fuzz.py ships 28 and fails the 25s budget on a regression;
+         # the flag spellings this group must still match are pinned in
+         # RULE_PATTERN_CASES in tests/unit_test.py.
+         _r(r"\brm\s+(-(?=\w*[rf])\w+\s+)+[^\n]{0,80}(\$\{?\w|\$\(|`|~|/\*)"
             r"|\bshred\b|\bdd\s+[^\n]{0,60}of=|\bmkfs\b"
             r"|git\s+(reset\s+--hard|clean\s+-\w*f)"),
          specificity=80),
