@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "PRV-003"
+  ],
+  "note": "the redirect target is the whole discriminant \u2014 see buildlog-truncate, which truncates just as hard",
+  "category": "malicious"
+}

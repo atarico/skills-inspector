@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same fetch, verification left on. NET-001 and NET-010 survive here exactly as in tls-off, which is the point: they are the constant, `--insecure` is the variable, and neither of them leads the headline either",
+  "category": "benign"
+}

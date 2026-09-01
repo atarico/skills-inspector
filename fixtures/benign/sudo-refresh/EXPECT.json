@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "clean, and it is the rule's own negative lookahead that makes it so: `sudo -v` only refreshes the credential cache and PRV-001 spells `\\bsudo\\s+(?!-v\\b)`. The install still happens, to the bundle's own bin/ rather than /usr/local/bin",
+  "category": "benign"
+}

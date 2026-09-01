@@ -1,0 +1,11 @@
+{
+  "must_detect": [
+    "PRV-004"
+  ],
+  "also_expect": [
+    "NET-001",
+    "NET-010"
+  ],
+  "note": "DETECTED, NEVER HEADLINED: PRV-004 is MEDIUM and the headline takes CRITICAL plus undeclared HIGH, so this fetch reaches the body only. The NET ids come from the URL and are present in the twin too, which is what makes `--insecure` the one moving token",
+  "category": "malicious"
+}

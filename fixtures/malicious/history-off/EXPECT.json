@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "PRV-002"
+  ],
+  "note": "one line, because the first draft shipped `unset HISTFILE` AND `HISTSIZE=0` and produced PRV-002 twice \u2014 two lines, two findings, correct behaviour but two axes in one fixture. The other spellings belong in RULE_PATTERN_CASES",
+  "category": "malicious"
+}

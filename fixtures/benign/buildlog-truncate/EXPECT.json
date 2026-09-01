@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "identical truncation, project-local target. PRV-003 reads WHERE the log lives, not that a log was emptied \u2014 a rotation tool doing its declared job to its own artifacts is clean",
+  "category": "benign"
+}

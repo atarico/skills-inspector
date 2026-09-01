@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "PRV-001"
+  ],
+  "note": "the only fixture in this batch whose disclosure lands EUPHEMISTIC rather than undeclared: \"Installs the helper toolchain\" gestures at the install without naming what runs as root. It leads the headline anyway, because euphemistic is not declared",
+  "category": "malicious"
+}
