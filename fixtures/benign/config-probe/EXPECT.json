@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "identical branch, project-local sensor. A build config is the unit's own file; branching on it is ordinary, and that is what makes the sensor path the whole discriminant",
+  "category": "benign"
+}

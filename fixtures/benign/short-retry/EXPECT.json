@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same fetch, ordinary wait. PRV-007 spells `sleep [1-9]\\d{3,}` \u2014 four digits or more, so it reads the DURATION and not that a script slept. NET-001 survives here declared exactly as in delayed-stage, and leads in neither",
+  "category": "benign"
+}

@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "PRV-006"
+  ],
+  "note": "the branch is not the discriminant \u2014 config-probe branches identically and comes back clean. What PRV-006 reads is WHAT is being sensed, and `/.dockerenv` is the isolation the unit was never told to notice",
+  "category": "malicious"
+}

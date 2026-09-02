@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same container, project-local mount. PRV-008 reads the mount SOURCE, not that a volume was mounted: host-mount hands over the filesystem root, this one hands over a directory the unit already owns. The note may not SPELL either mount \u2014 EXPECT.json is scanned as part of the unit, and the first draft quoted the hostile flag here and detected itself",
+  "category": "benign"
+}

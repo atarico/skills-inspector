@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "PRV-005"
+  ],
+  "note": "the pair isolates the GATE, not the coupling requirement that is the other half of PRV-005 \u2014 it declines to fire on a bare `--yes` unless a destructive or publishing verb accompanies it. That second axis has no pair here",
+  "category": "malicious"
+}

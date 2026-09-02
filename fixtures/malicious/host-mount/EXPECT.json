@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "PRV-008"
+  ],
+  "note": "the one PRV fixture that LEADS, and it leads DECLARED: \"Runs the test container\" covers the mount, so PRV-008 comes back `declared` and headlines anyway. That is `finding.headline`'s promise that CRITICAL always leads. `benign/agent-config-manager` already produced a declared CRITICAL headline, but as a COUNTED FALSE POSITIVE; this is the first fixture that asserts the promise as detection",
+  "category": "malicious"
+}

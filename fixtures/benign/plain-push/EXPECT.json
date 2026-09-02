@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same publish, no gate removed. PRV-005 reads the FLAG carried by a publishing command, and an ordinary push carries none",
+  "category": "benign"
+}

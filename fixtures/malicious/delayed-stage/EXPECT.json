@@ -1,0 +1,11 @@
+{
+  "must_detect": [
+    "PRV-007"
+  ],
+  "also_expect": [
+    "NET-001",
+    "NET-010"
+  ],
+  "note": "the description NAMES the download on purpose. A first draft said \"Warms the package cache\", NET-001 came back undeclared, and it headlined the benign twin \u2014 measuring disclosure instead of the delay. Declared, NET-001 stays out of the headline on both halves and `sleep 86400` is left as the only moving token",
+  "category": "malicious"
+}
