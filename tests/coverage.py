@@ -142,6 +142,32 @@ def implemented_ids() -> set[str]:
     return ids
 
 
+def unexercised_ids(live: set[str], fixture_ids: set[str]) -> list[str]:
+    """Implemented rules that no fixture exercises AND no test module names.
+
+    The table above counts fixtures, and for HOK and SEM that reads far lower
+    than the truth: structural and semantic rules are pinned by case tables in
+    tests/unit_test.py and tests/semantic_test.py, which a fixture count cannot
+    see. Reading `cover` as a testing total is a live mistake — it has already
+    produced one wrong claim in a published release and one wrong plan.
+
+    So this reports the strictly worse thing the table could never say: a rule
+    that NOTHING names. That is the dead-code risk `_EXEC_SINK` was — a pattern
+    that could not match at all, found only when something finally ran it.
+
+    Naming is the honest bound, not proof of a test: an id inside a comment
+    counts as named here. The set is therefore a floor on what is untested,
+    never a ceiling, and it is deliberately the cheap half of the question.
+    """
+    named: set[str] = set()
+    for module in ("unit_test", "semantic_test", "truepos", "fuzz"):
+        path = PROJECT / "tests" / f"{module}.py"
+        if path.exists():
+            named |= set(re.findall(r"\b([A-Z]{3}-\d{3})\b",
+                                    path.read_text(encoding="utf-8")))
+    return sorted(live - fixture_ids - named)
+
+
 # ----------------------------------------------------------------- scanning
 
 def observe(base: Path) -> dict:
@@ -263,7 +289,8 @@ def print_table(rows: list[tuple[str, dict, dict]]) -> int:
     print("\nper-family coverage, recall and precision")
     print(f"{DIM}  impl   implemented rules in the family (RULES.md minus rules.DEFERRED)")
     print("  exer   implemented rules at least one fixture declares it exercises")
-    print("  cover  exer/impl — a family at 0% is measured by nothing at all")
+    print("  cover  exer/impl — FIXTURES ONLY. A structural family reads low here")
+    print("         while its rules are covered by case tables in tests/; see below")
     print("  recall (fixture, id) pairs declared must-detect that actually fired")
     print("  blind  pairs declared known_miss: documented, counted, never a pass")
     print(f"  prec   headline ids on malicious units / (that + headline ids on benign){RESET}\n")
@@ -389,6 +416,20 @@ def main(argv: list[str]) -> int:
         print(f"\n{YELLOW}{uncovered} implemented rule famil"
               f"{'y is' if uncovered == 1 else 'ies are'} exercised by no fixture{RESET}"
               " — reported, not failed: the corpus is the thing to grow, not this check")
+
+    fixture_ids: set[str] = set()
+    for cell in measure(rows).values():
+        fixture_ids |= cell["exercised"]
+    nowhere = unexercised_ids(implemented_ids(), fixture_ids)
+    if nowhere:
+        print(f"\n{YELLOW}{len(nowhere)} implemented rule"
+              f"{'' if len(nowhere) == 1 else 's'} named by no fixture and by no "
+              f"test module{RESET} — the dead-code risk, and the one number above "
+              f"that a fixture count cannot show:")
+        print(f"  {' '.join(nowhere)}")
+    else:
+        print(f"\n{DIM}every implemented rule is named by a fixture or a test "
+              f"module{RESET}")
 
     return 1 if failed else 0
 
