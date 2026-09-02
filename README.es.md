@@ -9,8 +9,8 @@
 [![Licencia](https://img.shields.io/badge/licencia-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Dependencias](https://img.shields.io/badge/dependencias-ninguna-brightgreen.svg)](#inicio-rápido)
-[![Detección](https://img.shields.io/badge/detecci%C3%B3n-38%2F38-brightgreen.svg)](#medido-no-afirmado)
-[![Fuzz](https://img.shields.io/badge/entrada%20malformada-26%2F26-brightgreen.svg)](#medido-no-afirmado)
+[![Detección](https://img.shields.io/badge/detecci%C3%B3n-75%2F75-brightgreen.svg)](#medido-no-afirmado)
+[![Fuzz](https://img.shields.io/badge/entrada%20malformada-28%2F28-brightgreen.svg)](#medido-no-afirmado)
 
 </div>
 
@@ -353,10 +353,11 @@ corrió — en vez de reportar un pass que no midió.
 
 | Benchmark | Resultado |
 |---|---|
-| Tests unitarios de invariantes | **461/461** — cada caso fija una promesa que hace un docstring |
-| Detección, contra `fixtures/` | **38/38**, más **5/5** contrastes semánticos |
+| Tests unitarios de invariantes | **596/596** — cada caso fija una promesa que hace un docstring |
+| Detección, contra `fixtures/` | **75/75**, más **5/5** contrastes semánticos |
+| Ruleset ejercitado por el corpus | **41%** — 46 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
 | Puntos ciegos documentados, confirmados aún abiertos | **1** (exfiltración por prosa) |
-| Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **26/26** sobrevividos, sin crash ni cuelgue |
+| Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **28/28** sobrevividos, sin crash ni cuelgue |
 | Hallazgos de titular sobre 76 extensiones reales instaladas | **76% completamente silenciosas** (58/76), mediana **0**, p90 **3** |
 
 ### Ese 76% no es una tasa de falsos positivos, y no debería llegar a 100%
