@@ -4,6 +4,7 @@
     python -m scanner diff <old-path> <new-path> [--json]
     python -m scanner baseline <path> [--json]      record the approved state
     python -m scanner check <path> [--json]         compare against it
+    python -m scanner --version
 
 `diff` needs both trees; `check` needs only the one on disk, because an update
 overwrites the old copy in place and you rarely still have it.
@@ -20,6 +21,7 @@ import json
 import sys
 from pathlib import Path
 
+from . import __version__
 from . import baseline
 from . import diff as diffmod
 from . import semantic
@@ -40,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="inspector-skills",
         description="Static audit of an agent extension before installation. "
                     "Reports; never blocks.")
+    parser.add_argument("--version", action="version", version=f"inspector-skills {__version__}")
     parser.add_argument("path", type=Path, help="file or directory to audit")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--verbose", action="store_true", help="do not truncate lists")

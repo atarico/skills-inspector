@@ -5,7 +5,7 @@ license: Apache-2.0
 allowed-tools: "Bash(python3:*)"
 metadata:
   author: atarico
-  version: "0.2"
+  version: "0.2.0"
 ---
 
 # Inspect Skill — audit an agent extension before installing
