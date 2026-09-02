@@ -1,5 +1,5 @@
 .PHONY: help check unit detect coverage semantic fuzz falsepos drift-freeze \
-	drift anomalies selftest fixtures expected sync
+	drift anomalies selftest version fixtures expected sync
 
 help:
 	@echo "make check      run everything (detection + self-scan + sync check)"
@@ -23,17 +23,12 @@ check: unit detect coverage semantic fuzz selftest version
 		&& echo "bundle in sync" \
 		|| (echo "BUNDLE OUT OF SYNC — run: make sync"; exit 1)
 
-# Two hand-written strings that have to agree: the version the code carries and
-# the version the installable bundle advertises. They disagreed silently for the
-# whole life of the repo — 0.1.0 against 0.2 — because nothing ever compared
-# them and neither one was printed anywhere a reader could see it.
+# The version the CLI prints must be the version the bundle advertises. The
+# reasoning, and why a broken CLI is reported as a broken CLI rather than as a
+# mismatch, is in the module docstring — it does not fit on a `-c` line, which
+# is what the first draft tried and what made it report the wrong failure.
 version:
-	@python3 -c "\
-import re,sys; sys.path.insert(0,'.');\
-from scanner import __version__ as v;\
-m=re.search(r'^  version: \"([^\"]+)\"', open('skills/inspect-skill/SKILL.md').read(), re.M);\
-s=m.group(1) if m else 'MISSING';\
-print(f'version {v}') if s==v else sys.exit(f'VERSION MISMATCH: scanner {v}, SKILL.md {s}')"
+	@python3 -m tests.version_test
 
 # Runs first, and deliberately so. Every case here pins an invariant a docstring
 # already promised; when a demotion heuristic changes, this is what tells you
