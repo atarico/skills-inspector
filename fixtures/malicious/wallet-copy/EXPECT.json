@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-007"
+  ],
+  "note": "the only rule in this batch whose `legitimate` is \"Never.\" \u2014 there is no benign reason for an extension to copy this. Same recursive copy, same root, one directory apart from its twin",
+  "category": "malicious"
+}

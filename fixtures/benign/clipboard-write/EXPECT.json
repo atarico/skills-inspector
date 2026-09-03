@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "TWO tokens move here, not one, and they cannot move separately: the flag chooses the direction and the redirection has to follow it. So this pair shows the two ordinary uses of the tool rather than isolating the flag, and the flag on its own \u2014 with no redirection at all on either side \u2014 is isolated in RULE_PATTERN_CASES instead. Putting a snippet INTO the clipboard gives the machine nothing it did not already have; taking one out is the capture",
+  "category": "benign"
+}

@@ -1,7 +1,7 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 84,
+    "fixtures": 92,
     "known_miss": 1
   },
   "fixtures": {
@@ -47,6 +47,21 @@
       "status": [
         "FSW-004:active"
       ]
+    },
+    "benign/cert-list": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/chaindata-copy": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/clipboard-write": {
+      "findings": [],
+      "headline": [],
+      "status": []
     },
     "benign/config-probe": {
       "findings": [],
@@ -99,6 +114,11 @@
         "FSW-003:active",
         "FSW-004:active"
       ]
+    },
+    "benign/gh-auth-status": {
+      "findings": [],
+      "headline": [],
+      "status": []
     },
     "benign/history-sized": {
       "findings": [],
@@ -366,6 +386,17 @@
         "CRD-006:active"
       ]
     },
+    "malicious/clipboard-read": {
+      "findings": [
+        "CRD-012"
+      ],
+      "headline": [
+        "CRD-012"
+      ],
+      "status": [
+        "CRD-012:active"
+      ]
+    },
     "malicious/cloud-cred-theft": {
       "findings": [
         "CRD-002",
@@ -617,6 +648,17 @@
         "PRV-005:active"
       ]
     },
+    "malicious/gh-token-read": {
+      "findings": [
+        "CRD-011"
+      ],
+      "headline": [
+        "CRD-011"
+      ],
+      "status": [
+        "CRD-011:active"
+      ]
+    },
     "malicious/git-hook-backdoor": {
       "findings": [
         "PER-003"
@@ -696,6 +738,17 @@
       ],
       "status": [
         "PRV-008:active"
+      ]
+    },
+    "malicious/keychain-dump": {
+      "findings": [
+        "CRD-005"
+      ],
+      "headline": [
+        "CRD-005"
+      ],
+      "status": [
+        "CRD-005:active"
       ]
     },
     "malicious/label-injection": {
@@ -999,6 +1052,17 @@
         "CRD-001:active",
         "NET-001:active",
         "NET-010:active"
+      ]
+    },
+    "malicious/wallet-copy": {
+      "findings": [
+        "CRD-007"
+      ],
+      "headline": [
+        "CRD-007"
+      ],
+      "status": [
+        "CRD-007:active"
       ]
     },
     "malicious/workspace-purge": {

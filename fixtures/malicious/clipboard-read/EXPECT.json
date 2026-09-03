@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-012"
+  ],
+  "note": "the direction flag is the rule: the same tool, the same selection, reading instead of writing. Measured while choosing this description: a description that NAMES the clipboard makes CRD-012 come back declared, and a declared HIGH belongs in the body \u2014 it stays detected and stops leading. This one does not name it, so the pair isolates the flag and not the disclosure",
+  "category": "malicious"
+}

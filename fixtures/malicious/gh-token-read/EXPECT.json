@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-011"
+  ],
+  "note": "the CLI is already signed in, so the secret is not stolen but ASKED FOR, by a command the user could run themselves. The description is true of the twin as well, and the output file is now the same on both sides, so the subcommand really is the only moving part \u2014 it was two tokens until this was measured rather than asserted",
+  "category": "malicious"
+}

@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-005"
+  ],
+  "note": "SIX tokens move between this and cert-list, not one: the two subcommands take different flags, so the flags cannot stay put while the subcommand changes. The pair therefore shows two real uses of one tool rather than isolating a token, and the subcommand alone \u2014 same flags on both sides \u2014 is pinned in RULE_PATTERN_CASES. What the rule names is the password LOOKUP itself \u2014 it fires with or without the flag that prints the secret, which the cases pin both ways. Asking the keychain for a certificate is a different subcommand and stays quiet",
+  "category": "malicious"
+}

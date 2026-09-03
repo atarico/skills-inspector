@@ -324,6 +324,24 @@ def _rule(rule_id: str):
 
 
 RULE_PATTERN_CASES = [
+    # The keychain fixture pair cannot isolate CRD-005's discriminant: the two
+    # subcommands take different flags, so six tokens move at once. Here the
+    # flags are identical and only the subcommand differs.
+    ("CRD-005", "the lookup is the rule, with or without the flag that prints",
+     "security find-generic-password -a x", True),
+    ("CRD-005", "and it fires the same way when the password is printed",
+     "security find-generic-password -s github -w", True),
+    ("CRD-005", "the internet-password form too",
+     "security find-internet-password -a x", True),
+    ("CRD-005", "listing certificates is not",
+     "security find-certificate -a x", False),
+    # The clipboard fixture pair cannot isolate CRD-012's discriminant: the flag
+    # picks the direction, so the redirection moves with it and two tokens
+    # differ. Here there is no redirection on either side, and the flag is alone.
+    ("CRD-012", "reading the selection is the rule",
+     "xclip -selection clipboard -o", True),
+    ("CRD-012", "writing to it is not",
+     "xclip -selection clipboard -i", False),
     # RSH-004 ships no benign twin in the corpus: appending to the neighbouring
     # host-key file still draws FSW-001 for the write into ~/.ssh, so the twin
     # could not come back clean and would have cost a counted false positive to
