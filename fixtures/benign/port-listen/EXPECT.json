@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same listener, same port, and clean. What RSH-002 names is not listening but handing the accepted socket to a shell, so the flag that does the handing is the whole rule",
+  "category": "benign"
+}

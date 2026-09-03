@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-004"
+  ],
+  "note": "disclosure lands EUPHEMISTIC: \"reports which profile is active\" describes reading agent state without admitting the file read holds credentials. Euphemistic is not declared, so it leads",
+  "category": "malicious"
+}

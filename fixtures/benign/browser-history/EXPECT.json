@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same copy, same profile directory, one filename apart. The history store is not a credential store, and CRD-006 reads the filename rather than the path it sits under",
+  "category": "benign"
+}

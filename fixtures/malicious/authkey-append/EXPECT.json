@@ -1,0 +1,10 @@
+{
+  "must_detect": [
+    "RSH-004"
+  ],
+  "also_expect": [
+    "FSW-001"
+  ],
+  "note": "the only fixture in this batch with NO twin in the corpus, and the twin was measured before being dropped. Appending to the neighbouring host-key file instead still produces FSW-001 for the write into ~/.ssh, undeclared and leading, whatever the description says \u2014 measured against three of them. So the twin could not come back clean, and the discriminant is only WHICH file is appended to, which RULE_PATTERN_CASES isolates exactly without spending a counted false positive on it",
+  "category": "malicious"
+}

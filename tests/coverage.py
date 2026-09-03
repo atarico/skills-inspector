@@ -159,12 +159,24 @@ def unexercised_ids(live: set[str], fixture_ids: set[str]) -> list[str]:
     counts as named here. The set is therefore a floor on what is untested,
     never a ceiling, and it is deliberately the cheap half of the question.
     """
+    # Found rather than listed: a hardcoded list skips a renamed or newly added
+    # module in silence, and the count then calls a rule unnamed that a test
+    # names. Two files are excluded, and each exclusion is the measurement
+    # refusing to count itself as evidence:
+    #
+    #   this module      — its prose cites rule ids as examples. A first draft
+    #                      globbed the directory flat and EXE-001 left the list
+    #                      on the strength of a comment written right here.
+    #   make_fixtures.py — the generator. Its `must_detect` entries are already
+    #                      counted, as fixture_ids; everything else it says
+    #                      about a rule is a note, and a note is not a test.
+    excluded = {Path(__file__).name, "make_fixtures.py"}
     named: set[str] = set()
-    for module in ("unit_test", "semantic_test", "truepos", "fuzz"):
-        path = PROJECT / "tests" / f"{module}.py"
-        if path.exists():
-            named |= set(re.findall(r"\b([A-Z]{3}-\d{3})\b",
-                                    path.read_text(encoding="utf-8")))
+    for path in sorted((PROJECT / "tests").glob("*.py")):
+        if path.name in excluded:
+            continue
+        named |= set(re.findall(r"\b([A-Z]{3}-\d{3})\b",
+                                path.read_text(encoding="utf-8")))
     return sorted(live - fixture_ids - named)
 
 

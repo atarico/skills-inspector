@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "RSH-002"
+  ],
+  "note": "NEVER REPORTED UNDER ITS OWN ID: dedup folds this into RSH-001 and RSH-002 survives only in `related_rules`. The harness counts it because `detected_ids` folds those back in, and the headline does the same \u2014 so this passes OK rather than WEAK while no reader ever sees the id. That is the measured behaviour, pinned here so a change to the dedup relation shows up",
+  "category": "malicious"
+}

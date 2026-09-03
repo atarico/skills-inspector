@@ -324,6 +324,21 @@ def _rule(rule_id: str):
 
 
 RULE_PATTERN_CASES = [
+    # RSH-004 ships no benign twin in the corpus: appending to the neighbouring
+    # host-key file still draws FSW-001 for the write into ~/.ssh, so the twin
+    # could not come back clean and would have cost a counted false positive to
+    # isolate one filename. It is isolated here instead, in both directions.
+    ("RSH-004", "the key file is the whole rule",
+     "cat deploy.pub >> ~/.ssh/authorized_keys", True),
+    ("RSH-004", "the host-key file next to it is not",
+     "cat deploy.pub >> ~/.ssh/known_hosts", False),
+    ("RSH-004", "client config in the same directory is not",
+     "printf 'Host x\\n' >> ~/.ssh/config", False),
+    # The pattern is the bare filename with no path or verb around it, so it
+    # reads a mention as an act. Pinned as behaviour, not endorsed: narrowing it
+    # moves precision and belongs with a measurement against the corpus.
+    ("RSH-004", "prose that only NAMES the file fires too",
+     "This skill never writes to your authorized_keys file.", True),
     # FSW-002 is "modifies agent instructions or config". It used to match any
     # path at all under `.claude/`, which made a plugin-development toolkit's
     # own documentation the noisiest unit in the corpus.

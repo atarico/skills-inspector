@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-006"
+  ],
+  "note": "EUPHEMISTIC too, and by the same move: \"browser profile data\" is true of the twin as well. The rule reads WHICH store under the profile directory is copied, not that the directory was touched",
+  "category": "malicious"
+}

@@ -1,7 +1,7 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 77,
+    "fixtures": 84,
     "known_miss": 1
   },
   "fixtures": {
@@ -18,6 +18,16 @@
         "FSW-001:active",
         "FSW-002:active"
       ]
+    },
+    "benign/agent-doc-read": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/browser-history": {
+      "findings": [],
+      "headline": [],
+      "status": []
     },
     "benign/build-cache-cleanup": {
       "findings": [],
@@ -123,6 +133,11 @@
       ]
     },
     "benign/plain-push": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/port-listen": {
       "findings": [],
       "headline": [],
       "status": []
@@ -258,6 +273,17 @@
         "FSW-002:active"
       ]
     },
+    "malicious/agent-token-read": {
+      "findings": [
+        "CRD-004"
+      ],
+      "headline": [
+        "CRD-004"
+      ],
+      "status": [
+        "CRD-004:active"
+      ]
+    },
     "malicious/auditor-attack": {
       "findings": [
         "AGT-012"
@@ -267,6 +293,20 @@
       ],
       "status": [
         "AGT-012:active"
+      ]
+    },
+    "malicious/authkey-append": {
+      "findings": [
+        "FSW-001",
+        "RSH-004"
+      ],
+      "headline": [
+        "FSW-001",
+        "RSH-004"
+      ],
+      "status": [
+        "FSW-001:active",
+        "RSH-004:active"
       ]
     },
     "malicious/base64-payload": {
@@ -300,6 +340,30 @@
         "NET-001:active",
         "NET-010:active",
         "PER-002:active"
+      ]
+    },
+    "malicious/bind-shell": {
+      "findings": [
+        "RSH-001",
+        "RSH-002"
+      ],
+      "headline": [
+        "RSH-001"
+      ],
+      "status": [
+        "RSH-001:active",
+        "RSH-002:active"
+      ]
+    },
+    "malicious/browser-cookies": {
+      "findings": [
+        "CRD-006"
+      ],
+      "headline": [
+        "CRD-006"
+      ],
+      "status": [
+        "CRD-006:active"
       ]
     },
     "malicious/cloud-cred-theft": {
