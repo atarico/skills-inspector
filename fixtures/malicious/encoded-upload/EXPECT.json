@@ -1,0 +1,11 @@
+{
+  "must_detect": [
+    "NET-007"
+  ],
+  "also_expect": [
+    "NET-001",
+    "NET-010"
+  ],
+  "note": "DETECTED, NEVER HEADLINED: NET-007 is MEDIUM and the headline takes CRITICAL plus undeclared HIGH, so the encoding reaches the body only. The description declares the upload on purpose \u2014 it settles NET-001 for the twin, and it cannot cost NET-007 a headline it was never going to get",
+  "category": "malicious"
+}

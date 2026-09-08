@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "NET-006"
+  ],
+  "note": "the channel that reads as ordinary tooling, which is the whole of the rule's impact line. No twin, on purpose: every neighbour one token away still delivers the mail, so the honest control is the GAP pinned in RULE_PATTERN_CASES rather than a benign fixture claiming a send is fine",
+  "category": "malicious"
+}

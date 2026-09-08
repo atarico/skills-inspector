@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "the same sink, the same destination, one token earlier in the pipe. A digest is not an encoding of the content \u2014 it is a fingerprint of it, and what leaves is something a reader can check rather than something they have to decode first",
+  "category": "benign"
+}

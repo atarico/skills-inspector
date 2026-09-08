@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "NET-008"
+  ],
+  "note": "DETECTED, NEVER HEADLINED: MEDIUM again. No HTTP client is involved and no NET-001 comes with it, so this bundle opens a channel to a host and the headline stays empty \u2014 the clearest case in the corpus for reading the body and not the first line",
+  "category": "malicious"
+}
