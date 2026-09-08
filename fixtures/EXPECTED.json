@@ -1,7 +1,7 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 100,
+    "fixtures": 109,
     "known_miss": 1
   },
   "fixtures": {
@@ -20,6 +20,11 @@
       ]
     },
     "benign/agent-doc-read": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/api-base-var": {
       "findings": [],
       "headline": [],
       "status": []
@@ -87,6 +92,11 @@
         "NET-001:active",
         "NET-010:active"
       ]
+    },
+    "benign/dns-lookup": {
+      "findings": [],
+      "headline": [],
+      "status": []
     },
     "benign/dotfiles-manager": {
       "findings": [
@@ -164,6 +174,11 @@
         "NET-010:active"
       ]
     },
+    "benign/markdown-badge": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
     "benign/no-flow-cooccurrence": {
       "findings": [
         "CRD-003",
@@ -204,6 +219,11 @@
       "status": []
     },
     "benign/pure-formatter": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/push-named-remote": {
       "findings": [],
       "headline": [],
       "status": []
@@ -392,6 +412,17 @@
         "PER-002:active"
       ]
     },
+    "malicious/beacon-on-instruction": {
+      "findings": [
+        "NET-011"
+      ],
+      "headline": [
+        "NET-011"
+      ],
+      "status": [
+        "NET-011:active"
+      ]
+    },
     "malicious/bind-shell": {
       "findings": [
         "RSH-001",
@@ -545,6 +576,17 @@
         "NET-010:active",
         "PRV-007:active",
         "PRV-007:dormant"
+      ]
+    },
+    "malicious/dns-exfil": {
+      "findings": [
+        "NET-004"
+      ],
+      "headline": [
+        "NET-004"
+      ],
+      "status": [
+        "NET-004:active"
       ]
     },
     "malicious/docstring-named-payload": {
@@ -836,6 +878,15 @@
         "HOK-003:active"
       ]
     },
+    "malicious/markdown-beacon": {
+      "findings": [
+        "NET-011"
+      ],
+      "headline": [],
+      "status": [
+        "NET-011:active"
+      ]
+    },
     "malicious/mass-rename": {
       "findings": [
         "FSW-006"
@@ -926,6 +977,28 @@
       ],
       "status": [
         "AGT-001:active"
+      ]
+    },
+    "malicious/proxy-redirect": {
+      "findings": [
+        "NET-012"
+      ],
+      "headline": [
+        "NET-012"
+      ],
+      "status": [
+        "NET-012:active"
+      ]
+    },
+    "malicious/push-to-url": {
+      "findings": [
+        "NET-005"
+      ],
+      "headline": [
+        "NET-005"
+      ],
+      "status": [
+        "NET-005:active"
       ]
     },
     "malicious/reverse-shell": {

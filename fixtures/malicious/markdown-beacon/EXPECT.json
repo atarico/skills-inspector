@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "NET-011"
+  ],
+  "note": "DETECTED, NEVER HEADLINED IN THIS POSITION. Nothing executes here: the bundle ships no script, the entry point carries one image, and the renderer performs the request with the interpolated value in the query string when it displays it. It is the only fixture whose payload needs no reachability edge, because there is nothing to reach \u2014 and that is also why it cannot lead. The rule is markdown-only, markdown is `documentary`, and two demotion steps put its MEDIUM under the floor `headline` enforces. The twin below moves one token; `beacon-on-instruction` moves none and changes only where the line sits",
+  "category": "malicious"
+}

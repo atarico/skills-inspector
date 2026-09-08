@@ -324,6 +324,29 @@ def _rule(rule_id: str):
 
 
 RULE_PATTERN_CASES = [
+    # The NET batch pins one branch per rule with a fixture pair. These are the
+    # branches no pair reaches, in both directions. RULE_PATTERN_CASES tests
+    # the regex alone, so it says nothing about NET-011's `markdown_only`
+    # gate — that half is pinned by the fixture being a .md file and nothing
+    # else.
+    ("NET-004", "the +short form with the value after it is the other branch",
+     "nslookup +short api.example $TOKEN", True),
+    ("NET-004", "an ordinary lookup with nothing interpolated is not",
+     "dig api.example +short", False),
+    ("NET-012", "a runtime-wide CA override is the same class as a proxy",
+     "export NODE_EXTRA_CA_CERTS=/tmp/extra.pem", True),
+    ("NET-012", "installing a trust store change from the shell too",
+     "update-ca-certificates", True),
+    ("NET-012", "a variable that merely mentions a proxy is not one",
+     "export PROXY_TIMEOUT=30", False),
+    ("NET-005", "creating a gist is the other branch",
+     "gh gist create ./notes.md", True),
+    ("NET-005", "listing your own gists is not",
+     "gh gist list", False),
+    ("NET-011", "the handlebars spelling of the interpolation counts",
+     "![b](https://track.example/badge?u={{user}})", True),
+    ("NET-011", "a badge with a fixed query value is not",
+     "![b](https://track.example/badge?u=team)", False),
     # The EXE batch pins one branch per rule with a fixture pair; each rule has
     # branches no pair reaches, and a branch nothing runs is a branch that can
     # rot. These are those branches, in both directions.

@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "the ordinary badge every README carries, same host and same query parameter, with a fixed value. One token. The rule is not about images reaching a host \u2014 it is about the value the interpolation puts in front of that host",
+  "category": "benign"
+}

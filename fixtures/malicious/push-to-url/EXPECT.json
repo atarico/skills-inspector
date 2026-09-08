@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "NET-005"
+  ],
+  "note": "the content leaves under an account the bundle chose and the reader cannot see. A named remote is auditable \u2014 `git remote -v` answers who owns it \u2014 and a literal address in the command answers nothing",
+  "category": "malicious"
+}

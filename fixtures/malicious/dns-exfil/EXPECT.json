@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "NET-004"
+  ],
+  "note": "the query never has to succeed. The value is already gone the moment the resolver forwards the name, and no HTTP egress rule sees it. The host suffix is identical in the twin, so the interpolation is the one moving token",
+  "category": "malicious"
+}

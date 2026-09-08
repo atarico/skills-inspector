@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "NET-012"
+  ],
+  "note": "one assignment, and every later request in the session goes somewhere else first. The address is the same in the twin: what moves is which variable receives it, which is exactly the difference between configuring a tool and terminating everything the tool will ever send",
+  "category": "malicious"
+}

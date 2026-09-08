@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "the same resolver, the same suffix, a fixed label. One token, and it is the only thing that decides whether a lookup is a lookup or a channel",
+  "category": "benign"
+}
