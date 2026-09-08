@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "EXE-005"
+  ],
+  "note": "a config file is data until the loader is allowed to build objects out of it. This is the one HIGH/medium rule of the batch, so it leads on the medium-confidence path rather than the high one",
+  "category": "malicious"
+}

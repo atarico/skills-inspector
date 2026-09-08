@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "EXE-011"
+  ],
+  "note": "the archive decides where its own members land, which is the whole of zip-slip. This pair pins the shell spelling; the extractor-side spelling of the same defect is pinned in RULE_PATTERN_CASES, because one pair cannot show both",
+  "category": "malicious"
+}

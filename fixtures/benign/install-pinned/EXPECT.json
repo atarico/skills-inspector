@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same source, same tool, pinned to a released version. One token, and it is the ref. The rule ASKS for a commit SHA and settles for anything that is not a moving branch \u2014 that gap is the rule's, and this pair records it rather than hiding it",
+  "category": "benign"
+}

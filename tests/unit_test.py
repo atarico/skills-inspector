@@ -324,6 +324,37 @@ def _rule(rule_id: str):
 
 
 RULE_PATTERN_CASES = [
+    # The EXE batch pins one branch per rule with a fixture pair; each rule has
+    # branches no pair reaches, and a branch nothing runs is a branch that can
+    # rot. These are those branches, in both directions.
+    #
+    # EXE-004 has two: the fixture pins the fetch-and-run clause, this pins the
+    # mark-executable-and-run one.
+    ("EXE-004", "marking it executable and then running it is the other branch",
+     "chmod +x helper && ./helper", True),
+    ("EXE-004", "marking it executable and putting it away is not",
+     "chmod +x helper && mv helper bin/", False),
+    # EXE-005's negative lookahead IS the rule: the documented fix keeps the
+    # same call and passes a safe loader, so a pattern that ignored the argument
+    # would flag every correct use.
+    ("EXE-005", "deserialising a pickle is the same class as evaluating a string",
+     "obj = pickle.loads(blob)", True),
+    ("EXE-005", "the safe-loader argument is the documented fix and must pass",
+     "settings = yaml.load(raw, Loader=yaml.SafeLoader)", False),
+    ("EXE-005", "a method that happens to be named eval is not the builtin",
+     "value = node.eval(scope)", False),
+    # EXE-008: the fixture pins the module-ref branch, this pins the package
+    # manager one. The registry form is the near miss that must stay quiet.
+    ("EXE-008", "installing from a git ref is the other branch",
+     "pip3 install git+https://tools.example/pkg", True),
+    ("EXE-008", "installing the same package from the registry is not",
+     "pip3 install pkg", False),
+    # EXE-011: the fixture pins the shell flag, this pins the extractor call.
+    # The member-at-a-time form is what a validated extraction looks like.
+    ("EXE-011", "extracting a whole archive without checking members is the rule",
+     "archive.extractall(dest)", True),
+    ("EXE-011", "extracting one member the caller already checked is not",
+     "archive.extract(member, dest)", False),
     # The keychain fixture pair cannot isolate CRD-005's discriminant: the two
     # subcommands take different flags, so six tokens move at once. Here the
     # flags are identical and only the subcommand differs.

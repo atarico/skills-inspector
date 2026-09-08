@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same fetch, same file, and the next clause digests it instead of running it. One token \u2014 and it opens with the same two characters as the one it replaces, which is exactly the word boundary the rule has to get right",
+  "category": "benign"
+}

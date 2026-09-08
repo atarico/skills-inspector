@@ -1,0 +1,10 @@
+{
+  "must_detect": [
+    "EXE-008"
+  ],
+  "also_expect": [
+    "EXE-007"
+  ],
+  "note": "a moving branch is not a version: what a human reviewed today and what installs tomorrow are different code. EXE-007 fires on both halves and is MEDIUM, so it never leads and the twin still comes out clean",
+  "category": "malicious"
+}

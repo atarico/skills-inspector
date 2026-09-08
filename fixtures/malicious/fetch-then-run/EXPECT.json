@@ -1,0 +1,11 @@
+{
+  "must_detect": [
+    "EXE-004"
+  ],
+  "also_expect": [
+    "NET-001",
+    "NET-010"
+  ],
+  "note": "the two-step form of pipe-to-shell: fetch to disk on one clause, hand it to an interpreter on the next. The URL is identical in the twin, so the NET ids are the constant and the interpreter is the one moving token",
+  "category": "malicious"
+}
