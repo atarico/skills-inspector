@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "AGT-014"
+  ],
+  "note": "DETECTED, NEVER HEADLINED IN THIS PHRASING: HIGH at medium, floored the same way. A bundle that behaves one way for a named agent and another way otherwise is asking to be read twice, and the reader who stops at the headline reads it zero times",
+  "category": "malicious"
+}

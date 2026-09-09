@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "AGT-005"
+  ],
+  "note": "the SAME sentence as `instruction-fetch` with one word in front of it. That word is on the head-of-line list, the position comes back active, the confidence survives at high, and the finding LEADS. Nothing about the payload changed \u2014 the source is the same, the mutability is the same, the risk is the same. This pair varies position and holds the attack still, which is what turns the note next door into a measurement",
+  "category": "malicious"
+}

@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "the same instruction writing to an ordinary file. One token. What AGT-010 reads is the destination, and the agent layer is the one destination that survives into the next session",
+  "category": "benign"
+}

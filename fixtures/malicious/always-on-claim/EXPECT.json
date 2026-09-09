@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "AGT-008"
+  ],
+  "note": "DETECTED, NEVER HEADLINED: MEDIUM, so the position floor is not even the binding constraint here \u2014 this one could not lead at full confidence either",
+  "category": "malicious"
+}

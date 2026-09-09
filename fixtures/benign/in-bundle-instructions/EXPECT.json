@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "the same sentence pointing at a file inside the bundle. One token, and it is the whole of AGT-005: instructions the auditor can read are not instructions that change after the audit",
+  "category": "benign"
+}

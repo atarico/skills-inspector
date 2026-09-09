@@ -1,7 +1,7 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 114,
+    "fixtures": 125,
     "known_miss": 1
   },
   "fixtures": {
@@ -20,6 +20,11 @@
       ]
     },
     "benign/agent-doc-read": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/always-available": {
       "findings": [],
       "headline": [],
       "status": []
@@ -59,6 +64,11 @@
       "status": []
     },
     "benign/chaindata-copy": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/changelog-write": {
       "findings": [],
       "headline": [],
       "status": []
@@ -105,6 +115,11 @@
       ]
     },
     "benign/dns-lookup": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/domain-scoped": {
       "findings": [],
       "headline": [],
       "status": []
@@ -171,6 +186,11 @@
       "headline": [],
       "status": []
     },
+    "benign/in-bundle-instructions": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
     "benign/in-bundle-symlink": {
       "findings": [],
       "headline": [],
@@ -213,6 +233,11 @@
       ]
     },
     "benign/plain-push": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/platform-conditional": {
       "findings": [],
       "headline": [],
       "status": []
@@ -349,6 +374,15 @@
       "headline": [],
       "status": []
     },
+    "malicious/agent-conditional": {
+      "findings": [
+        "AGT-014"
+      ],
+      "headline": [],
+      "status": [
+        "AGT-014:active"
+      ]
+    },
     "malicious/agent-config-rewrite": {
       "findings": [
         "FSW-001",
@@ -372,6 +406,15 @@
       ],
       "status": [
         "CRD-004:active"
+      ]
+    },
+    "malicious/always-on-claim": {
+      "findings": [
+        "AGT-008"
+      ],
+      "headline": [],
+      "status": [
+        "AGT-008:active"
       ]
     },
     "malicious/auditor-attack": {
@@ -629,6 +672,15 @@
         "NET-010:dormant"
       ]
     },
+    "malicious/domain-capture": {
+      "findings": [
+        "AGT-013"
+      ],
+      "headline": [],
+      "status": [
+        "AGT-013:active"
+      ]
+    },
     "malicious/dormant-payload": {
       "findings": [
         "BND-001",
@@ -753,6 +805,17 @@
       ],
       "status": [
         "EXE-011:active"
+      ]
+    },
+    "malicious/fetch-on-directive-line": {
+      "findings": [
+        "AGT-005"
+      ],
+      "headline": [
+        "AGT-005"
+      ],
+      "status": [
+        "AGT-005:active"
       ]
     },
     "malicious/fetch-then-run": {
@@ -884,6 +947,15 @@
         "EXE-008:active"
       ]
     },
+    "malicious/instruction-fetch": {
+      "findings": [
+        "AGT-005"
+      ],
+      "headline": [],
+      "status": [
+        "AGT-005:active"
+      ]
+    },
     "malicious/keychain-dump": {
       "findings": [
         "CRD-005"
@@ -953,6 +1025,15 @@
       "status": [
         "HOK-003:active",
         "HOK-011:active"
+      ]
+    },
+    "malicious/memory-write": {
+      "findings": [
+        "AGT-010"
+      ],
+      "headline": [],
+      "status": [
+        "AGT-010:active"
       ]
     },
     "malicious/permission-lower": {

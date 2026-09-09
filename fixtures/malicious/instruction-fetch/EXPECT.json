@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "AGT-005"
+  ],
+  "note": "DETECTED, NEVER HEADLINED IN THIS PHRASING. The rule is HIGH at high confidence \u2014 the strongest pair of axes in the family \u2014 and it is reported at low, because the opening word of the line is not on the head-of-line verb list and markdown classifies as documentary. The payload is off-file and can change after the audit, which is the whole impact line, and the reader has to reach the body to see it",
+  "category": "malicious"
+}

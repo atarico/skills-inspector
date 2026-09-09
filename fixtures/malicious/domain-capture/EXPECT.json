@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "AGT-013"
+  ],
+  "note": "DETECTED, NEVER HEADLINED: HIGH at LOW confidence, and `headline` excludes low outright. It is a heuristic about territory, and heuristics never lead \u2014 the same reason PRV-006 and PRV-007 cannot",
+  "category": "malicious"
+}
