@@ -378,7 +378,9 @@
       "findings": [
         "AGT-014"
       ],
-      "headline": [],
+      "headline": [
+        "AGT-014"
+      ],
       "status": [
         "AGT-014:active"
       ]
@@ -951,7 +953,9 @@
       "findings": [
         "AGT-005"
       ],
-      "headline": [],
+      "headline": [
+        "AGT-005"
+      ],
       "status": [
         "AGT-005:active"
       ]

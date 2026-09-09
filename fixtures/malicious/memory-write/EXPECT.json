@@ -2,6 +2,6 @@
   "must_detect": [
     "AGT-010"
   ],
-  "note": "the one fixture in this batch that KEEPS its position: its opening word is on the head-of-line list, so it is reported active at medium. It still cannot lead, and the reason is severity rather than position \u2014 which is the distinction the other four make it possible to see",
+  "note": "the control that separates the two causes. Its opening word was always on the head-of-line list, so its position was never floored and the promotion fix does not touch it \u2014 and it STILL cannot lead. That reason is severity, and without this fixture the other two would have made position look like the only thing that ever kept a finding down",
   "category": "malicious"
 }

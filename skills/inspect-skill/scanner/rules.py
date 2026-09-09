@@ -795,7 +795,7 @@ RULES: list[Rule] = [
             r"other\s+skills?|installed\s+skills?|CLAUDE\.md|AGENTS\.md)"
             r"[^\n]{0,120}(send|post|upload|transmit|share|report|sync|push)\s+"
             r"|(send|post|upload)\s+(\w+\s+){0,4}(the\s+)?(conversation|transcript|history|memory|context)"),
-         specificity=91),
+         specificity=91, instruction_surface=True),
 
     Rule("AGT-005", "HIGH", "high", INSTRUCTION,
          "Runtime instruction fetching",
@@ -806,7 +806,7 @@ RULES: list[Rule] = [
             r"[^\n]{0,80}(and\s+)?(follow|execute|apply|obey|do|run)"
             r"|WebFetch[^\n]{0,80}(follow|instruction|then\s+do)"
             r"|follow\s+the\s+instructions?\s+(at|in|from)\s+https?://"),
-         specificity=88),
+         specificity=88, instruction_surface=True),
 
     Rule("AGT-003", "HIGH", "medium", INSTRUCTION,
          "Confirmation bypass instruction",
@@ -837,7 +837,7 @@ RULES: list[Rule] = [
             r"|when\s+(you\s+are\s+)?running\s+(autonomously|headless|unattended|in\s+ci)"
             r"|in\s+(autonomous|headless|unattended|yolo)\s+mode"
             r"|si\s+sos\s+(claude|codex|un\s+agente)"),
-         specificity=82),
+         specificity=82, instruction_surface=True),
 
     Rule("AGT-008", "MEDIUM", "medium", INSTRUCTION,
          "Overbroad activation",
