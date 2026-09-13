@@ -346,7 +346,7 @@ directory of extensions you already trust, CI does not have one, and it exits
 | Ruleset exercised by the corpus | **67%** — 75 of 111 implemented rules have a fixture; one family (`SEM`) has none |
 | Documented blind spots, confirmed still open | **3** (prose exfiltration; HOK-004's two documented locations, neither implemented) |
 | Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **28/28** survived, no crash or hang |
-| Headline findings across 103 real installed extensions | **73% completely silent** (76/103), median **0**, p90 **1** |
+| Headline findings across 101 distinct installed extensions | **73% completely silent** (74/101), median **0**, p90 **1** |
 
 ### That 76% is not a false-positive rate, and it should not be 100%
 

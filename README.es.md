@@ -358,7 +358,7 @@ corrió — en vez de reportar un pass que no midió.
 | Ruleset ejercitado por el corpus | **67%** — 75 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
 | Puntos ciegos documentados, confirmados aún abiertos | **3** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa) |
 | Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **28/28** sobrevividos, sin crash ni cuelgue |
-| Hallazgos de titular sobre 103 extensiones reales instaladas | **73% completamente silenciosas** (76/103), mediana **0**, p90 **1** |
+| Hallazgos de titular sobre 101 extensiones instaladas distintas | **73% completamente silenciosas** (74/101), mediana **0**, p90 **1** |
 
 ### Ese 76% no es una tasa de falsos positivos, y no debería llegar a 100%
 
