@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "AUT-003"
+  ],
+  "note": "opening the folder is the whole attack \u2014 no prompt, no invocation, no line in SKILL.md. Carries the same BND-001 contradiction as `python-import-hook`: `.vscode/tasks.json` is not in `_ENTRY_NAMES`, so the report says both `runs when the project is opened` and `referenced by nothing`",
+  "category": "malicious"
+}

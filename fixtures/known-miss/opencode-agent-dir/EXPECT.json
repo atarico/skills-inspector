@@ -1,0 +1,7 @@
+{
+  "known_miss": [
+    "HOK-004"
+  ],
+  "note": "the second location, same result. `.opencode/agent` is in `reachability._ENTRY_DIRS`, so the scanner knows the directory is an entry point and still has no structural check for what a subagent definition there grants",
+  "category": "known-miss"
+}

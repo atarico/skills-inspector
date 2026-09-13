@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "HOK-007"
+  ],
+  "note": "CRITICAL and it leads. Like AUT-004 the check is positional, not textual \u2014 `.opencode/` plus a `.js` suffix \u2014 and that is right: code in the plugin directory runs INSIDE the agent process, before any rule about what the code does gets a say. No BND-001 here, because `.opencode/plugin` IS in `_ENTRY_DIRS`. The entry list knows about this one",
+  "category": "malicious"
+}

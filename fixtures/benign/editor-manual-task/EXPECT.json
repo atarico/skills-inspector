@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same task, same command, one token: `folderOpen` becomes `default`. A task someone chooses to run is dev tooling; a task the editor runs on open is an entry point nobody agreed to. AUT-003 reads exactly that token",
+  "category": "benign"
+}

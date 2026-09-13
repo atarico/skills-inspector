@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "one token: the key is `formatter` instead of `agent`. Everything under it is identical, tool wildcard included. That is the whole of HOK-004 \u2014 a formatter with `*` tools is invisible to it and a subagent with one read tool is not",
+  "category": "benign"
+}

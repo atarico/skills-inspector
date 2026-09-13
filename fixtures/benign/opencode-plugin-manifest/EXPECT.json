@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "same directory, same hook named, configuration instead of code. Not a one-token pair \u2014 a JS module and a JSON object cannot be the same bytes \u2014 but it varies the one axis HOK-007's own impact line draws: `not configuration, code that runs inside the agent process`",
+  "category": "benign"
+}

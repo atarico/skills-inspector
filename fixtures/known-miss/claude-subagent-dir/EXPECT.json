@@ -1,0 +1,7 @@
+{
+  "known_miss": [
+    "HOK-004"
+  ],
+  "note": "the first location RULES.md names for HOK-004, with the broadest tools grant the format allows, and it scans clean. The rule is emitted only from `_opencode`, which is reached only by `opencode.json`",
+  "category": "known-miss"
+}

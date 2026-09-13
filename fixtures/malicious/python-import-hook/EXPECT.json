@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "AUT-004"
+  ],
+  "note": "CRITICAL, and it leads \u2014 but AUT-004 never opens the file. The check is the NAME: `sitecustomize.py` present in bundle. That is the correct reading of the risk, because what makes this CRITICAL is where Python will import it from, not what it says. The fixture also carries BND-001 `referenced by nothing` about the same file, in the same report, while AUT-004 says it runs on every Python process start. Both cannot be true and the reader gets both",
+  "category": "malicious"
+}

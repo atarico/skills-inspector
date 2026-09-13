@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "HOK-004"
+  ],
+  "note": "fires and leads \u2014 on the presence of the `agent` key, and on nothing else. Read it next to `opencode-narrow-subagent` and the two known-miss units: this is the ONLY shape HOK-004 sees, and RULES.md documents two other locations plus a breadth test that the code does not implement",
+  "category": "malicious"
+}

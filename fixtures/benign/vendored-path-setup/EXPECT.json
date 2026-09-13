@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "byte-identical to the payload in `python-import-hook`, unreferenced in exactly the same way. The only difference is the path, and it takes the unit from CRITICAL to silent \u2014 which is the honest statement of what AUT-004 is: a rule about where Python looks, not about what the file does",
+  "category": "benign"
+}

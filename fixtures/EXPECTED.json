@@ -1,8 +1,8 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 125,
-    "known_miss": 1
+    "fixtures": 136,
+    "known_miss": 3
   },
   "fixtures": {
     "benign/agent-config-manager": {
@@ -137,6 +137,11 @@
         "PER-002:active"
       ]
     },
+    "benign/editor-manual-task": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
     "benign/extension-manager": {
       "findings": [
         "FSW-003",
@@ -231,6 +236,27 @@
         "NET-001:active",
         "NET-010:active"
       ]
+    },
+    "benign/opencode-formatter-block": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "benign/opencode-narrow-subagent": {
+      "findings": [
+        "HOK-004"
+      ],
+      "headline": [
+        "HOK-004"
+      ],
+      "status": [
+        "HOK-004:active"
+      ]
+    },
+    "benign/opencode-plugin-manifest": {
+      "findings": [],
+      "headline": [],
+      "status": []
     },
     "benign/plain-push": {
       "findings": [],
@@ -355,6 +381,11 @@
         "NET-010:active"
       ]
     },
+    "benign/vendored-path-setup": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
     "benign/workspace-cleaner": {
       "findings": [
         "FSW-004"
@@ -365,6 +396,16 @@
       ]
     },
     "benign/yaml-safe-load": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "known-miss/claude-subagent-dir": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "known-miss/opencode-agent-dir": {
       "findings": [],
       "headline": [],
       "status": []
@@ -717,6 +758,20 @@
         "PER-002:active"
       ]
     },
+    "malicious/editor-autorun-task": {
+      "findings": [
+        "AUT-003",
+        "BND-001"
+      ],
+      "headline": [
+        "AUT-003",
+        "BND-001"
+      ],
+      "status": [
+        "AUT-003:dormant",
+        "BND-001:dormant"
+      ]
+    },
     "malicious/encoded-upload": {
       "findings": [
         "NET-001",
@@ -1040,6 +1095,28 @@
         "AGT-010:active"
       ]
     },
+    "malicious/opencode-plugin-code": {
+      "findings": [
+        "HOK-007"
+      ],
+      "headline": [
+        "HOK-007"
+      ],
+      "status": [
+        "HOK-007:active"
+      ]
+    },
+    "malicious/opencode-subagent": {
+      "findings": [
+        "HOK-004"
+      ],
+      "headline": [
+        "HOK-004"
+      ],
+      "status": [
+        "HOK-004:active"
+      ]
+    },
     "malicious/permission-lower": {
       "findings": [
         "HOK-006"
@@ -1128,6 +1205,20 @@
       ],
       "status": [
         "NET-005:active"
+      ]
+    },
+    "malicious/python-import-hook": {
+      "findings": [
+        "AUT-004",
+        "BND-001"
+      ],
+      "headline": [
+        "AUT-004",
+        "BND-001"
+      ],
+      "status": [
+        "AUT-004:dormant",
+        "BND-001:dormant"
       ]
     },
     "malicious/reverse-shell": {

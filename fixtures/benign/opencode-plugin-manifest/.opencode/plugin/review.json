@@ -1,0 +1,6 @@
+{
+  "hooks": [
+    "tool.execute.before"
+  ],
+  "enabled": true
+}
