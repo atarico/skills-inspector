@@ -1,5 +1,5 @@
 .PHONY: help check unit detect coverage semantic fuzz falsepos drift-freeze \
-	drift anomalies selftest version fixtures expected sync
+	drift anomalies selftest version readme fixtures expected sync
 
 help:
 	@echo "make check      run everything (detection + self-scan + sync check)"
@@ -14,11 +14,12 @@ help:
 	@echo "make drift-freeze     re-record the frozen report (review the diff)"
 	@echo "make anomalies  invariant sweep: is the OUTPUT well-formed"
 	@echo "make selftest   scan this repo with its own scanner"
+	@echo "make readme     README numbers must match what the suite just measured"
 	@echo "make fixtures   regenerate fixtures/ from tests/make_fixtures.py"
 	@echo "make expected   re-record fixtures/EXPECTED.json (review the diff)"
 	@echo "make sync       copy scanner/ into the installable skill bundle"
 
-check: unit detect coverage semantic fuzz selftest version
+check: unit detect coverage semantic fuzz selftest version readme
 	@diff -rq --exclude='__pycache__' scanner skills/inspect-skill/scanner >/dev/null \
 		&& echo "bundle in sync" \
 		|| (echo "BUNDLE OUT OF SYNC — run: make sync"; exit 1)
@@ -96,6 +97,14 @@ d=json.load(sys.stdin);\
 n=len([f for f in d['findings'] if f['disclosure'] in ('undeclared','euphemistic')\
  and f['severity'] in ('CRITICAL','HIGH') and f['confidence'] in ('high','medium')]);\
 print(f'self-scan headline: {n}')"
+
+# Re-runs unit + detect + semantic + fuzz + coverage in-process (~15s) rather
+# than caching the numbers they printed — a cache that can go stale is the
+# same failure mode as a README that can go stale, and that is the one this
+# target exists to close. Placed last in `check` so every number it reads is
+# the one the rest of the run just produced, not a leftover from before.
+readme:
+	@python3 -m tests.readme_test
 
 fixtures:
 	@python3 -m tests.make_fixtures

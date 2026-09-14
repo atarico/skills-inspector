@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#quick-start)
-[![Detection](https://img.shields.io/badge/detection-132%2F132-brightgreen.svg)](#measured-not-asserted)
+[![Detection](https://img.shields.io/badge/detection-139%2F139-brightgreen.svg)](#measured-not-asserted)
 [![Fuzz](https://img.shields.io/badge/malformed%20input-28%2F28-brightgreen.svg)](#measured-not-asserted)
 
 </div>
@@ -341,14 +341,14 @@ directory of extensions you already trust, CI does not have one, and it exits
 
 | Benchmark | Result |
 |---|---|
-| Invariant unit tests | **646/646** — every case pins a promise a docstring makes |
-| Detection, against `fixtures/` | **132/132**, plus **5/5** semantic cross-checks |
-| Ruleset exercised by the corpus | **67%** — 75 of 111 implemented rules have a fixture; one family (`SEM`) has none |
+| Invariant unit tests | **674/674** — every case pins a promise a docstring makes |
+| Detection, against `fixtures/` | **139/139**, plus **5/5** semantic cross-checks |
+| Ruleset exercised by the corpus | **70%** — 78 of 111 implemented rules have a fixture; one family (`SEM`) has none |
 | Documented blind spots, confirmed still open | **3** (prose exfiltration; HOK-004's two documented locations, neither implemented) |
 | Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **28/28** survived, no crash or hang |
 | Headline findings across 101 distinct installed extensions | **73% completely silent** (74/101), median **0**, p90 **1** |
 
-### That 76% is not a false-positive rate, and it should not be 100%
+### That 73% is not a false-positive rate, and it should not be 100%
 
 It is tempting to read the last row as "27% false positives" and to treat
 driving it to zero as the goal. Both readings are wrong, and acting on them

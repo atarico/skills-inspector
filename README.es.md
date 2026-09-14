@@ -9,7 +9,7 @@
 [![Licencia](https://img.shields.io/badge/licencia-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Dependencias](https://img.shields.io/badge/dependencias-ninguna-brightgreen.svg)](#inicio-rápido)
-[![Detección](https://img.shields.io/badge/detecci%C3%B3n-132%2F132-brightgreen.svg)](#medido-no-afirmado)
+[![Detección](https://img.shields.io/badge/detecci%C3%B3n-139%2F139-brightgreen.svg)](#medido-no-afirmado)
 [![Fuzz](https://img.shields.io/badge/entrada%20malformada-28%2F28-brightgreen.svg)](#medido-no-afirmado)
 
 </div>
@@ -353,14 +353,14 @@ corrió — en vez de reportar un pass que no midió.
 
 | Benchmark | Resultado |
 |---|---|
-| Tests unitarios de invariantes | **646/646** — cada caso fija una promesa que hace un docstring |
-| Detección, contra `fixtures/` | **132/132**, más **5/5** contrastes semánticos |
-| Ruleset ejercitado por el corpus | **67%** — 75 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
+| Tests unitarios de invariantes | **674/674** — cada caso fija una promesa que hace un docstring |
+| Detección, contra `fixtures/` | **139/139**, más **5/5** contrastes semánticos |
+| Ruleset ejercitado por el corpus | **70%** — 78 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
 | Puntos ciegos documentados, confirmados aún abiertos | **3** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa) |
 | Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **28/28** sobrevividos, sin crash ni cuelgue |
 | Hallazgos de titular sobre 101 extensiones instaladas distintas | **73% completamente silenciosas** (74/101), mediana **0**, p90 **1** |
 
-### Ese 76% no es una tasa de falsos positivos, y no debería llegar a 100%
+### Ese 73% no es una tasa de falsos positivos, y no debería llegar a 100%
 
 Es tentador leer la última fila como "27% de falsos positivos" y tomar como
 objetivo llevarla a cero. Las dos lecturas son incorrectas, y actuar sobre ellas
