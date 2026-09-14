@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-010"
+  ],
+  "note": "the control for the pair above, and the reason the finding there is about anchoring rather than about quotes. Same file shape, same quoting, and this one keeps its confidence because its pattern starts at `grep` \u2014 outside the quotes. It does not lead the report either way: MEDIUM never leads. It is also one step from invisible, since MEDIUM demoted once is low and `headline` excludes low",
+  "category": "malicious"
+}

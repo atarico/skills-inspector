@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-013"
+  ],
+  "note": "capturing the root window takes whatever else is on screen \u2014 another app's secrets, a password manager, a colleague's call. HIGH at high and it leads, because the pattern anchors on the command and the argument together, with nothing quotable in between",
+  "category": "malicious"
+}

@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-009"
+  ],
+  "note": "the shell history is where a pasted secret goes to live forever, and reading it needs no network to be the whole attack. Declared HIGH at high, REPORTED AT MEDIUM: the pattern matches the path, the path is inside the quotes, and `literal_demotion` charges a step for that. Quoting is correct shell, not illustration",
+  "category": "malicious"
+}

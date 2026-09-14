@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "CRD-009"
+  ],
+  "note": "the same line as `history-read` with the quotes taken off \u2014 ONE token, counted. Confidence comes back to high. Nothing about the attack moved: same command, same file, same destination. This pair is what turns the note next door into a measurement instead of a complaint, and it says the price of writing shell correctly is a step of confidence",
+  "category": "malicious"
+}
