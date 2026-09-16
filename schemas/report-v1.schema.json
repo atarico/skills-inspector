@@ -1,0 +1,393 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/inspector-skills/schemas/report-v1.schema.json",
+  "title": "inspector-skills report — schema_version 1",
+  "description": "The full shape of `scanner.report.to_json()`. Bump the filename (report-v2.schema.json) on a breaking key-name or key-type change, matching the `schema_version` value this document describes — never on a rule addition or a new finding. See RULES.md section 11 and tests/schema_test.py, the stdlib-only validator that checks a live report against this file.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "unit",
+    "profile",
+    "headline",
+    "findings",
+    "not_analyzed",
+    "coverage_limits",
+    "deferred_rules"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "unit": {
+      "type": "object",
+      "required": [
+        "name",
+        "kind",
+        "root",
+        "scope_widened",
+        "description",
+        "declared_tools",
+        "file_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "claude marketplace",
+            "claude plugin",
+            "opencode project",
+            "skill",
+            "directory"
+          ]
+        },
+        "root": {
+          "type": "string"
+        },
+        "scope_widened": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        },
+        "declared_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "required": [
+        "capabilities",
+        "severity_counts",
+        "finding_count",
+        "file_count",
+        "unreadable_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/capability"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "severity_counts": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/severity"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "finding_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unreadable_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "headline": {
+      "type": "object",
+      "description": "A precomputed restatement of finding.headline() — a measurement, not a verdict. max_severity is OMITTED (not null) when count == 0, so it is deliberately absent from 'required'. count/max_severity answer 'what leads the report'; undeclared_critical answers the narrower 'how many CRITICAL findings the description never named', which is a high-precision low-recall signal — see report.headline_summary's docstring for the measured rates.",
+      "required": [
+        "count",
+        "undeclared_critical",
+        "rule_ids",
+        "capabilities"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "undeclared_critical": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Headline findings that are CRITICAL and whose disclosure is not 'declared'. Never greater than count."
+        },
+        "max_severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "rule_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capability"
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "not_analyzed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "coverage_limits": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deferred_rules": {
+      "description": "An OBJECT mapping rule id -> reason string, not a list.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "severity": {
+      "type": "string",
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "INFO"
+      ]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "disclosure": {
+      "type": "string",
+      "enum": [
+        "undeclared",
+        "euphemistic",
+        "declared"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "conditional",
+        "dormant"
+      ]
+    },
+    "position": {
+      "type": "string",
+      "enum": [
+        "active",
+        "illustrative",
+        "documentary"
+      ]
+    },
+    "capability": {
+      "type": "string",
+      "enum": [
+        "network",
+        "secrets",
+        "write_outside",
+        "persistence",
+        "control_plane",
+        "auto_exec",
+        "remote_exec",
+        "hidden",
+        "privilege",
+        "destructive",
+        "instruction",
+        "recon"
+      ]
+    },
+    "location": {
+      "type": "object",
+      "required": [
+        "file",
+        "line"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer"
+        }
+      }
+    },
+    "chain_hop": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "step",
+            "line",
+            "rule",
+            "evidence"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "step": {
+              "type": "string",
+              "enum": [
+                "source",
+                "sink"
+              ]
+            },
+            "line": {
+              "type": "integer"
+            },
+            "rule": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "step",
+            "channel"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "step": {
+              "type": "string",
+              "const": "propagation"
+            },
+            "channel": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "severity",
+        "confidence",
+        "status",
+        "disclosure",
+        "capability",
+        "location",
+        "position",
+        "detects",
+        "evidence",
+        "impact",
+        "legitimate_use",
+        "what_to_check",
+        "related_rules",
+        "chain"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "disclosure": {
+          "$ref": "#/$defs/disclosure"
+        },
+        "capability": {
+          "$ref": "#/$defs/capability"
+        },
+        "location": {
+          "$ref": "#/$defs/location"
+        },
+        "position": {
+          "$ref": "#/$defs/position"
+        },
+        "detects": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "impact": {
+          "type": "string"
+        },
+        "legitimate_use": {
+          "type": "string"
+        },
+        "what_to_check": {
+          "type": "string"
+        },
+        "related_rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/chain_hop"
+          }
+        }
+      }
+    }
+  }
+}

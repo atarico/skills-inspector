@@ -1,5 +1,5 @@
 .PHONY: help check unit detect coverage semantic fuzz falsepos drift-freeze \
-	drift anomalies selftest version deps readme fixtures expected sync
+	drift anomalies selftest version deps schema readme fixtures expected sync
 
 help:
 	@echo "make check      run everything (detection + self-scan + sync check)"
@@ -15,12 +15,13 @@ help:
 	@echo "make anomalies  invariant sweep: is the OUTPUT well-formed"
 	@echo "make selftest   scan this repo with its own scanner"
 	@echo "make deps       prove nothing is DECLARED, not just that no file is present"
+	@echo "make schema     validate --json output against schemas/report-v1.schema.json"
 	@echo "make readme     README numbers must match what the suite just measured"
 	@echo "make fixtures   regenerate fixtures/ from tests/make_fixtures.py"
 	@echo "make expected   re-record fixtures/EXPECTED.json (review the diff)"
 	@echo "make sync       copy scanner/ into the installable skill bundle"
 
-check: unit detect coverage semantic fuzz selftest version deps readme
+check: unit detect coverage semantic fuzz selftest version deps schema readme
 	@diff -rq --exclude='__pycache__' scanner skills/inspect-skill/scanner >/dev/null \
 		&& echo "bundle in sync" \
 		|| (echo "BUNDLE OUT OF SYNC — run: make sync"; exit 1)
@@ -37,6 +38,11 @@ version:
 # the file-absence check this replaced. See tests/deps_test.py.
 deps:
 	@python3 -m tests.deps_test
+
+# Proves the shipped --json shape matches schemas/report-v1.schema.json —
+# stdlib only, no jsonschema dependency. See tests/schema_test.py.
+schema:
+	@python3 -m tests.schema_test
 
 # Runs first, and deliberately so. Every case here pins an invariant a docstring
 # already promised; when a demotion heuristic changes, this is what tells you
