@@ -87,12 +87,38 @@ _WITH_SEMANTIC = (
     "construction: the readers see adversarial text and can be steered past a "
     "capability the scanner also missed. Treat them as questions, not verdicts.")
 
+# Conditional, unlike the standing SKIP_DIRS limit above: it applies only when
+# THIS unit's enclosing-unit search (unit.py::resolve) could not rule out a
+# stronger marker above the target — `scope_search` of `depth_limit` or
+# `unreadable_ancestor`. `scope_widened: false` used to be the only signal, and
+# it read identically whether the search was exhaustive or merely cut short; a
+# consumer trusting a `false` here as "confirmed nothing above" is exactly the
+# false confidence ClawScan's issue #53 flagged for a target-only Docker mount.
+_INCONCLUSIVE_SCOPE = (
+    "The search for an enclosing installation unit (plugin, marketplace, or "
+    "opencode manifest) did not finish — see this unit's `scope_search` and "
+    "`scope_levels`. A report with no scope widening here is not evidence "
+    "that no such manifest sits above the target; the search never got far "
+    "enough to rule one out.")
 
-def coverage_limits(findings=()) -> list[str]:
+_INCONCLUSIVE_SCOPE_SEARCH = ("depth_limit", "unreadable_ancestor")
+
+
+def coverage_limits(findings=(), *, scope_search: str | None = None) -> list[str]:
     """Limits depend on which passes actually ran, so the report cannot claim a
-    coverage it does not have — or deny one it does."""
+    coverage it does not have — or deny one it does.
+
+    `scope_search` is the enclosing-unit search's own termination reason
+    (unit.py::resolve). It is optional and keyword-only, and its absence is not
+    a claim either way — callers that have a `Unit` pass its `scope_search`;
+    `COVERAGE_LIMITS` below, which has no unit to read, simply omits the
+    conditional line rather than guessing.
+    """
     semantic_ran = any(f.id.startswith("SEM-") for f in findings)
-    return [_WITH_SEMANTIC if semantic_ran else _NO_SEMANTIC, *_BASE_LIMITS]
+    limits = [_WITH_SEMANTIC if semantic_ran else _NO_SEMANTIC, *_BASE_LIMITS]
+    if scope_search in _INCONCLUSIVE_SCOPE_SEARCH:
+        limits.append(_INCONCLUSIVE_SCOPE)
+    return limits
 
 
 # Kept for callers that want the pessimistic default.
@@ -178,6 +204,8 @@ def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
             "kind": unit.kind,
             "root": str(unit.root),
             "scope_widened": unit.widened,
+            "scope_search": unit.scope_search,
+            "scope_levels": unit.scope_levels,
             "description": ev.sanitize(unit.description),
             "declared_tools": [ev.sanitize(t) for t in unit.declared_tools],
             "file_count": len(unit.files),
@@ -186,7 +214,7 @@ def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
         "headline": headline_summary(findings),
         "findings": [f.as_dict() for f in findings],
         "not_analyzed": [{"file": ev.sanitize_path(p), "reason": r} for p, r in unit.skipped],
-        "coverage_limits": coverage_limits(findings),
+        "coverage_limits": coverage_limits(findings, scope_search=unit.scope_search),
         "deferred_rules": R.DEFERRED,
     }, indent=2, ensure_ascii=False)
 
@@ -198,6 +226,9 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
     w(f"UNIT      {ev.sanitize(unit.name)}  ({unit.kind}, {len(unit.files)} files)")
     if unit.widened:
         w(f"          scope widened to the installation unit: {unit.root}")
+    elif unit.scope_search in _INCONCLUSIVE_SCOPE_SEARCH:
+        w(f"          scope search {unit.scope_search} after {unit.scope_levels} "
+          f"level(s) — could not confirm there is no enclosing unit above this target")
     desc = ev.sanitize(unit.description) or "(no description found)"
     w(f"DECLARED  \"{desc[:300]}\"")
     if unit.declared_tools:
@@ -294,7 +325,7 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
         w("")
 
     w("COVERAGE LIMITS")
-    for limit_text in coverage_limits(findings):
+    for limit_text in coverage_limits(findings, scope_search=unit.scope_search):
         w(f"  - {limit_text}")
 
     return "\n".join(out)

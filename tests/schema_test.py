@@ -190,6 +190,11 @@ _MUTATIONS: list[tuple[str, object]] = [
     ("a chain hop matching neither shape", lambda d: d["findings"][0]["chain"].append({"step": "teleport"})),
     ("an undeclared top-level key", lambda d: d.__setitem__("verdict", "bad")),
     ("the headline block removed", lambda d: d.pop("headline")),
+    ("unit.scope_search outside its enum",
+     lambda d: d["unit"].__setitem__("scope_search", "gave_up")),
+    ("unit.scope_search removed", lambda d: d["unit"].pop("scope_search")),
+    ("unit.scope_levels typed as a string", lambda d: d["unit"].__setitem__("scope_levels", "3")),
+    ("unit.scope_levels removed", lambda d: d["unit"].pop("scope_levels")),
 ]
 
 

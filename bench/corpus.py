@@ -104,7 +104,7 @@ def discover(root: Path) -> list[Path]:
 
     resolved: dict[Path, None] = {}
     for path in candidates:
-        root_path, _kind, _widened = resolve(path)
+        root_path, _kind, _widened, _scope_search, _scope_levels = resolve(path)
         resolved.setdefault(root_path, None)
 
     by_content: dict[str, Path] = {}

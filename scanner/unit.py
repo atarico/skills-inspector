@@ -86,12 +86,25 @@ class FileEntry:
     truncated: bool = False   # read only in part; anything past the cap is unseen
 
 
+# The five ways the upward search for an enclosing unit can end. Only the first
+# three are conclusive: the search actually saw enough of the ancestor chain to
+# trust its answer. `depth_limit` and `unreadable_ancestor` mean the search
+# stopped without ruling out a stronger marker further up — see resolve()'s
+# docstring for why that distinction has to survive into the report.
+SCOPE_SEARCH_VALUES = (
+    "widened", "marker_at_target", "reached_filesystem_root",
+    "depth_limit", "unreadable_ancestor",
+)
+
+
 @dataclass
 class Unit:
     root: Path
     kind: str
     requested: Path
     widened: bool
+    scope_search: str
+    scope_levels: int
     files: list[FileEntry] = field(default_factory=list)
     skipped: list[tuple[str, str]] = field(default_factory=list)
     description: str = ""
@@ -99,10 +112,37 @@ class Unit:
     name: str = ""
 
 
-def resolve(target: Path) -> tuple[Path, str, bool]:
+def resolve(target: Path) -> tuple[Path, str, bool, str, int]:
     """Widen the scope to the installation unit if a marker sits above the target.
 
     A skill audited without its plugin manifest produces a false clean.
+
+    Returns (root, kind, widened, scope_search, scope_levels).
+
+    `scope_search` names HOW the upward walk ended and `scope_levels` says how
+    far it got. Before this, the only signal was `widened` (now derived from
+    the same result, kept for compatibility) — and a `False` value meant two
+    different things with nothing to tell them apart: "climbed all the way to
+    '/' and there is genuinely no marker above" and "gave up two steps in
+    because that is where the mount, the depth budget, or a permission error
+    ended the search". Both looked identical in the old report. A sandbox that
+    mounts only the target directory reaches `reached_filesystem_root` in two
+    steps against a filesystem that is not the user's — that is ClawScan's
+    issue #53 objection — and only `scope_levels` lets a consumer see that two
+    steps is not the same claim as forty.
+
+    The value names how the ENCLOSING-UNIT search ended, not what was found.
+    Those are different questions, and conflating them re-creates the defect
+    in a new place. `widened` is conclusive because the climb stopped on the
+    answer itself. `marker_at_target` is conclusive ONLY when the climb went
+    on to run out of tree without finding anything stronger — that is what
+    proves nothing encloses the target. A climb that instead ran out of budget
+    or hit an unreadable directory reports `depth_limit` /
+    `unreadable_ancestor` even though a marker sits at the target: the unit is
+    known, what encloses it is not, and a plugin manifest one level past the
+    budget is exactly the false clean named above. Claiming
+    `marker_at_target` there would assert a search that never happened, which
+    is worse than the bare boolean this replaced — that one claimed nothing.
     """
     target = target.resolve()
     start = target if target.is_dir() else target.parent
@@ -116,7 +156,20 @@ def resolve(target: Path) -> tuple[Path, str, bool]:
     # disclosure axis. Pinned by tests/unit_test.py::resolve.
     best: tuple[Path, str] | None = None
     current = start
+    levels = 0
+    termination = "depth_limit"  # overwritten below unless the for-loop runs dry
     for _ in range(8):
+        # Read permission is required to trust "no marker here" — a directory
+        # this process cannot list is not evidence of an empty one. Checked
+        # BEFORE the marker probe below, because (dir / marker).exists() alone
+        # cannot make this distinction: stat'ing a KNOWN filename only needs
+        # execute (search) permission on its parent, not read, so it would
+        # silently report "no marker" for a directory that was never actually
+        # examined.
+        if not os.access(current, os.R_OK):
+            termination = "unreadable_ancestor"
+            break
+        levels += 1
         for marker, kind in UNIT_MARKERS:
             if (current / marker).exists():
                 if best is None or kind != "skill":
@@ -126,13 +179,31 @@ def resolve(target: Path) -> tuple[Path, str, bool]:
             break
         parent = current.parent
         if parent == current:
+            termination = "reached_filesystem_root"
             break
         current = parent
+    else:
+        termination = "depth_limit"
 
     if best is None:
-        return start, "directory", False
+        return start, "directory", False, termination, levels
     root, kind = best
-    return root, kind, root != start
+    widened = root != start
+    if widened:
+        # The climb stopped because it FOUND the enclosing unit. That is an
+        # answer, not a truncated search.
+        return root, kind, True, "widened", levels
+    # A marker at the target settles what the unit IS. It does not settle
+    # whether something ENCLOSES it, and that is the question this field
+    # exists to answer. Only a climb that ran out of tree
+    # (`reached_filesystem_root`) proves nothing encloses the target; one that
+    # ran out of budget, or hit a directory it could not read, leaves an
+    # enclosing plugin possible and unseen. Reporting `marker_at_target` there
+    # would assert a search that never happened — worse than the bare boolean
+    # this replaced, which at least claimed nothing. It is also precisely the
+    # false clean named at the top of this function.
+    search = "marker_at_target" if termination == "reached_filesystem_root" else termination
+    return root, kind, False, search, levels
 
 
 def _read_head(path: Path, n: int = 512) -> bytes:
@@ -176,9 +247,9 @@ def _skip_dir_reason(name: str) -> str:
 
 
 def collect(target: Path) -> Unit:
-    root, kind, widened = resolve(target)
+    root, kind, widened, scope_search, scope_levels = resolve(target)
     unit = Unit(root=root, kind=kind, requested=target.resolve(), widened=widened,
-                name=root.name)
+                scope_search=scope_search, scope_levels=scope_levels, name=root.name)
 
     count = 0
     for dirpath, dirnames, filenames in os.walk(root):

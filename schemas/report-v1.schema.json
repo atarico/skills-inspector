@@ -27,6 +27,8 @@
         "kind",
         "root",
         "scope_widened",
+        "scope_search",
+        "scope_levels",
         "description",
         "declared_tools",
         "file_count"
@@ -51,6 +53,15 @@
         },
         "scope_widened": {
           "type": "boolean"
+        },
+        "scope_search": {
+          "$ref": "#/$defs/scope_search",
+          "description": "How the upward search for an enclosing unit (unit.py::resolve) ended. `widened`, `marker_at_target`, and `reached_filesystem_root` are conclusive — the search saw enough of the ancestor chain to trust its answer. `depth_limit` and `unreadable_ancestor` are NOT: the search stopped without ruling out a stronger marker further up, and `scope_widened: false` alone cannot tell that apart from a genuinely exhaustive search — see RULES.md section 11 and coverage_limits()."
+        },
+        "scope_levels": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many ancestor directories the search in scope_search actually examined."
         },
         "description": {
           "type": "string"
@@ -191,6 +202,16 @@
     }
   },
   "$defs": {
+    "scope_search": {
+      "type": "string",
+      "enum": [
+        "widened",
+        "marker_at_target",
+        "reached_filesystem_root",
+        "depth_limit",
+        "unreadable_ancestor"
+      ]
+    },
     "severity": {
       "type": "string",
       "enum": [

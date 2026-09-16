@@ -800,6 +800,41 @@ spell out:
   `undeclared_critical` is choosing precision over recall, deliberately, and
   should say so.
 
+**`unit.scope_search` / `unit.scope_levels`.** `unit.scope_widened` alone could
+not distinguish "the search climbed to the filesystem root and there is
+genuinely no plugin or marketplace manifest above the target" from "the search
+never got far enough to know" — both reported `false`, on 143 of 143 corpus
+units, and a `false` here is a claim a consumer might trust. This is ClawScan's
+issue #53 objection stated as a defect: a target-only Docker mount reaches what
+LOOKS like the filesystem root in two steps, against a filesystem that is not
+the user's, and the old report could not tell that apart from an exhaustive
+search. `unit.py::resolve` now reports both:
+
+- `scope_search` — one of five values, naming how the upward walk ended.
+  `widened`, `marker_at_target`, and `reached_filesystem_root` are
+  **conclusive**: the search saw enough of the ancestor chain to trust its
+  answer. `depth_limit` (the 8-iteration budget ran out with ancestors still
+  unexamined) and `unreadable_ancestor` (an ancestor could not be read — a
+  permission error, or it is not there) are **not**: the search stopped without
+  ruling out a stronger marker further up.
+
+  Finding a marker **at** the target is not by itself conclusive, and reading
+  it that way was a defect caught in review. It settles what the unit IS; the
+  question this field answers is what ENCLOSES it. So `marker_at_target` is
+  reported only when the climb went on to run out of tree. A target carrying a
+  `SKILL.md` with a plugin manifest nine levels above it reports `depth_limit`,
+  not `marker_at_target` — the plugin is real, was never seen, and calling that
+  conclusive would assert a search that never happened.
+- `scope_levels` — how many ancestor directories the search actually examined,
+  so a consumer can judge a shallow search rather than trust it by default.
+
+`scope_widened` itself is unchanged and still published; the new keys are
+additive. When `scope_search` is `depth_limit` or `unreadable_ancestor`,
+`coverage_limits` carries one more entry saying so — conditional, unlike the
+standing SKIP_DIRS limit below, because it depends on how THIS unit's search
+went. The text report prints the same caveat next to the scope line, so the
+human-readable report cannot say less than the JSON does.
+
 **NOT ANALYZED now lists pruned directories.** `.git`, `node_modules`, `dist`,
 and the rest of `unit.py`'s `SKIP_DIRS` are never walked — that has always been
 true — but pruning them used to be the one exclusion path that never recorded

