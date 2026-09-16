@@ -1,0 +1,5 @@
+{
+  "must_detect": [],
+  "note": "the payload lives inside node_modules/, a pruned directory \u2014 NOT DETECTED, by construction of the scope this scanner covers. The correct report says so via not_analyzed rather than a false clean; see tests/unit_test.py::_pruned_dir_cases for the assertion this harness cannot express",
+  "category": "malicious"
+}

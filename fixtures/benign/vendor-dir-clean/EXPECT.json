@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "an ordinary vendored dependency inside a pruned directory must stay clean",
+  "category": "benign"
+}

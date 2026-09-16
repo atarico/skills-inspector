@@ -156,6 +156,25 @@ def _detect_binary(head: bytes) -> str:
     return ""
 
 
+def _skip_dir_reason(name: str) -> str:
+    """Why a SKIP_DIRS name is pruned, derived from the name — not written by
+    hand at the one call site, so a new entry added to SKIP_DIRS cannot ship
+    without a reason.
+
+    `.git` is not the same kind of skip as `dist/`: version-control metadata
+    can carry a hook or config that RUNS on its own (a `post-checkout` script,
+    a `.git/config` core.hooksPath override), with nothing in the bundle ever
+    referencing it. Everything else in SKIP_DIRS is build output or a vendored
+    dependency — inert data, unreviewed, but not an execution vector on its own.
+    """
+    if name == ".git":
+        return ("version control metadata is never scanned — a hook or config "
+                "placed here can run on its own, with nothing in the bundle "
+                "referencing it")
+    return ("build output or a vendored dependency, skipped by default — "
+            "contents unreviewed")
+
+
 def collect(target: Path) -> Unit:
     root, kind, widened = resolve(target)
     unit = Unit(root=root, kind=kind, requested=target.resolve(), widened=widened,
@@ -163,6 +182,13 @@ def collect(target: Path) -> Unit:
 
     count = 0
     for dirpath, dirnames, filenames in os.walk(root):
+        # Every OTHER exclusion path below appends to unit.skipped (file limit,
+        # symlink escape, unreadable, binary, size) — this pruning step used to
+        # be the one silent exception. One entry per pruned DIRECTORY, recorded
+        # before the prune, never one per file it happens to contain.
+        for pruned in sorted(d for d in dirnames if d in SKIP_DIRS):
+            rel = str((Path(dirpath) / pruned).relative_to(root))
+            unit.skipped.append((rel, _skip_dir_reason(pruned)))
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for filename in sorted(filenames):
             full = Path(dirpath) / filename

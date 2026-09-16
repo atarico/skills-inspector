@@ -738,6 +738,7 @@ NOT ANALYZED
   bin/helper           binary, 2.1 MB — contents unreviewable
   data/blob.enc        unknown encoding
   vendor/              812 files skipped (size limit)
+  node_modules         build output or a vendored dependency, skipped by default
 
 COVERAGE LIMITS
   • Instruction detection is phrase-seeded. Plain non-imperative prose
@@ -798,6 +799,25 @@ spell out:
   confidence can tell those two apart. An integrator that blocks on
   `undeclared_critical` is choosing precision over recall, deliberately, and
   should say so.
+
+**NOT ANALYZED now lists pruned directories.** `.git`, `node_modules`, `dist`,
+and the rest of `unit.py`'s `SKIP_DIRS` are never walked — that has always been
+true — but pruning them used to be the one exclusion path that never recorded
+itself in `NOT ANALYZED`: every other skip (file limit, symlink escape,
+unreadable, binary, size) did. A `.git/hooks/post-checkout` payload, or an
+`evil-pkg` postinstall script buried in `node_modules/`, produced a spotless
+report — zero findings, empty `NOT ANALYZED` — identical to a bundle that
+genuinely had nothing hidden. This is section 1.6's principle applied to
+observation instead of rejection: a guard that never says no reads exactly
+like one that cannot, and a report that never says "I did not look here" reads
+exactly like one that looked everywhere. Each pruned directory now costs one
+`NOT ANALYZED` entry — one per directory, never one per file inside it — with
+a reason specific to what kind of blindness it is: `.git` names that a hook or
+config placed there can run on its own, with nothing in the bundle referencing
+it; everything else in `SKIP_DIRS` gets the generic build-output-or-vendored
+reason. `coverage_limits` also carries a standing entry for this class, because
+it is true of every scan, not only the ones where a pruned directory happens to
+be present.
 
 ---
 

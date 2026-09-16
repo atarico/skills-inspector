@@ -64,6 +64,16 @@ _BASE_LIMITS = [
     "demoted to low confidence incorrectly.",
     "Large bundles are capped: files past the unit line budget are listed under "
     "NOT ANALYZED and were never read.",
+    # A standing property of the tool, not a conditional one: .git, dist/,
+    # node_modules/, and the rest of SKIP_DIRS are never walked, on every scan,
+    # whether or not one happens to be present. When one IS present it is now
+    # listed under NOT ANALYZED (unit.py's directory pruning used to be the one
+    # exclusion path that never recorded itself there) — but the blindness
+    # itself predates that fix and does not depend on it firing this run.
+    "Directories that are version control metadata, build output, or vendored "
+    "dependencies (.git, node_modules, dist, and the rest of SKIP_DIRS) are "
+    "never walked. When one is present in the unit it is listed under NOT "
+    "ANALYZED, never silently absorbed into a clean report.",
     "A clean report is not a safety claim.",
 ]
 
