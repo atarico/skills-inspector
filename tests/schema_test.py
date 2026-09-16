@@ -14,11 +14,18 @@ of `.`, a `fixtures/malicious/*` unit whose findings carry a non-empty
 `chain` (so `chain_hop`'s two shapes both get walked), and a
 `fixtures/benign/*` unit.
 
+A fourth case validates the validator. The three above only ever ask it to
+say yes, so its rejection path ships untested — and a walker that cannot
+reject is indistinguishable from output that always conforms. `_MUTATIONS`
+corrupts a live report one way at a time, once per vocabulary branch the
+schema uses, and each corruption must produce at least one error.
+
     python -m tests.schema_test
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import sys
@@ -151,12 +158,72 @@ def _check(target: str, *, require_nonempty_chain: bool = False) -> tuple[bool, 
     return True, f"{len(report['findings'])} findings, schema_version {report['schema_version']}"
 
 
+# Guards the guard. On a healthy repository `validate()` returns [] on every
+# report, every run — so its REJECTION path is exercised by nothing, and a
+# validator that has never said no reads exactly like one that cannot. That is
+# not hypothetical here: the first attempt to probe this validator by hand
+# called it with `schema` and `instance` transposed, and every single mutation
+# came back clean. The transposition was the bug, but a validator whose
+# rejection path no test pins would fail the same way and nothing would notice.
+#
+# Each mutation below corrupts a live report in one specific way and must
+# produce at least one error. They are chosen to cover every vocabulary branch
+# the schema actually uses: enum, const, type, required, additionalProperties,
+# oneOf, and $ref resolution into $defs.
+_MUTATIONS: list[tuple[str, object]] = [
+    ("severity outside its enum", lambda d: d["findings"][0].__setitem__("severity", "critical")),
+    ("confidence outside its enum", lambda d: d["findings"][0].__setitem__("confidence", "HIGH")),
+    ("disclosure outside its enum", lambda d: d["findings"][0].__setitem__("disclosure", "hidden")),
+    ("capability outside its enum", lambda d: d["findings"][0].__setitem__("capability", "nonsense")),
+    ("status outside its enum", lambda d: d["findings"][0].__setitem__("status", "pending")),
+    ("a required finding key removed", lambda d: d["findings"][0].pop("impact")),
+    ("an undeclared key on a finding", lambda d: d["findings"][0].__setitem__("verdict", "malicious")),
+    ("location.line typed as a string", lambda d: d["findings"][0]["location"].__setitem__("line", "7")),
+    ("schema_version typed as an int", lambda d: d.__setitem__("schema_version", 1)),
+    ("schema_version bumped", lambda d: d.__setitem__("schema_version", "2")),
+    ("headline.count typed as a string", lambda d: d["headline"].__setitem__("count", "1")),
+    ("headline.undeclared_critical removed", lambda d: d["headline"].pop("undeclared_critical")),
+    ("headline.undeclared_critical negative",
+     lambda d: d["headline"].__setitem__("undeclared_critical", -1)),
+    ("headline.max_severity lowercased", lambda d: d["headline"].__setitem__("max_severity", "critical")),
+    ("deferred_rules typed as a list", lambda d: d.__setitem__("deferred_rules", [])),
+    ("a chain hop matching neither shape", lambda d: d["findings"][0]["chain"].append({"step": "teleport"})),
+    ("an undeclared top-level key", lambda d: d.__setitem__("verdict", "bad")),
+    ("the headline block removed", lambda d: d.pop("headline")),
+]
+
+
+def _check_validator_rejects(target: str) -> tuple[bool, str]:
+    schema = load_schema()
+    defs = schema["$defs"]
+    try:
+        report = scan_json(target)
+    except Exception as exc:  # noqa: BLE001 — a scan/parse failure is this case's failure
+        return False, f"could not produce a report: {exc}"
+    if validate(schema, report, defs):
+        return False, "the unmutated report does not validate — nothing below proves anything"
+    slipped = [label for label, mutate in _MUTATIONS
+               if not validate(schema, _mutated(report, mutate), defs)]
+    if slipped:
+        return False, ("the validator accepted reports it must reject: "
+                       + "; ".join(slipped))
+    return True, f"{len(_MUTATIONS)} corrupted reports rejected, clean report still accepted"
+
+
+def _mutated(report: dict, mutate) -> dict:
+    clone = copy.deepcopy(report)
+    mutate(clone)
+    return clone
+
+
 def main() -> int:
     cases = [
         ("self-scan of .", lambda: _check(".")),
         ("fixtures/malicious/conditional-script (chain-bearing)",
          lambda: _check("fixtures/malicious/conditional-script", require_nonempty_chain=True)),
         ("fixtures/benign/agent-config-manager", lambda: _check("fixtures/benign/agent-config-manager")),
+        ("validator rejects every corruption it must",
+         lambda: _check_validator_rejects("fixtures/malicious/conditional-script")),
     ]
 
     if not SCHEMA_PATH.exists():

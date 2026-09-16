@@ -62,6 +62,24 @@ use is pre-installation, against a downloaded directory that no harness has load
 5. **No completeness claim, ever.** Every detection in this document is evadable by
    a determined author. The report says what was found, never that nothing exists.
 
+6. **Every guard proves its rejection path, not only its acceptance path.**
+   A check that never said no is indistinguishable from a check that *cannot*
+   say no. On a healthy repository each gate in `tests/` returns OK on every
+   run, forever — so the branch that fails is the branch nothing exercises, and
+   an inverted allowlist, a `bad` list that is built and never read, or a
+   validator called with its arguments transposed all keep the suite green.
+   This is the same disease `bench/drift.py` exits `2` to avoid: a guard that
+   measured nothing must not look like a guard that measured well.
+
+   So every gate is also pointed at input it MUST reject, and back at the real
+   input it must still accept — both halves, because a check neutered to always
+   pass and one inverted to always fail are both broken. See
+   `tests/deps_test.py::_VIOLATIONS` and `tests/schema_test.py::_MUTATIONS`.
+   The principle was not theoretical when it was written: the schema validator
+   was first probed by hand with `schema` and `instance` transposed, and every
+   corruption came back clean. That call was the bug — but a validator that
+   could not reject would have failed in exactly the same silence.
+
 ---
 
 ## 2. The four axes

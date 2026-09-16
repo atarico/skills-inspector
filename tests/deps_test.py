@@ -41,6 +41,14 @@ agreement is what earns the 3.10 job's reliance on `_parse_fallback` — it is
 proven correct on the same file, just on a different interpreter, rather
 than assumed correct because nothing ever caught it out.
 
+And one check guards the guard. On a healthy repository every check above
+returns True on every run, forever — which means their rejection paths are
+exercised by nothing, and a check that has never said no reads exactly like a
+check that cannot. So each one is also pointed at a document that violates
+precisely it and must reject, and at the real file, which it must still
+accept. Neutering any check (always yes) or inverting it (always no) fails
+that case; see `_VIOLATIONS`.
+
 `tests/version_test.py` reuses `_parse_fallback` / `_has_tomllib` from this
 module for the same reason, rather than writing a third copy of the same
 two-parser story.
@@ -313,6 +321,55 @@ def _check_build_backends_allowlisted(doc: dict) -> tuple[bool, str]:
     return True, f"build-system.requires: {', '.join(requires)}"
 
 
+# A guard is only as good as its rejection path, and this one's rejection path
+# runs on nothing during a normal build: `pyproject.toml` is clean, so every
+# check above returns True every time, forever. A check that has never once
+# said no is indistinguishable from a check that CANNOT say no — the allowlist
+# could be inverted, or a `bad` list could be built and never tested, and the
+# suite would stay green. So each check is also pointed at a document that
+# violates exactly it, and must reject.
+#
+# The documents are built as dicts rather than TOML text on purpose: what is
+# unproven here is the CHECK logic, not the parsers, and `_check_fallback_
+# parser_agrees` already covers those. Dicts also keep this identical on 3.10,
+# where there is no `tomllib` to parse a fixture with.
+_VIOLATIONS: list[tuple[str, str, dict]] = [
+    ("a declared runtime dependency", "_check_dependencies_empty",
+     {"project": {"name": "x", "dependencies": ["requests"]}}),
+    ("an absent dependencies key", "_check_dependencies_empty",
+     {"project": {"name": "x"}}),
+    ("a non-empty optional group", "_check_optional_dependencies_empty",
+     {"project": {"name": "x", "dependencies": [],
+                  "optional-dependencies": {"dev": ["pytest"]}}}),
+    ("a poetry dependency past python", "_check_no_poetry_dependencies",
+     {"project": {"name": "x", "dependencies": []},
+      "tool": {"poetry": {"dependencies": {"python": "^3.10", "requests": "*"}}}}),
+    ("a runtime dep smuggled into build-system", "_check_build_backends_allowlisted",
+     {"build-system": {"requires": ["setuptools>=77", "requests"]},
+      "project": {"name": "x", "dependencies": []}}),
+    ("an absent build-system table", "_check_build_backends_allowlisted",
+     {"project": {"name": "x", "dependencies": []}}),
+]
+
+
+def _check_rejects_known_violations(doc: dict) -> tuple[bool, str]:
+    slipped = []
+    for label, fn_name, bad_doc in _VIOLATIONS:
+        ok, _ = globals()[fn_name](bad_doc)
+        if ok:
+            slipped.append(f"{label} ({fn_name})")
+    if slipped:
+        return False, ("these checks accepted a document they must reject: "
+                        + "; ".join(slipped))
+    # The mirror image: a guard that rejects everything is just as useless.
+    for _, fn_name, _ in _VIOLATIONS:
+        ok, detail = globals()[fn_name](doc)
+        if not ok:
+            return False, (f"{fn_name} rejected the real pyproject.toml while "
+                            f"proving its rejection path: {detail}")
+    return True, f"{len(_VIOLATIONS)} violating documents rejected, real file still accepted"
+
+
 def _check_fallback_parser_agrees(text: str | None) -> tuple[bool, str]:
     if text is None:
         return False, "cannot compare parsers — pyproject.toml did not load"
@@ -346,6 +403,8 @@ def main(argv: list[str] | None = None) -> int:
             ("build-system.requires is build-backends only",
              _check_build_backends_allowlisted(doc)),
             ("fallback TOML parser agrees with tomllib", _check_fallback_parser_agrees(text)),
+            ("every check rejects a known violation",
+             _check_rejects_known_violations(doc)),
         ]
 
     passed = 0
