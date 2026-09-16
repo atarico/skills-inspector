@@ -26,15 +26,13 @@ jobs:
 
       - name: No third-party dependencies
         # The README's central claim about this tool is that installing it pulls
-        # nothing. A dependency file appearing is a change to what the tool IS,
-        # so it fails the build rather than passing quietly.
-        run: |
-          for f in requirements.txt pyproject.toml setup.py Pipfile poetry.lock; do
-            if [ -e "$f" ]; then
-              echo "::error::$f exists — this project must stay stdlib-only"
-              exit 1
-            fi
-          done
+        # nothing. `pyproject.toml` now exists on purpose (it is what makes
+        # `pip install` work at all), so file-absence stopped being the right
+        # proof. This proves the stronger, and now correct, invariant: nothing
+        # is DECLARED, not merely that no manifest file is PRESENT. See
+        # tests/deps_test.py's module docstring for the vacuous-pass hole a
+        # weaker check would reopen.
+        run: python3 -m tests.deps_test --ci
 
       - name: make check
         run: make check

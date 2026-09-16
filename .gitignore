@@ -7,6 +7,10 @@ __pycache__/
 .DS_Store
 .atl/
 
+# `pip install -e .` (pyproject.toml, Task A) writes these into the repo root.
+*.egg-info/
+/build/
+
 # Per-unit drift fingerprints. Derived, machine-specific, and deliberately NOT
 # committed: bench/drift-baseline.json is public and privacy-reviewed down to
 # rule ids, while this file identifies each installed bundle by content hash.

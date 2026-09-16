@@ -1,0 +1,28 @@
+# `dependencies = []` below is the machine-readable form of the README's
+# zero-dependency claim, checked by `tests/deps_test.py` (see also the CI step
+# "No third-party dependencies"). It must never gain an entry — a dependency
+# here is a change to what this tool IS, not a routine bump.
+#
+# `version` is `dynamic`, sourced from `scanner.__version__`, so this file does
+# not become a third hand-written version string alongside `__version__` and
+# SKILL.md's frontmatter (see `tests/version_test.py`).
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skills-inspector"
+description = "Static audit of an agent extension before installation. Reports; never blocks."
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = []
+dynamic = ["version"]
+
+[project.scripts]
+skills-inspector = "scanner.__main__:main"
+
+[tool.setuptools]
+packages = ["scanner"]
+
+[tool.setuptools.dynamic]
+version = {attr = "scanner.__version__"}
