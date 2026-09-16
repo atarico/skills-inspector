@@ -278,7 +278,7 @@ for name, block, want in YAML_CASES:
 # far it got (`scope_levels`). Before this, every non-widening outcome collapsed
 # to `scope_widened: false`, whether the walk genuinely saw the whole ancestor
 # chain or was cut short by a permission error or the depth budget — ClawScan's
-# issue #53 objection in one sentence. The cases below exercise all five values.
+# issue #53 objection in one sentence. The cases below exercise all six values.
 
 def _resolve_cases() -> None:
     with tempfile.TemporaryDirectory() as tmp:
@@ -322,6 +322,56 @@ def _resolve_cases() -> None:
               levels, 3,
               "pskill -> skills -> plug is 3 directories examined before the "
               "non-skill marker is found and the walk stops")
+
+        # A non-skill marker AT the target itself — scanning a claude plugin
+        # root directly, not a skill inside one. The break on line ~185 used
+        # to leave `termination` at its stale initial value here, publishing
+        # `scope_search: depth_limit` after a walk that ran exactly one
+        # iteration. `stopped_at_unit_marker` names the real reason: the
+        # marker settles what the unit IS, but the break means a stronger
+        # marker (a marketplace) above it was never looked for.
+        pluginroot = base / "pluginroot"
+        pluginroot.mkdir()
+        (pluginroot / ".claude-plugin").mkdir()
+        (pluginroot / ".claude-plugin" / "plugin.json").write_text('{"name":"p2"}')
+        root, kind, widened, scope_search, levels = resolve(pluginroot)
+        check("resolve", "non-skill marker at the target: no widening",
+              (root.name, kind, widened), ("pluginroot", "claude plugin", False),
+              "the plugin IS the unit; nothing was found above it")
+        check("resolve", "non-skill marker at the target: scope_search names "
+              "the real reason, not the stale depth_limit sentinel",
+              scope_search, "stopped_at_unit_marker",
+              "one iteration ran, not eight — depth_limit here would be a lie")
+        check("resolve", "non-skill marker at the target: exactly one level examined",
+              levels, 1,
+              "the break fires in the same iteration the marker is found")
+
+        # A marketplace enclosing a plugin, with the PLUGIN scanned directly.
+        # This pins the honesty of `stopped_at_unit_marker`: the marketplace
+        # really does sit above the target, and the climb still never sees
+        # it, because the plugin manifest at the target wins the break first.
+        marketplace = base / "marketplace"
+        pluginchild = marketplace / "plugins" / "p"
+        pluginchild.mkdir(parents=True)
+        (marketplace / ".claude-plugin").mkdir()
+        (marketplace / ".claude-plugin" / "marketplace.json").write_text('{"name":"m"}')
+        (pluginchild / ".claude-plugin").mkdir()
+        (pluginchild / ".claude-plugin" / "plugin.json").write_text('{"name":"p"}')
+        root, kind, widened, scope_search, levels = resolve(pluginchild)
+        check("resolve", "marketplace above a plugin scanned directly: "
+              "climb stops at the plugin, not the marketplace",
+              (root.name, kind, widened), ("p", "claude plugin", False),
+              "the plugin at the target wins the break before the walk ever "
+              "reaches the enclosing marketplace")
+        check("resolve", "marketplace above a plugin scanned directly: "
+              "scope_search reports the search never got there",
+              scope_search, "stopped_at_unit_marker",
+              "a marketplace.json genuinely sits one level up and was never "
+              "seen — this is exactly what the value exists to admit")
+        check("resolve", "marketplace above a plugin scanned directly: "
+              "exactly one level examined",
+              levels, 1,
+              "only 'p' itself was read before the break")
 
         # THE CASE THAT MAKES `marker_at_target` A CLAIM AND NOT A SHRUG.
         # A skill marker sits at the target AND a plugin manifest genuinely
@@ -400,6 +450,19 @@ def _resolve_cases() -> None:
         check("resolve", "depth_limit: scope_levels is exactly the budget",
               levels, 8,
               "every one of the 8 permitted iterations ran, and no more")
+
+        # `termination` carries no default any more — deliberately, so that an
+        # exit which forgets to assign one fails loudly instead of leaking a
+        # stale sentinel into the report. The price is that the for/else is now
+        # load-bearing: it is the ONLY assignment standing behind the run-dry
+        # exit, which has none anywhere in the loop body. This check names that
+        # dependency, so whoever deletes the `else` branch finds a pin that
+        # says what it was holding up.
+        check("resolve", "depth_limit: the run-dry exit binds its own reason",
+              resolve(deep)[3], "depth_limit",
+              "no initialiser stands behind this path any more; the for/else "
+              "is the only assignment, and without it resolve() raises "
+              "UnboundLocalError instead of returning a report")
 
         # unreadable_ancestor: an ancestor exists but this process cannot list
         # it. os.access(..., R_OK) is what has to catch this — (path/marker

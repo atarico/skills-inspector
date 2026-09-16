@@ -86,14 +86,15 @@ class FileEntry:
     truncated: bool = False   # read only in part; anything past the cap is unseen
 
 
-# The five ways the upward search for an enclosing unit can end. Only the first
+# The six ways the upward search for an enclosing unit can end. Only the first
 # three are conclusive: the search actually saw enough of the ancestor chain to
-# trust its answer. `depth_limit` and `unreadable_ancestor` mean the search
-# stopped without ruling out a stronger marker further up — see resolve()'s
-# docstring for why that distinction has to survive into the report.
+# trust its answer. `depth_limit`, `unreadable_ancestor`, and
+# `stopped_at_unit_marker` mean the search stopped without ruling out a
+# stronger marker further up — see resolve()'s docstring for why that
+# distinction has to survive into the report.
 SCOPE_SEARCH_VALUES = (
     "widened", "marker_at_target", "reached_filesystem_root",
-    "depth_limit", "unreadable_ancestor",
+    "depth_limit", "unreadable_ancestor", "stopped_at_unit_marker",
 )
 
 
@@ -157,7 +158,13 @@ def resolve(target: Path) -> tuple[Path, str, bool, str, int]:
     best: tuple[Path, str] | None = None
     current = start
     levels = 0
-    termination = "depth_limit"  # overwritten below unless the for-loop runs dry
+    # No default value on purpose: every exit below (unreadable ancestor,
+    # non-skill marker, filesystem root, budget run-dry) assigns its own
+    # reason. A bare annotation means an exit that forgot to assign one fails
+    # loudly with NameError instead of silently reporting whatever sentinel
+    # was left here — which is exactly how the non-skill-marker break used to
+    # leak `depth_limit` for a search that ran one iteration, not eight.
+    termination: str
     for _ in range(8):
         # Read permission is required to trust "no marker here" — a directory
         # this process cannot list is not evidence of an empty one. Checked
@@ -176,6 +183,14 @@ def resolve(target: Path) -> tuple[Path, str, bool, str, int]:
                     best = (current, kind)
                 break
         if best and best[1] != "skill":
+            # This is the widening marker itself, found at `current`. When
+            # `current` is still `start` (the target), this is the same
+            # false-clean shape the docstring above names: the marker settles
+            # what the unit IS, but a marketplace could enclose THIS plugin
+            # and the break means it is never looked for. `stopped_at_unit_marker`
+            # names that truthfully; only `widened` (below) claims the search
+            # is done.
+            termination = "stopped_at_unit_marker"
             break
         parent = current.parent
         if parent == current:

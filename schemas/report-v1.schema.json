@@ -56,7 +56,7 @@
         },
         "scope_search": {
           "$ref": "#/$defs/scope_search",
-          "description": "How the upward search for an enclosing unit (unit.py::resolve) ended. `widened`, `marker_at_target`, and `reached_filesystem_root` are conclusive — the search saw enough of the ancestor chain to trust its answer. `depth_limit` and `unreadable_ancestor` are NOT: the search stopped without ruling out a stronger marker further up, and `scope_widened: false` alone cannot tell that apart from a genuinely exhaustive search — see RULES.md section 11 and coverage_limits()."
+          "description": "How the upward search for an enclosing unit (unit.py::resolve) ended. `widened`, `marker_at_target`, and `reached_filesystem_root` are conclusive — the search saw enough of the ancestor chain to trust its answer. `depth_limit`, `unreadable_ancestor`, and `stopped_at_unit_marker` are NOT: the search stopped without ruling out a stronger marker further up, and `scope_widened: false` alone cannot tell that apart from a genuinely exhaustive search — see RULES.md section 11 and coverage_limits()."
         },
         "scope_levels": {
           "type": "integer",
@@ -209,7 +209,8 @@
         "marker_at_target",
         "reached_filesystem_root",
         "depth_limit",
-        "unreadable_ancestor"
+        "unreadable_ancestor",
+        "stopped_at_unit_marker"
       ]
     },
     "severity": {

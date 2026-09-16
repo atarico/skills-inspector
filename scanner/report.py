@@ -89,8 +89,10 @@ _WITH_SEMANTIC = (
 
 # Conditional, unlike the standing SKIP_DIRS limit above: it applies only when
 # THIS unit's enclosing-unit search (unit.py::resolve) could not rule out a
-# stronger marker above the target — `scope_search` of `depth_limit` or
-# `unreadable_ancestor`. `scope_widened: false` used to be the only signal, and
+# stronger marker above the target — `scope_search` of `depth_limit`,
+# `unreadable_ancestor`, or `stopped_at_unit_marker` (a non-skill marker sat
+# at the target itself, so the climb broke before it could rule out a
+# stronger marker above it). `scope_widened: false` used to be the only signal, and
 # it read identically whether the search was exhaustive or merely cut short; a
 # consumer trusting a `false` here as "confirmed nothing above" is exactly the
 # false confidence ClawScan's issue #53 flagged for a target-only Docker mount.
@@ -101,7 +103,7 @@ _INCONCLUSIVE_SCOPE = (
     "that no such manifest sits above the target; the search never got far "
     "enough to rule one out.")
 
-_INCONCLUSIVE_SCOPE_SEARCH = ("depth_limit", "unreadable_ancestor")
+_INCONCLUSIVE_SCOPE_SEARCH = ("depth_limit", "unreadable_ancestor", "stopped_at_unit_marker")
 
 
 def coverage_limits(findings=(), *, scope_search: str | None = None) -> list[str]:
