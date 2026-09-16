@@ -14,7 +14,7 @@ import re
 
 from . import evidence as ev
 from . import rules as R
-from .finding import Finding, headline
+from .finding import SEVERITY_ORDER, Finding, headline
 from .unit import Unit
 
 
@@ -88,6 +88,61 @@ def coverage_limits(findings=()) -> list[str]:
 # Kept for callers that want the pessimistic default.
 COVERAGE_LIMITS = coverage_limits()
 
+
+def headline_summary(findings: list[Finding]) -> dict:
+    """Precompute the disclosure-gap predicate for integrators that cannot.
+
+    A gate DSL (ClawScan's included) evaluates one JSON path per rule and has
+    no way to express "CRITICAL, or HIGH the description never named" as a
+    condition — that conjunction is exactly `finding.headline`'s definition
+    (RULES.md section 11). Without this block, an integrator can only gate on
+    raw severity and loses the disclosure half of the report's thesis. This is
+    a MEASUREMENT the scanner already made, restated so a gate can read it in
+    one lookup — it is not a new verdict, and it does not make the tool block.
+
+    Built by calling `headline()` itself, never by re-deriving its condition —
+    see the Makefile `selftest` target and its comment for the drift this
+    duplication caused before the predicate was collapsed to one place.
+
+    `undeclared_critical` is a second, narrower counter, and it exists because
+    "leads the report" and "must not be installed" are different thresholds.
+    `headline()` deliberately leads with a declared CRITICAL (section 11: there
+    is no benign declared CRITICAL), so `count` and `max_severity` alone cannot
+    tell a gate apart from a legitimate tool that says what it does. This
+    counts only the CRITICAL findings the description never named.
+
+    WHAT IT IS NOT, measured over the 143-unit fixture corpus rather than
+    assumed: it is a HIGH-PRECISION, LOW-RECALL signal, not a verdict.
+
+        undeclared_critical > 0   malicious 35/82    benign  2/56
+        count > 0                 malicious 69/82    benign  8/56
+
+    So a gate blocking on `undeclared_critical` misses 47 of the 82 malicious
+    units — among them `fixtures/malicious/host-mount`, whose only finding is
+    a CRITICAL the author DID declare. On (severity, disclosure, confidence)
+    that unit's finding set is a strict subset of benign `agent-config-manager`'s,
+    so no counter over those three axes can separate them; the information is
+    not in this block at all. Block narrow on this, warn broad on `count`, and
+    do not mistake either for a decision — the tool still does not block.
+    """
+    lead = headline(findings)
+    summary: dict = {
+        "count": len(lead),
+        "undeclared_critical": sum(1 for f in lead
+                                   if f.severity == "CRITICAL"
+                                   and f.disclosure != "declared"),
+        "rule_ids": sorted({f.id for f in lead}),
+        "capabilities": sorted({f.capability for f in lead}),
+    }
+    if lead:
+        # `headline()` happens to sort severity-first today, so `lead[0]` IS
+        # the max — but reading that off the sort order would make a future
+        # re-sort of `headline()` silently change this contract. Derive it
+        # from SEVERITY_ORDER instead, independent of how `lead` is ordered.
+        summary["max_severity"] = min(
+            (f.severity for f in lead), key=lambda s: SEVERITY_ORDER.get(s, 9))
+    return summary
+
 # Generic label for a group whose members word the same fact differently.
 RULE_SUMMARY = {
     "HOK-001": "Defines agent hooks",
@@ -103,6 +158,11 @@ RULE_SUMMARY = {
 
 def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
     return json.dumps({
+        # The machine contract for this shape. Bump only on a breaking
+        # key-name or key-type change to the keys below — never on a rule
+        # addition, a new finding, or a wording change. An integrator pins
+        # this, not the tool's own version.
+        "schema_version": "1",
         "unit": {
             "name": ev.sanitize(unit.name),
             "kind": unit.kind,
@@ -113,6 +173,7 @@ def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
             "file_count": len(unit.files),
         },
         "profile": profile,
+        "headline": headline_summary(findings),
         "findings": [f.as_dict() for f in findings],
         "not_analyzed": [{"file": ev.sanitize_path(p), "reason": r} for p, r in unit.skipped],
         "coverage_limits": coverage_limits(findings),

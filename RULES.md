@@ -750,6 +750,37 @@ The `NOT ANALYZED` and `COVERAGE LIMITS` sections are **mandatory output**, not
 documentation. A report that omits them implies a completeness the tool does not
 have.
 
+**`--json` output** carries two things the text report above does not need to
+spell out:
+
+- `schema_version` — a string, first key in the document. It is the machine
+  contract for this shape: bump it only when a key's name or type changes in a
+  breaking way, never for a rule addition, a new finding, or a wording change.
+  An integrator pins this number, not the tool's own release version.
+- `headline` — `{count, undeclared_critical, rule_ids, capabilities,
+  max_severity}`, a precomputed restatement of `headline()` (this section's own
+  predicate) for gate DSLs that can only test one JSON path per rule and cannot
+  express "CRITICAL, or HIGH the description never named" as a condition.
+  `max_severity` is omitted entirely (not `null`) when `count` is 0; every
+  other key is unconditional. This block is a **measurement, not a verdict** —
+  it does not make the tool block, and it must never be computed by anything
+  other than a call to `headline()` itself.
+
+  `count` and `undeclared_critical` are two different thresholds and must not
+  be conflated. Leading the report and being unfit to install are different
+  questions: a declared CRITICAL leads (see above) but says nothing about
+  intent, so `undeclared_critical` counts only the CRITICAL findings the
+  description never named. Measured over the 143-unit fixture corpus, it fires
+  on 35 of 82 malicious units and 2 of 56 benign ones, where `count > 0` fires
+  on 69 and 8 — narrow and precise against broad and sensitive. Neither is a
+  verdict, and neither separates every case: `fixtures/malicious/host-mount`
+  scores `undeclared_critical: 0`, because its single finding is a CRITICAL the
+  author declared, and on these axes its finding set is a strict subset of
+  benign `agent-config-manager`'s. No counter over severity, disclosure and
+  confidence can tell those two apart. An integrator that blocks on
+  `undeclared_critical` is choosing precision over recall, deliberately, and
+  should say so.
+
 ---
 
 ## 12. Diff mode and the approved state

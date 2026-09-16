@@ -2719,6 +2719,8 @@ _instruction_surface_cases()
 
 def _report_shape_cases() -> None:
     from scanner import engine
+    from scanner import report as report_mod
+    from scanner import unit as unit_mod
 
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
@@ -2759,6 +2761,120 @@ def _report_shape_cases() -> None:
         check("headline", "CRITICAL leads even when declared",
               [f.id for f in engine.headline(findings)], ["X-CRIT", "X-HIGH"],
               "the docstring promises CRITICAL always leads, declared or not")
+
+        # `schema_version` is the machine contract for `to_json`'s shape — see
+        # RULES.md section 11 — and must be the string "1" until a breaking
+        # key change earns a bump.
+        unit = unit_mod.collect(control)
+        text = report_mod.to_json(unit, findings, {"capabilities": {}, "severity_counts": {},
+                                                    "finding_count": 0, "file_count": 0,
+                                                    "unreadable_count": 0})
+        check("schema_version", "to_json's first-class contract string",
+              json.loads(text)["schema_version"], "1",
+              "RULES.md section 11 promises a stable, explicitly-versioned JSON contract")
+
+        # `headline_summary` (report.py) exists ONLY to restate `headline()`
+        # for a gate DSL that cannot express its conjunction — it must never
+        # grow a second copy of the predicate. See the Makefile `selftest`
+        # comment for the drift a duplicate copy caused before it was deleted.
+        empty = report_mod.headline_summary([])
+        check("headline_summary", "empty input has count 0",
+              empty["count"], 0, "an empty findings list has no headline")
+        check("headline_summary", "empty input omits max_severity entirely",
+              "max_severity" in empty, False,
+              "the field must be OMITTED, not null or 'NONE', when count == 0")
+
+        dup_findings = [
+            engine.Finding(id="X-CRIT", severity="CRITICAL", confidence="high",
+                           status="active", disclosure="declared",
+                           capability=R.NETWORK, location="a.sh", line=1,
+                           detects="", evidence="", impact="",
+                           legitimate_use="", what_to_check=""),
+            # Same rule id, same capability, a second file — proves dedupe.
+            engine.Finding(id="X-CRIT", severity="CRITICAL", confidence="high",
+                           status="active", disclosure="declared",
+                           capability=R.NETWORK, location="b.sh", line=1,
+                           detects="", evidence="", impact="",
+                           legitimate_use="", what_to_check=""),
+            engine.Finding(id="X-SEC", severity="CRITICAL", confidence="high",
+                           status="active", disclosure="undeclared",
+                           capability=R.SECRETS, location="c.sh", line=1,
+                           detects="", evidence="", impact="",
+                           legitimate_use="", what_to_check=""),
+        ]
+        summary = report_mod.headline_summary(dup_findings)
+        canonical = engine.headline(dup_findings)
+        check("headline_summary", "count agrees with headline()",
+              summary["count"], len(canonical),
+              "headline_summary is built by calling headline(), never by re-deriving it")
+        check("headline_summary", "rule_ids sorted and deduplicated",
+              summary["rule_ids"], ["X-CRIT", "X-SEC"],
+              "two findings share id X-CRIT; the list must not repeat it")
+        check("headline_summary", "capabilities sorted and deduplicated",
+              summary["capabilities"], sorted({R.NETWORK, R.SECRETS}),
+              "two findings share capability=network; the list must not repeat it")
+
+        # This is the EXACT case where the now-deleted Makefile copy of the
+        # predicate disagreed with the canonical one: a CRITICAL finding with
+        # disclosure="declared" and confidence="high". The Makefile's copy
+        # only counted disclosure in (undeclared, euphemistic), so it silently
+        # dropped a declared CRITICAL — `fixtures/malicious/host-mount` is the
+        # fixture that caught this live. `headline()` counts CRITICAL either
+        # way; pin it here so the drift cannot come back.
+        declared_critical = [
+            engine.Finding(id="PRV-008", severity="CRITICAL", confidence="high",
+                           status="active", disclosure="declared",
+                           capability=R.WRITE_OUTSIDE, location="d.sh", line=1,
+                           detects="", evidence="", impact="",
+                           legitimate_use="", what_to_check=""),
+        ]
+        check("headline_summary", "a declared CRITICAL is still counted",
+              report_mod.headline_summary(declared_critical)["count"], 1,
+              "CRITICAL always leads, declared or not — RULES.md section 11")
+
+        # `undeclared_critical` is the OTHER threshold: what leads the report
+        # and what a gate should refuse to install are not the same question.
+        # It must count the declared CRITICAL above as ZERO while `count`
+        # counts it as one — that gap is the entire reason the field exists.
+        check("headline_summary", "a declared CRITICAL is not undeclared_critical",
+              report_mod.headline_summary(declared_critical)["undeclared_critical"], 0,
+              "the author named it; only findings the description never named count here")
+        check("headline_summary", "undeclared_critical counts a hidden CRITICAL",
+              report_mod.headline_summary(dup_findings)["undeclared_critical"], 1,
+              "X-SEC is CRITICAL/undeclared; the two declared X-CRIT rows are not")
+        check("headline_summary", "undeclared_critical never exceeds count",
+              report_mod.headline_summary(dup_findings)["undeclared_critical"]
+              <= report_mod.headline_summary(dup_findings)["count"], True,
+              "it is a subset of the headline, not an independent tally")
+        check("headline_summary", "undeclared_critical is present at count 0",
+              empty["undeclared_critical"], 0,
+              "unlike max_severity it is unconditional — a gate reads it without an exists check")
+        # A euphemistic description is not a declaration. RULES.md section 11
+        # treats "undeclared" and "euphemistic" as the same failure to name a
+        # capability, and this counter must not let the softer wording through.
+        euphemistic_critical = [
+            engine.Finding(id="X-EUPH", severity="CRITICAL", confidence="high",
+                           status="active", disclosure="euphemistic",
+                           capability=R.SECRETS, location="e.sh", line=1,
+                           detects="", evidence="", impact="",
+                           legitimate_use="", what_to_check=""),
+        ]
+        check("headline_summary", "a euphemistic CRITICAL counts as undeclared",
+              report_mod.headline_summary(euphemistic_critical)["undeclared_critical"], 1,
+              "euphemistic is a failure to name the capability, not a declaration")
+        # A HIGH the description never named leads the report, but it is not
+        # a CRITICAL — the narrow counter must not quietly widen to catch it.
+        undeclared_high = [
+            engine.Finding(id="X-HI", severity="HIGH", confidence="high",
+                           status="active", disclosure="undeclared",
+                           capability=R.NETWORK, location="f.sh", line=1,
+                           detects="", evidence="", impact="",
+                           legitimate_use="", what_to_check=""),
+        ]
+        summary_high = report_mod.headline_summary(undeclared_high)
+        check("headline_summary", "an undeclared HIGH leads but is not critical",
+              (summary_high["count"], summary_high["undeclared_critical"]), (1, 0),
+              "count is the broad signal, undeclared_critical the narrow one")
 
 
 _report_shape_cases()

@@ -96,14 +96,16 @@ anomalies:
 # The scanner must stay quiet on its own source: a rules catalogue is full of
 # attack patterns, and flagging them is the failure mode this project exists
 # to avoid. Non-zero headline findings here are a regression in position.py.
+#
+# The predicate lives in exactly one place now: `scanner/finding.py::headline`
+# (RULES.md section 11). This target no longer imports it or recomputes it —
+# a second copy here disagreed with the canonical one on 2 of 143 fixture
+# units before it was deleted. It reads `headline.count` straight out of the
+# JSON the scanner ships, so the number below is the number an integrator gets.
 selftest:
 	@python3 -m scanner . --json | python3 -c "\
-import json,sys; sys.path.insert(0,'.');\
-from scanner.engine import headline;\
-d=json.load(sys.stdin);\
-n=len([f for f in d['findings'] if f['disclosure'] in ('undeclared','euphemistic')\
- and f['severity'] in ('CRITICAL','HIGH') and f['confidence'] in ('high','medium')]);\
-print(f'self-scan headline: {n}')"
+import json,sys;\
+print(f\"self-scan headline: {json.load(sys.stdin)['headline']['count']}\")"
 
 # Re-runs unit + detect + semantic + fuzz + coverage in-process (~15s) rather
 # than caching the numbers they printed — a cache that can go stale is the
