@@ -120,6 +120,9 @@ drift-freeze:
 bench-public:
 	@python3 -m bench.public $(if $(LIMIT),--limit $(LIMIT))
 
+# LIMIT is accepted here and REFUSED when it narrows: the smoke-run advice
+# above belongs to `bench-public`. Re-freezing five units over a 253-unit
+# baseline deletes the reference instead of updating it.
 bench-public-freeze:
 	@python3 -m bench.public --freeze $(if $(LIMIT),--limit $(LIMIT))
 

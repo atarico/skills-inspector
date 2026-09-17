@@ -166,7 +166,8 @@ def _owner_repo(url: str) -> tuple[str, str]:
 
 
 def fetch_unit(unit: dict, cache_dir: Path,
-                timeout: int = FETCH_TIMEOUT) -> tuple[Path | None, str]:
+                timeout: int = FETCH_TIMEOUT,
+                link_drops: list | None = None) -> tuple[Path | None, str]:
     """Fetch one pinned unit's exact sha into the cache.
 
     Keyed `<sha>/<path>` (path "" for the 153 pinned units that are a whole
@@ -179,6 +180,11 @@ def fetch_unit(unit: dict, cache_dir: Path,
     everything else is discarded — cheaper than a full clone, which would
     also carry the git history and every other subdirectory this benchmark
     never reads.
+
+    `link_drops`, when given, collects `(name, count)` for every unit
+    extracted on this run that had link entries dropped — see the skip below.
+    A cache hit appends nothing, because it was not re-read and a 0 there
+    would be a count nobody took.
 
     Returns (root, reason). `root` is the extracted directory on success, or
     None with `reason` naming why the fetch failed — a 404, an archived
@@ -204,6 +210,7 @@ def fetch_unit(unit: dict, cache_dir: Path,
     tmp = cache_dir / f".fetch-{sha[:12]}-{uuid.uuid4().hex[:12]}"
     tmp.mkdir(parents=True, exist_ok=True)
     extracted_any = False
+    links = 0
     try:
         url = CODELOAD.format(owner=owner, repo=repo, sha=sha)
         with urllib.request.urlopen(url, timeout=timeout) as resp:
@@ -219,10 +226,14 @@ def fetch_unit(unit: dict, cache_dir: Path,
                     if not member.name.startswith(prefix):
                         continue
                     if member.issym() or member.islnk():
-                        # A symlink escaping the unit is a finding the
-                        # scanner itself reports (FSW-008) once the unit is
-                        # collected; following one here, before that check
-                        # runs, could write outside `tmp`.
+                        # DROPPED, AND THE SCAN NEVER SEES IT. Following a link
+                        # could write outside `tmp`, so it is not extracted —
+                        # which also means it never reaches the cache, and
+                        # FSW-008 cannot fire on what is not there. The comment
+                        # this replaces claimed the scanner covered the case
+                        # downstream; this line is what removes it from
+                        # coverage, so the drops are counted, not implied.
+                        links += 1
                         continue
                     rel = member.name[len(prefix):]
                     if not rel:
@@ -258,6 +269,8 @@ def fetch_unit(unit: dict, cache_dir: Path,
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(dest, ignore_errors=True)
     shutil.move(str(tmp), str(dest))
+    if links and link_drops is not None:
+        link_drops.append((unit["name"], links))
     return dest, "fetched"
 
 
@@ -351,31 +364,35 @@ def _breakdown(report: dict) -> None:
             print(f"  {DIM}listed {BREAKDOWN_ROWS} of {len(crashed)}{RESET}")
 
 
-def read_baseline(path: Path) -> dict | None:
+def read_baseline(path: Path) -> tuple[dict | None, str]:
     """The frozen public report, or None with the reason printed.
 
     Same discipline as `bench.drift.read_baseline` — a truncated or
-    hand-edited baseline must never read as zero regressions."""
+    hand-edited baseline must never read as zero regressions, and a bare
+    `None` meaning BOTH absence and damage is what let one read as the
+    other: the caller printed "no baseline yet", named a cause that was not
+    the cause, and exited 0. Returns `(baseline, status)` — present, absent
+    or damaged — and damaged is a DID NOT RUN, never a pass."""
     if not path.exists():
-        return None
+        return None, "absent"
     try:
         base = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         print(f"  the frozen public baseline cannot be read "
               f"({type(exc).__name__}) — restore it from git, or re-record "
               f"it: make bench-public-freeze")
-        return None
+        return None, "damaged"
     if not isinstance(base, dict) or base.get("schema") != SCHEMA:
         got = base.get("schema") if isinstance(base, dict) else "not an object"
         print(f"  the frozen public baseline is schema {got}, this build "
               f"reads {SCHEMA}.")
-        return None
+        return None, "damaged"
     missing = [key for key in REQUIRED if key not in base]
     if missing:
         print(f"  the frozen public baseline is missing {missing} — "
               f"truncated or hand-edited, nothing to compare against.")
-        return None
-    return base
+        return None, "damaged"
+    return base, "present"
 
 
 def freeze_report(report: dict) -> int:
@@ -401,6 +418,20 @@ def freeze_report(report: dict) -> int:
               f"written — a new field gets reviewed for what it says and "
               f"added to FROZEN_KEYS on purpose.")
         return DID_NOT_RUN
+
+    # A NARROWING RE-FREEZE IS A DELETION, not an update: `LIMIT=5 make
+    # bench-public-freeze` forwards the measuring target's --limit, and that
+    # replaced a 253-unit baseline with a five-unit one that still parsed.
+    existing, status = read_baseline(BASELINE)
+    if status == "present":
+        lost = sorted(set(existing["unit_names"]) - set(report["unit_names"]))
+        if lost:
+            print(f"{YELLOW}DID NOT RUN{RESET}  the frozen baseline covers "
+                  f"{len(existing['unit_names'])} unit(s); this run measured "
+                  f"{len(report['unit_names'])} and would drop {len(lost)}. "
+                  f"Nothing was written — re-run without --limit, or remove "
+                  f"{BASELINE.name} first if starting over is the intent.")
+            return DID_NOT_RUN
 
     published = {key: published[key] for key in FROZEN_KEYS}
     BASELINE.write_text(json.dumps(published, indent=2) + "\n", encoding="utf-8")
@@ -449,8 +480,9 @@ def main(argv: list[str]) -> int:
 
     fetched: list[tuple[str, Path]] = []
     fetch_failures: list[tuple[str, str]] = []
+    link_drops: list[tuple[str, int]] = []
     for unit in requested:
-        root, reason = fetch_unit(unit, cache_dir, timeout)
+        root, reason = fetch_unit(unit, cache_dir, timeout, link_drops)
         if root is None:
             fetch_failures.append((unit["name"], reason))
         else:
@@ -463,6 +495,11 @@ def main(argv: list[str]) -> int:
           (f", {len(fetch_failures)} failure(s) below" if fetch_failures else ""))
     for name, reason in fetch_failures:
         print(f"    FAILED  {name}: {reason}")
+    if link_drops:
+        total = sum(n for _, n in link_drops)
+        print(f"    {total} link entr(ies) dropped before extraction across "
+              f"{len(link_drops)} unit(s), never scanned; cached units were "
+              f"not re-read, so theirs are unknown rather than zero")
 
     if len(fetched) < len(requested):
         print(f"\n{YELLOW}DID NOT RUN{RESET}  {len(fetch_failures)} of "
@@ -478,6 +515,14 @@ def main(argv: list[str]) -> int:
         print(f"\n{YELLOW}DID NOT RUN{RESET}  nothing was measured.")
         return DID_NOT_RUN
 
+    # `report_for_units` returns None only for an EMPTY list; when every unit
+    # CRASHES it returns units=0 carrying the zeroes of an empty sequence, and
+    # that reached the exit-0 branch below. `freeze_report` already refused it.
+    if not report["units"]:
+        print(f"\n{YELLOW}DID NOT RUN{RESET}  all {report['discovered']} "
+              f"fetched unit(s) crashed the scanner; nothing was measured.")
+        return DID_NOT_RUN
+
     report["schema"] = SCHEMA
     report["limit"] = limit
     report["marketplace_json_sha256"] = corpus["provenance"]["marketplace_json_sha256"]
@@ -489,7 +534,12 @@ def main(argv: list[str]) -> int:
     if freeze:
         return freeze_report(report)
 
-    baseline = read_baseline(BASELINE)
+    baseline, status = read_baseline(BASELINE)
+    if status == "damaged":
+        print(f"\n{YELLOW}DID NOT RUN{RESET}  the baseline named above could "
+              f"not be read, so nothing was compared — a gate that cannot see "
+              f"its own reference reports neither a pass nor a regression.")
+        return DID_NOT_RUN
     if baseline is None:
         print(f"\n  no frozen public baseline yet — nothing to compare. "
               f"Record one with: make bench-public-freeze")
