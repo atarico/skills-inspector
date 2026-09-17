@@ -4069,6 +4069,129 @@ def _corpus_discover_cases() -> None:
 _corpus_discover_cases()
 
 
+# ------------------------------------------- public benchmark: the breakdown
+# Promise (bench/public.py): a number a third party can check. `_summary`
+# prints one line of aggregates, and `openclaw/clawscan` issue #53 asks for
+# evidence somebody else can verify — an aggregate nobody can take apart is a
+# number trusted on faith. `_breakdown` prints the two censuses behind it, and
+# these pin the three properties that make them evidence instead of decoration.
+#
+# ORDER IS DETERMINISTIC, ties broken by id and by name. A published table
+# that reshuffles between two runs over the same corpus is not reproducible.
+#
+# THE CUT IS ADMITTED AND THE ACCOUNTING ADDS UP. `bench.corpus` prints a flat
+# twelve rows with no sign that a thirteenth rule exists — the exact defect
+# class this repository has now fixed three times in the scanner itself: a
+# climb that stopped and called its last answer the whole search, a scope that
+# never widened counted as searched, a pruned directory the report never named.
+# Listed plus unlisted, and noisy plus clean equals scanned.
+#
+# A CRASHED UNIT IS NAMED AND APPEARS IN NO STATISTIC. It produced no findings
+# because it never ran; listing it among the quiet units would read as evidence
+# of quiet, which is the same lie in a smaller font.
+
+def _public_breakdown_cases() -> None:
+    import io
+    import re
+    from contextlib import redirect_stdout
+
+    from bench import public as P
+
+    def fp(*rule_ids: str, crashed: bool = False) -> dict:
+        return {"crashed": crashed, "headline_ids": list(rule_ids),
+                "finding_ids": list(rule_ids)}
+
+    def run(fingerprints: dict) -> str:
+        """Drive `_breakdown` on a report shaped exactly like the one
+        `bench.corpus.report_for_units` returns: `units` and `clean_units`
+        count only the units that actually scanned, and a crashed unit is in
+        `unit_fingerprints` and in neither count."""
+        live = [row for row in fingerprints.values() if not row["crashed"]]
+        rules: dict[str, int] = {}
+        for row in live:
+            for rule_id in row["headline_ids"]:
+                rules[rule_id] = rules.get(rule_id, 0) + 1
+        report = {"units": len(live),
+                  "clean_units": sum(1 for row in live if not row["headline_ids"]),
+                  "rule_headline_counts": dict(sorted(rules.items())),
+                  "unit_fingerprints": fingerprints}
+        out = io.StringIO()
+        with redirect_stdout(out):
+            P._breakdown(report)
+        # Colour codes carry digits, and every numeric assertion below would
+        # read them as part of the accounting.
+        return re.sub(r"\033\[[0-9;]*m", "", out.getvalue())
+
+    def rules_listed(out: str) -> list[str]:
+        return re.findall(r"^ +([A-Z]{3}-\d{3}) +\d+$", out, re.M)
+
+    def units_listed(out: str) -> list[str]:
+        return re.findall(r"^ +\d+ +(\S+)", out, re.M)
+
+    def numbers_on(out: str, needle: str) -> list[str]:
+        line = [row for row in out.splitlines() if needle in row]
+        return re.findall(r"\d+", line[0]) if line else []
+
+    out = run({"beta": fp("NET-001", "HOK-003"),
+               "alpha": fp("NET-001", "HOK-003"),
+               "zeta": fp(*["AGT-002"] * 5),
+               "quiet": fp()})
+
+    check("public", "rules are ordered by count, ties by rule id",
+          rules_listed(out), ["AGT-002", "HOK-003", "NET-001"],
+          "a table that reshuffles between two runs over the same corpus is "
+          "not reproducible evidence")
+    check("public", "units are ordered by count, ties by name",
+          units_listed(out), ["zeta", "alpha", "beta"],
+          "the worst unit has to still be the worst unit tomorrow")
+    check("public", "a clean unit is not listed among the worst",
+          "quiet" in units_listed(out), False,
+          "the list is the units that made noise; padding it with the quiet "
+          "ones buries the ones that did")
+    zeta_row = [row for row in out.splitlines() if " zeta" in row]
+    check("public", "the rules behind a unit's count are named on its row",
+          bool(zeta_row) and "AGT-002" in zeta_row[0], True,
+          "a count with no rule ids cannot be checked against the scan that "
+          "produced it")
+
+    # Twenty units that made noise, each on its own rule, plus five clean ones.
+    # Both lists overflow, so both have to say by how much.
+    many = {f"unit-{i:02d}": fp(*[f"NET-{i:03d}"] * (30 - i)) for i in range(20)}
+    many.update({f"quiet-{i}": fp() for i in range(5)})
+    out = run(many)
+
+    check("public", "the units list cuts at the row budget",
+          len(units_listed(out)), P.BREAKDOWN_ROWS,
+          "a full census of a 253-unit corpus is not a terminal report")
+    check("public", "the units list admits its cut and accounts for the rest",
+          numbers_on(out, "clean"), [str(P.BREAKDOWN_ROWS), "20", "5"],
+          "listed, noisy and clean have to add up to what was scanned — a "
+          "cut the report does not admit to is a cut the reader cannot see")
+    check("public", "the rules list admits its cut too",
+          numbers_on(out, "rule(s)"), [str(P.BREAKDOWN_ROWS), "20"],
+          "twelve rows with no thirteenth named is the defect this repository "
+          "has already fixed three times in the scanner")
+
+    out = run({"boom": fp(crashed=True), "ok": fp("HOK-003")})
+    check("public", "a crashed unit is named",
+          "boom" in out, True,
+          "a crash count nobody can attribute to a unit is not a report")
+    check("public", "a crashed unit is in no statistic",
+          "boom" in units_listed(out), False,
+          "a unit that produced no findings because it never ran is not a "
+          "quiet unit and must never be counted as one")
+
+    out = run({"quiet": fp(), "also-quiet": fp()})
+    check("public", "an all-clean corpus says so instead of printing nothing",
+          (rules_listed(out), units_listed(out), "none" in out),
+          ([], [], True),
+          "an empty table under a header reads like output that went missing")
+
+
+_public_breakdown_cases()
+
+
+
 
 # ------------------------------------------------- instruction-surface promotion
 # `_DIRECTIVE_VERBS` gates promotion of a line that ALREADY matched an

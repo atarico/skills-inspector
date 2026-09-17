@@ -121,6 +121,11 @@ FROZEN_KEYS = ("schema", "limit", "marketplace_json_sha256", "unit_names",
 # key stays reviewed rather than growing by accident.
 LOCAL_KEYS = ("unit_fingerprints",)
 
+# How many rows each census in `_breakdown` prints before it stops. Twelve is
+# `bench.corpus`'s number, kept so the two benchmarks read the same way; the
+# difference is that this one names what it left out.
+BREAKDOWN_ROWS = 12
+
 
 def load_corpus(path: Path = CORPUS) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -246,6 +251,88 @@ def _summary(report: dict) -> str:
             f"median {report['median']}   mean {report['mean']}   "
             f"p90 {report['p90']}   max {report['max']}   "
             f"crashes {report['crashes']}   reported {report['finding_total']}")
+
+
+def _breakdown(report: dict) -> None:
+    """Print the per-rule and per-unit censuses behind the summary line.
+
+    NOTHING HERE IS COMPUTED. `rule_headline_counts` and `unit_fingerprints`
+    come straight out of `bench.corpus.report_for_units` — the same function
+    `bench.drift` freezes — and this only orders and prints them. That is the
+    point: a breakdown doing its own arithmetic could disagree with the
+    aggregate it sits under, and a report whose halves contradict each other
+    is the defect class this whole benchmark exists to refuse.
+
+    WHY IT EXISTS. Issue #53 asks for benchmark evidence a third party can
+    check, and `_summary`'s single line cannot be checked — it says
+    `clean 47 (20%)` and hands the reader nothing to look at when they doubt
+    it. The rules that lead, and the units they lead on, are what turn a
+    percentage into a claim somebody else can go verify against the same
+    pinned shas.
+
+    WHY IT MAY NAME UNITS, when `bench.drift` may not: this corpus is a
+    public marketplace manifest and every name here is already published in
+    `bench/public-corpus.json`. See `bench.corpus.report_for_units` for the
+    half of this that stays anonymous and why.
+
+    ORDER IS COUNT DESCENDING, ties broken by rule id and by unit name —
+    never by the order a Counter happened to see them. A table that
+    reshuffles between two runs over the same corpus is not reproducible
+    evidence, whatever the numbers in it say.
+
+    BOTH LISTS CUT AT `BREAKDOWN_ROWS`, AND BOTH SAY SO, with what they cut
+    accounted for rather than implied. `bench.corpus` prints a flat twelve
+    rows with no sign that a thirteenth rule fired; that is the same shape as
+    a climb that stopped and called its last answer the whole search, a scope
+    that never widened counted as a scope that was searched, and a pruned
+    directory the report never admitted to skipping. Three fixes in the
+    scanner, and the benchmark that publishes its number should not reopen it.
+    """
+    rules = report.get("rule_headline_counts", {})
+    fingerprints = report.get("unit_fingerprints", {})
+    scanned = report["units"]
+
+    print(f"\nnoisiest rules (headline hits across {scanned} scanned unit(s)):")
+    if not rules:
+        print("  none — no scanned unit produced a headline finding")
+    else:
+        ranked = sorted(rules.items(), key=lambda row: (-row[1], row[0]))
+        for rule_id, hits in ranked[:BREAKDOWN_ROWS]:
+            print(f"  {rule_id:<10} {hits:>4}")
+        print(f"  {DIM}listed {min(len(ranked), BREAKDOWN_ROWS)} of "
+              f"{len(ranked)} rule(s) that fired; --freeze records the "
+              f"complete census{RESET}")
+
+    # A crashed unit has no findings to rank, and ranking it at zero would put
+    # it among the quiet ones — a unit that never ran reading as evidence of
+    # quiet. It gets its own section below instead.
+    noisy = [(len(row["headline_ids"]), name, row["headline_ids"])
+             for name, row in fingerprints.items()
+             if not row["crashed"] and row["headline_ids"]]
+
+    print("\nworst units (headline findings, and the rules that fired):")
+    if not noisy:
+        print(f"  none — all {scanned} scanned unit(s) are clean")
+    else:
+        for hits, name, ids in sorted(noisy, key=lambda row: (-row[0], row[1]))[:BREAKDOWN_ROWS]:
+            print(f"  {hits:>4}  {name:<34} {DIM}{' '.join(sorted(set(ids)))}{RESET}")
+        print(f"  {DIM}listed {min(len(noisy), BREAKDOWN_ROWS)} of "
+              f"{len(noisy)} unit(s) with a headline finding; the other "
+              f"{report['clean_units']} scanned unit(s) are clean{RESET}")
+
+    # Names only, and deliberately no exception text: it would name a path
+    # inside the local cache directory, which is the one thing about this
+    # report that is not reproducible anywhere else. `report_for_units` drops
+    # it at the source for the same reason; reproduce a crash by scanning the
+    # named unit out of bench/.public-cache directly.
+    crashed = sorted(name for name, row in fingerprints.items() if row["crashed"])
+    if crashed:
+        print(f"\ncrashed ({len(crashed)} unit(s) — counted above, and in "
+              f"none of the numbers):")
+        for name in crashed[:BREAKDOWN_ROWS]:
+            print(f"  {name}")
+        if len(crashed) > BREAKDOWN_ROWS:
+            print(f"  {DIM}listed {BREAKDOWN_ROWS} of {len(crashed)}{RESET}")
 
 
 def read_baseline(path: Path) -> dict | None:
@@ -381,6 +468,7 @@ def main(argv: list[str]) -> int:
     report["unit_names"] = sorted(name for name, _ in fetched)
 
     print(f"\n{_summary(report)}")
+    _breakdown(report)
 
     if freeze:
         return freeze_report(report)
