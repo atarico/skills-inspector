@@ -1,5 +1,6 @@
 .PHONY: help check unit detect coverage semantic fuzz falsepos drift-freeze \
-	drift anomalies selftest version deps schema readme fixtures expected sync
+	drift anomalies selftest version deps schema readme fixtures expected sync \
+	bench-public bench-public-freeze
 
 help:
 	@echo "make check      run everything (detection + self-scan + sync check)"
@@ -12,6 +13,9 @@ help:
 	@echo "make drift      diff that corpus against the frozen report: any finding"
 	@echo "                gained OR lost fails, and a crash is its own failure"
 	@echo "make drift-freeze     re-record the frozen report (review the diff)"
+	@echo "make bench-public       falsepos/drift's public, reproducible sibling —"
+	@echo "                        fetches a pinned marketplace corpus, no \$$HOME"
+	@echo "make bench-public-freeze   re-record bench/public-baseline.json"
 	@echo "make anomalies  invariant sweep: is the OUTPUT well-formed"
 	@echo "make selftest   scan this repo with its own scanner"
 	@echo "make deps       prove nothing is DECLARED, not just that no file is present"
@@ -93,6 +97,31 @@ drift:
 
 drift-freeze:
 	@python3 -m bench.drift --freeze $${CORPUS:-$$HOME/.claude}
+
+# falsepos/drift's answer to issue #53's objection: THEY read $$HOME/.claude,
+# a machine-specific directory CI does not have, and their output names the
+# operator's own installed extensions — evidence nobody else can reproduce
+# and a report that cannot be published. This benchmark instead fetches a
+# corpus vendored from a public marketplace manifest, pinned by exact git
+# sha (bench/public-corpus.json), so the same command against the same
+# commit gets the same number on any machine with network access.
+#
+# Deliberately NOT part of `check`, for the same reason falsepos/drift are
+# not: it needs network, and a check that has to pass offline in CI cannot
+# depend on one that cannot run there. LIMIT defaults to nothing (the full
+# 253-unit corpus); pass a small LIMIT for a cheap smoke run.
+#
+# Three exit codes, same convention as drift: 0 measured (and consistent
+# with the frozen baseline, when one exists), 1 a regression against that
+# baseline a human has to justify, 2 did not run — a fetch failed (a 404, an
+# archived or renamed repository, a timeout) or fewer units were fetched
+# than this run requested. A pass over an incomplete corpus is exactly the
+# defect this file exists to refuse.
+bench-public:
+	@python3 -m bench.public $(if $(LIMIT),--limit $(LIMIT))
+
+bench-public-freeze:
+	@python3 -m bench.public --freeze $(if $(LIMIT),--limit $(LIMIT))
 
 # Asks a different question than falsepos: not "is the verdict noisy" but
 # "is the output well-formed". Every hand-found bug so far was this shape.
