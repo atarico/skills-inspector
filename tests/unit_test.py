@@ -4296,6 +4296,164 @@ def _report_for_units_cases() -> None:
 _report_for_units_cases()
 
 
+# ------------------------------- fetch_unit and the freeze refusals, driven
+# Promise (bench/public.py): `fetch_unit` decides WHICH BYTES the published
+# number is computed over, and `freeze_report`'s three refusals are the only
+# thing between a convenience flag and the deletion of the 253-unit reference
+# — a deletion its own comment records as having already happened once.
+# Neither had a test. A guard nobody executes is a guard that rots quietly,
+# which is the same class as the comment that claimed coverage it removed.
+#
+# No network: a tarball is built in memory and `urlopen` is substituted, the
+# same module-attribute trick the crash path above uses on `engine.scan`.
+
+def _fetch_and_freeze_cases() -> None:
+    import io
+    import json as J
+    import tarfile
+    import tempfile
+    import urllib.error
+    import urllib.request
+    from contextlib import redirect_stdout
+    from pathlib import Path as P
+
+    from bench import public as PB
+
+    TOP = "repo-deadbeef"
+
+    def tarball(entries: dict) -> bytes:
+        """`entries` maps a path under the archive's top directory to its text,
+        or to None for a symlink pointing outside the unit."""
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for name, body in entries.items():
+                info = tarfile.TarInfo(f"{TOP}/{name}")
+                if body is None:
+                    info.type, info.linkname = tarfile.SYMTYPE, "../../../etc/passwd"
+                    tar.addfile(info)
+                    continue
+                data = body.encode()
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        return buf.getvalue()
+
+    class _Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+
+    def serving(payload):
+        def urlopen(url, timeout=None):
+            if isinstance(payload, Exception):
+                raise payload
+            return _Resp(payload)
+        return urlopen
+
+    def fetch(payload, path="skills/a", sha="a" * 40):
+        unit = {"name": "u", "sha": sha, "path": path,
+                "url": "https://github.com/o/r.git"}
+        cache = tempfile.TemporaryDirectory()
+        drops: list = []
+        real = urllib.request.urlopen
+        urllib.request.urlopen = serving(payload)
+        try:
+            root, reason = PB.fetch_unit(unit, P(cache.name), 5, drops)
+        finally:
+            urllib.request.urlopen = real
+        return root, reason, drops, cache
+
+    root, reason, drops, cache = fetch(tarball(
+        {"skills/a/SKILL.md": "kept", "skills/b/SKILL.md": "outside the unit"}))
+    check("public", "only the pinned subtree is extracted",
+          (reason, root is not None and (root / "SKILL.md").read_text(),
+           root is not None and (root / "b").exists()),
+          ("fetched", "kept", False),
+          "a unit measured with its siblings attached is not the unit the "
+          "corpus pinned, and every statistic downstream inherits that")
+    check("public", "a unit with no link entries records no drop", drops, [],
+          "a zero nobody counted and a count of zero must not look alike")
+    cache.cleanup()
+
+    root, reason, drops, cache = fetch(tarball(
+        {"skills/a/SKILL.md": "kept", "skills/a/escape": None}))
+    check("public", "a link entry is dropped and the drop is counted",
+          (reason, root is not None and (root / "escape").exists(), drops),
+          ("fetched", False, [("u", 1)]),
+          "it never reaches the cache, so FSW-008 cannot fire on it; a "
+          "measurement biased by entries nobody counted is the defect this "
+          "repository keeps finding in its own reports")
+    cache.cleanup()
+
+    root, reason, _, cache = fetch(
+        urllib.error.HTTPError("u", 404, "Not Found", None, None))
+    check("public", "an HTTP failure names itself and fetches nothing",
+          (root, reason), (None, "HTTP 404 fetching aaaaaaaaaaaa"),
+          "a fetch failure folded into a smaller corpus is the clean pass "
+          "over incomplete evidence this whole file exists to refuse")
+    cache.cleanup()
+
+    root, reason, _, cache = fetch(tarball({"other/SKILL.md": "x"}))
+    check("public", "a pinned path absent at that sha is a failure, not an "
+          "empty unit", (root, reason),
+          (None, "skills/a not present at aaaaaaaaaaaa"),
+          "an empty directory would scan clean and quietly improve the "
+          "number this benchmark publishes")
+    cache.cleanup()
+
+    # The freeze refusals. `freeze_report` reads and writes the module-level
+    # BASELINE, so the constant is what has to be substituted.
+    def frozen(names: list[str], **over) -> dict:
+        row = {"schema": PB.SCHEMA, "limit": None, "marketplace_json_sha256": "m",
+               "unit_names": sorted(names), "discovered": len(names),
+               "units": len(names), "clean_units": 0, "clean_pct": 0,
+               "median": 0, "mean": 0.0, "p90": 0, "max": 0, "crashes": 0,
+               "headline_total": 0, "rule_headline_counts": {},
+               "finding_total": 0, "rule_finding_counts": {},
+               "unit_histogram": {}}
+        row.update(over)
+        return row
+
+    def freezing(report: dict, existing: list[str] | None = None):
+        tmp = tempfile.TemporaryDirectory()
+        path = P(tmp.name) / "public-baseline.json"
+        if existing is not None:
+            path.write_text(J.dumps(frozen(existing)))
+        before = path.read_bytes() if path.exists() else None
+        real = PB.BASELINE
+        PB.BASELINE = path
+        out = io.StringIO()
+        try:
+            with redirect_stdout(out):
+                code = PB.freeze_report(report)
+        finally:
+            PB.BASELINE = real
+        after = path.read_bytes() if path.exists() else None
+        tmp.cleanup()
+        return code, before == after
+
+    check("public", "a narrowing re-freeze is refused and writes nothing",
+          freezing(frozen(["a"]), existing=["a", "b", "c"]),
+          (PB.DID_NOT_RUN, True),
+          "`LIMIT=5 make bench-public-freeze` would otherwise replace the "
+          "253-unit reference with a five-unit one that still parses, and "
+          "the destructive step is invisible at the call site")
+    check("public", "a freeze over the same unit set is still allowed",
+          freezing(frozen(["a", "b"]), existing=["a", "b"])[0], 0,
+          "refusing every re-freeze would make the guard unusable, and an "
+          "unusable guard gets deleted rather than obeyed")
+    check("public", "a report of zero scanned units is never frozen",
+          freezing(frozen([], discovered=3))[0], PB.DID_NOT_RUN,
+          "a baseline of zero successful scans makes every later run look "
+          "clean by comparison")
+    check("public", "a key this file has never published is never frozen",
+          freezing(frozen(["a"], surprise=1))[0], PB.DID_NOT_RUN,
+          "a field reaching a committed file because nobody subtracted it "
+          "out is not a decision anybody made")
+
+
+_fetch_and_freeze_cases()
+
+
+
 
 
 
