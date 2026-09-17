@@ -18,7 +18,8 @@ __pycache__/
 # aggregate-only comparison.
 bench/.drift-units.json
 
-# bench.public's fetch cache, keyed <sha>/<path>. Derived from
-# bench/public-corpus.json on demand — never committed, since it is a full
-# checkout of 253 pinned repositories' subtrees, not a report.
+# bench.public's fetch cache no longer defaults to anywhere inside this tree
+# — it is a gigabyte of third-party checkouts, and `make selftest` and
+# `make schema` scan `.` (see bench/public.py::DEFAULT_CACHE). This entry
+# stays only to catch a `--cache` explicitly pointed back in here.
 bench/.public-cache/

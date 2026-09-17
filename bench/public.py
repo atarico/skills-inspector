@@ -69,6 +69,7 @@ without a gitignored, privacy-sensitive sidecar; this file does not need one.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tarfile
@@ -86,7 +87,22 @@ from bench.drift import compare  # noqa: E402
 PROJECT = Path(__file__).resolve().parent.parent
 CORPUS = PROJECT / "bench" / "public-corpus.json"
 BASELINE = PROJECT / "bench" / "public-baseline.json"
-DEFAULT_CACHE = PROJECT / "bench" / ".public-cache"
+# OUTSIDE THE REPOSITORY, and that is not a preference. This cache is a full
+# checkout of 253 pinned third-party subtrees — a gigabyte of other people's
+# plugins — and `make selftest` and `make schema` scan `.` to prove the
+# scanner stays quiet on its own source. With the cache inside the tree those
+# targets scan the corpus instead: the self-scan went from 8.8 seconds and 14
+# headline findings to a 60-second timeout and 578, and `make check` stopped
+# being green depending on whether somebody had run the network benchmark.
+# An offline check must not depend on that.
+#
+# The scanner is right to report what is on disk — silently skipping a
+# directory is the defect this repository has already fixed. So the fix is to
+# stop putting foreign code in the scanned tree, not to teach the scan to look
+# away from it.
+_XDG_CACHE = os.environ.get("XDG_CACHE_HOME")
+DEFAULT_CACHE = (Path(_XDG_CACHE) if _XDG_CACHE else Path.home() / ".cache") \
+    / "skills-inspector" / "public-corpus"
 
 GREEN, RED, YELLOW, DIM, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
 
@@ -324,7 +340,7 @@ def _breakdown(report: dict) -> None:
     # inside the local cache directory, which is the one thing about this
     # report that is not reproducible anywhere else. `report_for_units` drops
     # it at the source for the same reason; reproduce a crash by scanning the
-    # named unit out of bench/.public-cache directly.
+    # named unit out of the fetch cache directly (see DEFAULT_CACHE).
     crashed = sorted(name for name, row in fingerprints.items() if row["crashed"])
     if crashed:
         print(f"\ncrashed ({len(crashed)} unit(s) — counted above, and in "
