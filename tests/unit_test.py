@@ -4308,6 +4308,7 @@ _report_for_units_cases()
 # same module-attribute trick the crash path above uses on `engine.scan`.
 
 def _fetch_and_freeze_cases() -> None:
+    import http.client
     import io
     import json as J
     import tarfile
@@ -4467,6 +4468,66 @@ def _fetch_and_freeze_cases() -> None:
           "it rather than replacing it; the wipe one line above is what "
           "keeps a leftover directory from silently relocating every file "
           "this fetch was supposed to produce")
+    cache.cleanup()
+
+    # R4-truncated-member-cached-as-complete, side one: the member-size
+    # reconciliation. A byte-level cut inside real gzip data raises
+    # `tarfile.ReadError` in this CPython's `_FileInFile.read()` (already
+    # caught below as "corrupt tarball"), so `extractfile` is patched to
+    # hand back fewer bytes than the header's own `member.size` — the exact
+    # input the size check exists to catch, without depending on where this
+    # CPython's own truncation happens to raise.
+    real_extractfile = tarfile.TarFile.extractfile
+    tarfile.TarFile.extractfile = lambda self, member: io.BytesIO(b"short")
+    try:
+        root, reason, _, cache = fetch(tarball(
+            {"skills/a/SKILL.md": "longer than the bytes the fake read returns"}))
+    finally:
+        tarfile.TarFile.extractfile = real_extractfile
+    check("public", "a member read shorter than its own header size is never cached",
+          (root, "truncated member" in reason,
+           (P(cache.name) / ("a" * 40) / "skills" / "a").exists()),
+          (None, True, False),
+          "`target.write_bytes(fh.read())` used to write whatever came back "
+          "with no comparison against `member.size`, and the cache-hit "
+          "branch trusts any non-empty destination forever after")
+    cache.cleanup()
+
+    # R4-truncated-member-cached-as-complete, side two: a body cut at a
+    # HEADER boundary instead of inside a member's data. Every member still
+    # decodes whole — `TarFile.next()` reads a short header past offset 0 as
+    # a clean end of archive — so only draining the response afterward can
+    # see it, and on a real cut connection that drain raises IncompleteRead.
+    class _IncompleteResp(_Resp):
+        def read(self, size=-1):
+            if size == -1:
+                raise http.client.IncompleteRead(b"")
+            return super().read(size)
+
+    incomplete_unit = {"name": "u", "sha": "f" * 40, "path": "skills/a",
+                        "url": "https://github.com/o/r.git"}
+    cache = tempfile.TemporaryDirectory()
+    real_urlopen = urllib.request.urlopen
+    urllib.request.urlopen = lambda url, timeout=None: _IncompleteResp(
+        tarball({"skills/a/SKILL.md": "kept"}))
+    try:
+        root, reason = PB.fetch_unit(incomplete_unit, P(cache.name), 5, [])
+    except Exception as exc:
+        # IncompleteRead subclasses HTTPException, not OSError, so without
+        # its own handler it escapes `fetch_unit` entirely. Catching it here
+        # turns that into one named FAIL; letting it propagate would kill the
+        # suite with a traceback and report no failing check at all.
+        root, reason = "escaped", f"{type(exc).__name__} left fetch_unit"
+    finally:
+        urllib.request.urlopen = real_urlopen
+    check("public", "a response cut after every member decoded whole is still caught",
+          (root, "truncated response" in reason,
+           (P(cache.name) / ("f" * 40) / "skills" / "a").exists()),
+          (None, True, False),
+          "no per-member check can see this: the tar loop finishes clean, "
+          "and only draining resp.read() afterward forces a cut body to "
+          "raise IncompleteRead instead of caching a possibly-incomplete "
+          "subtree forever")
     cache.cleanup()
 
     # The freeze refusals. `freeze_report` reads and writes the module-level

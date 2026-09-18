@@ -68,6 +68,7 @@ without a gitignored, privacy-sensitive sidecar; this file does not need one.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import shutil
@@ -248,13 +249,37 @@ def fetch_unit(unit: dict, cache_dir: Path,
                         fh = tar.extractfile(member)
                         if fh is None:
                             continue
-                        target.write_bytes(fh.read())
+                        data = fh.read()
+                        if len(data) != member.size:
+                            # A cut connection makes this `read()` come back
+                            # short with no exception: `_Stream._read()` breaks
+                            # on an empty underlying read instead of raising,
+                            # because it drives raw deflate through
+                            # `zlib.decompressobj` rather than gzip's checked
+                            # reader. Everything after a short member is
+                            # unreliable too, so the whole fetch is abandoned
+                            # rather than just this one member.
+                            shutil.rmtree(tmp, ignore_errors=True)
+                            return None, (f"truncated member {member.name!r} "
+                                          f"({len(data)}/{member.size} bytes)")
+                        target.write_bytes(data)
                         if member.mode & 0o111:
                             target.chmod(target.stat().st_mode | 0o111)
                         extracted_any = True
+            # The member loop above cannot see a cut body at a HEADER
+            # boundary: `TarFile.next()` treats a short header past offset 0
+            # as a clean end of archive, so every member still looks
+            # complete. Draining what is left is the only place that checks
+            # it — on a chunked or Content-Length body cut early this raises
+            # IncompleteRead; a body framed only by connection-close still
+            # slips through, since HTTP gives it no length to fail against.
+            resp.read()
     except urllib.error.HTTPError as exc:
         shutil.rmtree(tmp, ignore_errors=True)
         return None, f"HTTP {exc.code} fetching {sha[:12]}"
+    except http.client.IncompleteRead as exc:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None, f"truncated response ({len(exc.partial)} bytes) fetching {sha[:12]}"
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         shutil.rmtree(tmp, ignore_errors=True)
         return None, f"{type(exc).__name__} fetching {sha[:12]}"
