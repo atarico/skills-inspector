@@ -4375,15 +4375,18 @@ def _fetch_and_freeze_cases() -> None:
           ("fetched", "kept", False),
           "a unit measured with its siblings attached is not the unit the "
           "corpus pinned, and every statistic downstream inherits that")
-    check("public", "a unit with no link entries records no drop", drops, [],
-          "a zero nobody counted and a count of zero must not look alike")
+    check("public", "a unit with no drops records a known zero, not an omission",
+          drops, [("u", {"links": 0, "escapes": 0})],
+          "a zero this run measured and a count nobody took must not look "
+          "alike; collapsing them is exactly the unknown-vs-zero confusion "
+          "the drop registry exists to refuse")
     cache.cleanup()
 
     root, reason, drops, cache = fetch(tarball(
         {"skills/a/SKILL.md": "kept", "skills/a/escape": None}))
     check("public", "a link entry is dropped and the drop is counted",
           (reason, root is not None and (root / "escape").exists(), drops),
-          ("fetched", False, [("u", 1)]),
+          ("fetched", False, [("u", {"links": 1, "escapes": 0})]),
           "it never reaches the cache, so FSW-008 cannot fire on it; a "
           "measurement biased by entries nobody counted is the defect this "
           "repository keeps finding in its own reports")
@@ -4410,7 +4413,7 @@ def _fetch_and_freeze_cases() -> None:
     # been exercised by members that never got that far. Here the `..`
     # lives in the NAME of an ordinary regular file, the one thing the link
     # filter does not look at, so it survives to the guard below it.
-    root, reason, _, cache = fetch(tarball(
+    root, reason, drops, cache = fetch(tarball(
         {"skills/a/SKILL.md": "kept", "skills/a/../escaped.txt": "pwned"}))
     check("public", "a member name that climbs out via .. is never written",
           (reason, root is not None and (root / "SKILL.md").read_text(),
@@ -4419,6 +4422,13 @@ def _fetch_and_freeze_cases() -> None:
           "only `target.resolve().is_relative_to(tmp.resolve())` stands "
           "between a pinned subtree and a member whose own path climbs out "
           "of the directory being extracted into")
+    check("public", "a containment escape is counted, not just refused",
+          drops, [("u", {"links": 0, "escapes": 1})],
+          "R4-containment-drop-unreported / R3-containment-drop-uncounted: "
+          "the bare `continue` this replaces discarded the member and told "
+          "nobody; a member excluded from the scan with no record of the "
+          "exclusion is the one drop the module's own governing principle "
+          "did not apply to")
     cache.cleanup()
 
     # The fixture above only ever drove `issym()`; `islnk()` — the hardlink
@@ -4428,11 +4438,121 @@ def _fetch_and_freeze_cases() -> None:
         {"skills/a/SKILL.md": "kept", "skills/a/hard": HARDLINK}))
     check("public", "a hardlink entry is dropped exactly like a symlink",
           (reason, root is not None and (root / "hard").exists(), drops),
-          ("fetched", False, [("u", 1)]),
+          ("fetched", False, [("u", {"links": 1, "escapes": 0})]),
           "the filter reads `issym() or islnk()`; a hardlink that reached "
           "the cache would be exactly as unproven-safe as the symlink case "
           "this test's sibling exists to refuse")
     cache.cleanup()
+
+    # R4-link-drop-absent-from-frozen-baseline: a fresh extraction commits
+    # its drop counts to `drops.json` at the cache root at the same moment
+    # `dest` itself is written, and a later cache hit for the same unit
+    # reads them back instead of contributing nothing. Both calls share one
+    # cache directory on purpose — the second call must take the "cached"
+    # branch and never touch the network at all, so `urlopen` is patched to
+    # raise if it does: a regression that quietly re-fetches on a cache hit
+    # would otherwise still return the right numbers and pass silently.
+    registry_unit = {"name": "u", "sha": "1" * 40, "path": "skills/a",
+                      "url": "https://github.com/o/r.git"}
+    registry_cache = tempfile.TemporaryDirectory()
+    real = urllib.request.urlopen
+    urllib.request.urlopen = serving(tarball(
+        {"skills/a/SKILL.md": "kept", "skills/a/escape": None}))
+    first_drops: list = []
+    try:
+        first_root, first_reason = PB.fetch_unit(
+            registry_unit, P(registry_cache.name), 5, first_drops)
+    finally:
+        urllib.request.urlopen = real
+
+    # Read defensively: the property this pins is precisely that the file
+    # might not exist, so an eager `.read_text()` inside the tuple `check()`
+    # compares would raise before the comparison ever ran, turning a missing
+    # registry into a crashed suite instead of one named FAIL.
+    registry_path = P(registry_cache.name) / "drops.json"
+    registry_written = (J.loads(registry_path.read_text()) if registry_path.exists()
+                         else "drops.json was never written")
+    check("public", "the fresh extraction writes the registry entry to disk",
+          first_root is not None and registry_written,
+          {"1111111111111111111111111111111111111111/skills/a":
+           {"links": 1, "escapes": 0}},
+          "drops.json lives at the cache root and is written the instant "
+          "shutil.move commits the extraction, so a unit that exists in "
+          "the cache and its drop record can never disagree about whether "
+          "it does")
+
+    # `urllib.error.URLError` is one of fetch_unit's own caught exceptions
+    # (see the `except (urllib.error.URLError, ...)` clause), so a
+    # regression that makes a cache hit call the network turns into an
+    # ordinary failed-fetch return here, not an uncaught exception —
+    # `network_calls` is what actually pins "never called", named and
+    # comparable, rather than a raise this test would have to catch itself.
+    network_calls: list = []
+
+    def _network_forbidden(*_a, **_k):
+        network_calls.append(1)
+        raise urllib.error.URLError("a cache hit must not need the network")
+    urllib.request.urlopen = _network_forbidden
+    second_drops: list = []
+    try:
+        second_root, second_reason = PB.fetch_unit(
+            registry_unit, P(registry_cache.name), 5, second_drops)
+    finally:
+        urllib.request.urlopen = real
+    check("public", "a cache hit reads its drop counts from the registry, not zero",
+          (first_reason, second_reason, network_calls, first_drops, second_drops),
+          ("fetched", "cached", [],
+           [("u", {"links": 1, "escapes": 0})],
+           [("u", {"links": 1, "escapes": 0})]),
+          "without the registry a cache hit contributed nothing, so a "
+          "corpus measured once and compared many times afterward would "
+          "publish drop totals that shrink toward zero as more of it comes "
+          "from cache — never because fewer links or escapes actually exist")
+    registry_cache.cleanup()
+
+    # Every entry in the ~1GB cache this benchmark's own user already has was
+    # extracted before this registry existed: `dest` is populated, but no
+    # build ever wrote a `drops.json` entry for it. That must read as
+    # UNKNOWN, not as a unit that happened to drop nothing — a cache hit has
+    # no way to back up a claim of zero for a unit it never re-read.
+    unrecorded_unit = {"name": "u", "sha": "2" * 40, "path": "skills/a",
+                        "url": "https://github.com/o/r.git"}
+    unrecorded_cache = tempfile.TemporaryDirectory()
+    unrecorded_dest = P(unrecorded_cache.name) / unrecorded_unit["sha"] / "skills/a"
+    unrecorded_dest.mkdir(parents=True)
+    (unrecorded_dest / "SKILL.md").write_text("already here")
+    unrecorded_drops: list = []
+    root, reason = PB.fetch_unit(
+        unrecorded_unit, P(unrecorded_cache.name), 5, unrecorded_drops)
+    check("public", "a cached unit with no registry entry is unknown, not zero",
+          (reason, unrecorded_drops), ("cached", [("u", None)]),
+          "a cache built by a build before this registry existed cannot "
+          "say whether it dropped anything; reading the absence of an "
+          "entry as zero would publish a claim this run never checked — "
+          "exactly the bias R4-link-drop-absent-from-frozen-baseline named")
+    unrecorded_cache.cleanup()
+
+    # A registry that fails to parse is not a registry that says zero,
+    # same tri-state discipline as read_baseline: this must make every
+    # cached unit unknown, not silently fall back to treating the cache as
+    # freshly built.
+    corrupt_unit = {"name": "u", "sha": "3" * 40, "path": "skills/a",
+                     "url": "https://github.com/o/r.git"}
+    corrupt_cache = tempfile.TemporaryDirectory()
+    corrupt_dest = P(corrupt_cache.name) / corrupt_unit["sha"] / "skills/a"
+    corrupt_dest.mkdir(parents=True)
+    (corrupt_dest / "SKILL.md").write_text("already here")
+    (P(corrupt_cache.name) / "drops.json").write_text("{not valid json")
+    corrupt_drops: list = []
+    root, reason = PB.fetch_unit(
+        corrupt_unit, P(corrupt_cache.name), 5, corrupt_drops)
+    check("public", "a corrupt drops.json makes every cached unit unknown",
+          (reason, corrupt_drops), ("cached", [("u", None)]),
+          "a registry this run cannot read must not be treated as an empty "
+          "one — that would read a corrupted file as a clean corpus, the "
+          "same absence-read-as-damage confusion read_baseline's own "
+          "docstring refuses for the baseline file")
+    corrupt_cache.cleanup()
 
     # The recursive wipe at line 270 only matters when `dest` already
     # exists, and a `dest` that already holds content never reaches it — the
@@ -4539,7 +4659,9 @@ def _fetch_and_freeze_cases() -> None:
                "median": 0, "mean": 0.0, "p90": 0, "max": 0, "crashes": 0,
                "headline_total": 0, "rule_headline_counts": {},
                "finding_total": 0, "rule_finding_counts": {},
-               "unit_histogram": {}}
+               "unit_histogram": {}, "link_drops_total": 0,
+               "link_drops_units": 0, "escape_drops_total": 0,
+               "escape_drops_units": 0, "unknown_drop_units": 0}
         row.update(over)
         return row
 
@@ -4587,6 +4709,42 @@ def _fetch_and_freeze_cases() -> None:
           freezing(frozen(["a"], surprise=1))[0], PB.DID_NOT_RUN,
           "a field reaching a committed file because nobody subtracted it "
           "out is not a decision anybody made")
+    check("public", "freeze_report refuses when any unit's drops are unknown",
+          freezing(frozen(["a"], unknown_drop_units=1)),
+          (PB.DID_NOT_RUN, True),
+          "a drop total that is partly unknown would publish a floor as if "
+          "it were the number — the same silent shrinkage a cache hit used "
+          "to cause is reintroduced here if the refusal is dropped, just "
+          "moved from 'never counted' to 'counted, then frozen anyway'")
+    check("public", "freeze_report still succeeds when no unit's drops are unknown",
+          freezing(frozen(["a"], unknown_drop_units=0))[0], 0,
+          "the guard reads the count itself, not merely whether the key is "
+          "present; a report where every unit's drops are known must still "
+          "be freezable, or the guard would refuse every run forever")
+
+    field_cache = tempfile.TemporaryDirectory()
+    field_path = P(field_cache.name) / "public-baseline.json"
+    real_baseline = PB.BASELINE
+    PB.BASELINE = field_path
+    try:
+        freeze_code = PB.freeze_report(frozen(
+            ["a"], link_drops_total=5, link_drops_units=2,
+            escape_drops_total=1, escape_drops_units=1))
+    finally:
+        PB.BASELINE = real_baseline
+    # Read defensively: a regression that makes freeze_report wrongly
+    # refuse to write would otherwise crash this read with
+    # FileNotFoundError instead of failing the comparison below by name.
+    written = J.loads(field_path.read_text()) if field_path.exists() else {}
+    check("public", "the four drop totals reach the frozen file",
+          (freeze_code, written.get("link_drops_total"), written.get("link_drops_units"),
+           written.get("escape_drops_total"), written.get("escape_drops_units")),
+          (0, 5, 2, 1, 1),
+          "R4-link-drop-absent-from-frozen-baseline: the aggregate a run "
+          "prints to the terminal had no durable record before this field "
+          "existed, so a later comparison run had nothing to check the "
+          "fetch-side bias against")
+    field_cache.cleanup()
 
     # main()'s own comparison, and read_baseline's three outcomes, driven
     # end to end. `load_corpus` and `urlopen` get the same module-attribute
@@ -4693,6 +4851,37 @@ def _fetch_and_freeze_cases() -> None:
           "whether they are there; a truncated baseline reaching it either "
           "raises inside the gate or compares against a field that silently "
           "defaulted, and neither of those is an answer")
+
+    # All four, not just one: a missing-key baseline test below only drives
+    # ONE of the four through read_baseline, so a mutation dropping any of
+    # the other three from REQUIRED would still leave that test green. This
+    # pins REQUIRED's actual membership directly, independent of which one
+    # a baseline happens to be missing.
+    check("public", "all four drop-total keys are required, not merely frozen",
+          {"link_drops_total", "link_drops_units", "escape_drops_total",
+           "escape_drops_units"} <= set(PB.REQUIRED),
+          True,
+          "REQUIRED and FROZEN_KEYS are separate tuples on purpose; a field "
+          "added to one and not the other either can never be frozen or "
+          "can be frozen but never checked for on read — a baseline missing "
+          "any one of the four must be treated as truncated, not zero")
+
+    # A baseline frozen before this build tracked drops parses fine and has
+    # every OLD required key — only link_drops_total (and its three
+    # siblings) is missing. Without it in REQUIRED, that baseline would read
+    # as "present" and compare clean on drops it never measured, which is
+    # the exact zero-vs-unknown confusion the whole registry exists to
+    # refuse, now one file up at the baseline boundary instead of the cache.
+    missing_drop_key_path = P(base_dir.name) / "missing-drop-key-baseline.json"
+    pre_registry = frozen(["a"])
+    del pre_registry["link_drops_total"]
+    missing_drop_key_path.write_text(J.dumps(pre_registry))
+    code, output = run_main(units_a, quiet_tar, missing_drop_key_path)
+    check("public", "a baseline missing a new drop-total key is damaged, not clean",
+          (code, "could not be read" in output), (PB.DID_NOT_RUN, True),
+          "a baseline this old carries no claim about drops at all — "
+          "reading its absence as zero would silently compare this run's "
+          "drop counts against a baseline that was never asked about them")
 
     present_path = P(base_dir.name) / "present-baseline.json"
     freeze_code, _ = run_main(units_a, quiet_tar, present_path, argv_extra=("--freeze",))

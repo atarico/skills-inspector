@@ -341,7 +341,7 @@ directory of extensions you already trust, CI does not have one, and it exits
 
 | Benchmark | Result |
 |---|---|
-| Invariant unit tests | **774/774** — every case pins a promise a docstring makes |
+| Invariant unit tests | **784/784** — every case pins a promise a docstring makes |
 | Detection, against `fixtures/` | **141/141**, plus **5/5** semantic cross-checks |
 | Ruleset exercised by the corpus | **70%** — 78 of 111 implemented rules have a fixture; one family (`SEM`) has none |
 | Documented blind spots, confirmed still open | **3** (prose exfiltration; HOK-004's two documented locations, neither implemented) |

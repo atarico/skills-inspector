@@ -64,6 +64,19 @@ names are already published in `bench/public-corpus.json`, so
 lets a corpus-size mismatch be detected EXACTLY, by the set of names that
 were measured, rather than by count alone — `bench.drift` cannot do this
 without a gitignored, privacy-sensitive sidecar; this file does not need one.
+
+It also carries `link_drops_total`/`link_drops_units` and
+`escape_drops_total`/`escape_drops_units` — the aggregate counts of link
+entries and containment escapes discarded before extraction (see
+`fetch_unit`), across how many units each kind of drop touched. These are
+published because the measurement they describe is otherwise invisible: a
+member never extracted is a member the scanner never sees, so `clean 31
+(12%)` is a claim about the tree this file fetched, not the tree the pinned
+shas actually contain, unless the gap between the two is on the record too.
+`freeze_report` refuses to write these fields at all when any unit's drops
+are unknown (a cache entry from a build that predates this registry) — a
+partial total published as the total would understate every comparison run
+against it forever after.
 """
 
 from __future__ import annotations
@@ -115,10 +128,14 @@ CODELOAD = "https://codeload.github.com/{owner}/{repo}/tar.gz/{sha}"
 
 # What compare()/_summary() read, plus `unit_names` — the extra field this
 # benchmark's comparability check needs that bench.drift cannot publish (see
-# module docstring). A baseline missing any of these is truncated, not zero.
+# module docstring) — and the four drop totals, missing which a baseline is
+# truncated, not a corpus with nothing dropped: a hand-edited or pre-registry
+# file that simply lacks the field must never read as zero drops.
 REQUIRED = ("discovered", "units", "clean_units", "clean_pct", "median", "mean",
             "p90", "max", "crashes", "headline_total", "rule_headline_counts",
-            "finding_total", "rule_finding_counts", "unit_names")
+            "finding_total", "rule_finding_counts", "unit_names",
+            "link_drops_total", "link_drops_units",
+            "escape_drops_total", "escape_drops_units")
 
 # Every key that may be written to bench/public-baseline.json. Enumerated
 # rather than implied, exactly as bench.drift.FROZEN_KEYS is: a new field on
@@ -128,7 +145,8 @@ FROZEN_KEYS = ("schema", "limit", "marketplace_json_sha256", "unit_names",
                "discovered", "units", "clean_units", "clean_pct", "median",
                "mean", "p90", "max", "crashes", "headline_total",
                "rule_headline_counts", "finding_total", "rule_finding_counts",
-               "unit_histogram")
+               "unit_histogram", "link_drops_total", "link_drops_units",
+               "escape_drops_total", "escape_drops_units")
 
 # report_for_units() also returns `unit_fingerprints` — headline/finding ids
 # per unit NAME. Unlike bench.drift's content-signature fingerprints, a name
@@ -136,7 +154,14 @@ FROZEN_KEYS = ("schema", "limit", "marketplace_json_sha256", "unit_names",
 # out of FROZEN_KEYS is not a privacy decision; it is just unneeded for the
 # name-set comparability check this file actually does, and every published
 # key stays reviewed rather than growing by accident.
-LOCAL_KEYS = ("unit_fingerprints",)
+#
+# `unknown_drop_units` joins it for a different reason: it counts units whose
+# drops this run could not determine (see fetch_unit / _read_drop_record),
+# and it exists only so freeze_report can refuse to publish a partial total —
+# publishing the count itself would be publishing a number about this one
+# run's cache, not about the corpus, and the next run's cache state would
+# make it drift for no reason a diff could explain.
+LOCAL_KEYS = ("unit_fingerprints", "unknown_drop_units")
 
 # How many rows each census in `_breakdown` prints before it stops. Twelve is
 # `bench.corpus`'s number, kept so the two benchmarks read the same way; the
@@ -166,9 +191,98 @@ def _owner_repo(url: str) -> tuple[str, str]:
     return owner, repo
 
 
+def _drop_registry_path(cache_dir: Path) -> Path:
+    """`drops.json`'s path, at the cache ROOT — never inside a unit's own
+    tree. `make selftest`/`make schema` scan `.`, and the whole reason the
+    fetch cache lives outside the repository (see DEFAULT_CACHE above) is
+    that a scan must never walk what it is trying to measure; a registry
+    file dropped inside `cache_dir / sha / path` would be exactly that
+    mistake in miniature, sitting in every extracted unit's own directory
+    and entering the FSW-008 census it exists to make honest."""
+    return cache_dir / "drops.json"
+
+
+def _drop_key(sha: str, path: str) -> str:
+    """The registry's key for one unit — the same `<sha>/<path>` shape
+    `fetch_unit` already uses for its cache directory, so a registry entry
+    and its cached unit are always found by, and always disagree with, the
+    same identity."""
+    return f"{sha}/{path}" if path else sha
+
+
+def _read_drop_registry(cache_dir: Path) -> dict | None:
+    """The whole drop registry, or None when it cannot be trusted.
+
+    None means the file exists and could not be parsed; `{}` means it is
+    not there yet, which a cache nothing has extracted into since this file
+    started writing one legitimately is.
+
+    BOTH ALREADY READ AS UNKNOWN downstream, and saying so is the point of
+    this paragraph. `_read_drop_record` funnels the two through
+    `registry.get(key)`, which answers None for a missing key just as it
+    does for a registry that was never readable, so returning `{}` here on
+    a parse failure would not change one published number today. The
+    distinction is kept because it is the honest return type, not because
+    it is load-bearing: a later caller that iterates the registry instead
+    of indexing it would see an empty mapping and conclude every unit
+    dropped nothing, and that caller is the one this signature refuses to
+    mislead. Mutation-checking found the claim that used to sit here —
+    that substituting `{}` would publish known-zero — asserting a
+    protection the `.get()` below was already providing.
+    """
+    path = _drop_registry_path(cache_dir)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _read_drop_record(cache_dir: Path, sha: str, path: str) -> dict | None:
+    """This unit's `{"links": N, "escapes": M}`, or None when UNKNOWN.
+
+    Unknown covers two cases a caller must never tell apart, because both
+    mean the same thing to a total that must never publish a floor as a
+    fact: the registry itself could not be read, or it parsed fine but has
+    no entry for this unit — a cache populated before this registry
+    existed, which is every unit in a cache built by an older version of
+    this file. Neither one is "zero drops"; both are "this run cannot say".
+    """
+    registry = _read_drop_registry(cache_dir)
+    if registry is None:
+        return None
+    return registry.get(_drop_key(sha, path))
+
+
+def _record_drops(cache_dir: Path, sha: str, path: str,
+                   links: int, escapes: int) -> None:
+    """Write one unit's drop counts into the registry.
+
+    Called at the same moment `fetch_unit` commits the extraction — right
+    after `shutil.move` promotes `tmp` into `dest` — so a unit that exists in
+    the cache and its drop record always agree; there is no window where a
+    unit is cached but its record is not, or the reverse.
+
+    Read-modify-write, no locking: `main()` calls `fetch_unit` once per unit,
+    in a single sequential loop, so there is never a second writer racing
+    this read against this write. A registry this call cannot parse is
+    treated as empty rather than refused — this unit's own count is known
+    right now and worth keeping, and a prior corruption already cost every
+    other unit's record whether this write proceeds or not.
+    """
+    registry = _read_drop_registry(cache_dir)
+    if registry is None:
+        registry = {}
+    registry[_drop_key(sha, path)] = {"links": links, "escapes": escapes}
+    _drop_registry_path(cache_dir).write_text(
+        json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+
+
 def fetch_unit(unit: dict, cache_dir: Path,
                 timeout: int = FETCH_TIMEOUT,
-                link_drops: list | None = None) -> tuple[Path | None, str]:
+                drops: list | None = None) -> tuple[Path | None, str]:
     """Fetch one pinned unit's exact sha into the cache.
 
     Keyed `<sha>/<path>` (path "" for the 153 pinned units that are a whole
@@ -182,10 +296,15 @@ def fetch_unit(unit: dict, cache_dir: Path,
     also carry the git history and every other subdirectory this benchmark
     never reads.
 
-    `link_drops`, when given, collects `(name, count)` for every unit
-    extracted on this run that had link entries dropped — see the skip below.
-    A cache hit appends nothing, because it was not re-read and a 0 there
-    would be a count nobody took.
+    `drops`, when given, collects `(name, counts)` for every unit this call
+    resolves — fetched fresh or already cached — where `counts` is
+    `{"links": N, "escapes": M}` when known, or None when UNKNOWN (see
+    `_read_drop_record`). A cache hit is never re-read to recount its drops
+    — that would cost as much as fetching it again — so its counts come from
+    `drops.json` at the cache root, written when the unit was first
+    extracted (see `_record_drops`); an entry that registry does not have is
+    unknown, never zero, because zero here is a claim that nothing was
+    dropped and a cache hit has no way to back that claim up.
 
     Returns (root, reason). `root` is the extracted directory on success, or
     None with `reason` naming why the fetch failed — a 404, an archived
@@ -198,6 +317,8 @@ def fetch_unit(unit: dict, cache_dir: Path,
     sha, path = unit["sha"], unit["path"]
     dest = cache_dir / sha / path if path else cache_dir / sha
     if dest.is_dir() and any(dest.iterdir()):
+        if drops is not None:
+            drops.append((unit["name"], _read_drop_record(cache_dir, sha, path)))
         return dest, "cached"
 
     owner, repo = _owner_repo(unit["url"])
@@ -212,6 +333,7 @@ def fetch_unit(unit: dict, cache_dir: Path,
     tmp.mkdir(parents=True, exist_ok=True)
     extracted_any = False
     links = 0
+    escapes = 0
     try:
         url = CODELOAD.format(owner=owner, repo=repo, sha=sha)
         with urllib.request.urlopen(url, timeout=timeout) as resp:
@@ -241,6 +363,15 @@ def fetch_unit(unit: dict, cache_dir: Path,
                         continue
                     target = tmp / rel
                     if not target.resolve().is_relative_to(tmp.resolve()):
+                        # DROPPED, AND UNTIL NOW UNCOUNTED. A member whose own
+                        # path climbs out of `tmp` (see the `..`-in-name test)
+                        # never reaches `dest`, so FSW-008 cannot fire on it —
+                        # the same story as the link filter above, and it was
+                        # missing the same fix: a bare `continue` here made
+                        # this the one drop the module's own governing
+                        # principle did not apply to. Counted before
+                        # discarded, exactly like `links`.
+                        escapes += 1
                         continue
                     if member.isdir():
                         target.mkdir(parents=True, exist_ok=True)
@@ -294,9 +425,48 @@ def fetch_unit(unit: dict, cache_dir: Path,
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(dest, ignore_errors=True)
     shutil.move(str(tmp), str(dest))
-    if links and link_drops is not None:
-        link_drops.append((unit["name"], links))
+    # Written at the same instant the extraction is committed, so a unit
+    # that exists in the cache and its drop record can never disagree — see
+    # _record_drops.
+    _record_drops(cache_dir, sha, path, links, escapes)
+    if drops is not None:
+        drops.append((unit["name"], {"links": links, "escapes": escapes}))
     return dest, "fetched"
+
+
+def _drop_totals(drops: list[tuple[str, dict | None]]) -> dict:
+    """Reduce fetch_unit's per-unit `(name, counts)` records to the four
+    totals this file publishes, plus how many units this run could not
+    price.
+
+    Kept separate from main()'s loop so the arithmetic behind
+    link_drops_total/escape_drops_total is one function a test can call
+    directly, rather than something only provable by driving the whole CLI.
+    `*_units` counts units with a NONZERO known count — a unit whose
+    registry entry is `{"links": 0, "escapes": 0}` contributed nothing and
+    should not inflate "how many units this affected", the same way
+    `link_drops`'s old callers never recorded a unit that dropped nothing.
+    """
+    link_drops_total = link_drops_units = 0
+    escape_drops_total = escape_drops_units = 0
+    unknown_drop_units = 0
+    for _, counts in drops:
+        if counts is None:
+            unknown_drop_units += 1
+            continue
+        if counts["links"]:
+            link_drops_total += counts["links"]
+            link_drops_units += 1
+        if counts["escapes"]:
+            escape_drops_total += counts["escapes"]
+            escape_drops_units += 1
+    return {
+        "link_drops_total": link_drops_total,
+        "link_drops_units": link_drops_units,
+        "escape_drops_total": escape_drops_total,
+        "escape_drops_units": escape_drops_units,
+        "unknown_drop_units": unknown_drop_units,
+    }
 
 
 def _summary(report: dict) -> str:
@@ -434,6 +604,23 @@ def freeze_report(report: dict) -> int:
               f"run look clean.")
         return DID_NOT_RUN
 
+    # A partial total is not a total: `unknown_drop_units` counts units this
+    # run could not price (a cache hit with no drops.json entry — every unit
+    # in a cache built before this registry existed). Freezing anyway would
+    # publish link_drops_total/escape_drops_total as though they covered the
+    # whole corpus, when they are really a floor over however much of it
+    # happened to have a record — the exact "clean 31 (12%)" problem this
+    # field exists to fix, reintroduced one level down.
+    if report.get("unknown_drop_units"):
+        print(f"{YELLOW}DID NOT RUN{RESET}  {report['unknown_drop_units']} "
+              f"unit(s) came from cache entries with no drop record, so "
+              f"their link/containment-escape counts are unknown, not "
+              f"zero.\n  Nothing was frozen: a drop total that is partly "
+              f"unknown would publish a floor as if it were the number.\n"
+              f"  Fetch into a fresh --cache so every unit's drops get "
+              f"recorded, then re-freeze.")
+        return DID_NOT_RUN
+
     local = {key: report[key] for key in LOCAL_KEYS if key in report}
     published = {key: value for key, value in report.items() if key not in local}
     unknown = sorted(set(published) - set(FROZEN_KEYS))
@@ -505,13 +692,15 @@ def main(argv: list[str]) -> int:
 
     fetched: list[tuple[str, Path]] = []
     fetch_failures: list[tuple[str, str]] = []
-    link_drops: list[tuple[str, int]] = []
+    drops: list[tuple[str, dict | None]] = []
     for unit in requested:
-        root, reason = fetch_unit(unit, cache_dir, timeout, link_drops)
+        root, reason = fetch_unit(unit, cache_dir, timeout, drops)
         if root is None:
             fetch_failures.append((unit["name"], reason))
         else:
             fetched.append((unit["name"], root))
+
+    totals = _drop_totals(drops)
 
     print(f"public corpus: {len(requested)} unit(s) requested "
           f"({corpus['provenance']['pinned']} pinned in {CORPUS.name}"
@@ -520,11 +709,18 @@ def main(argv: list[str]) -> int:
           (f", {len(fetch_failures)} failure(s) below" if fetch_failures else ""))
     for name, reason in fetch_failures:
         print(f"    FAILED  {name}: {reason}")
-    if link_drops:
-        total = sum(n for _, n in link_drops)
-        print(f"    {total} link entr(ies) dropped before extraction across "
-              f"{len(link_drops)} unit(s), never scanned; cached units were "
-              f"not re-read, so theirs are unknown rather than zero")
+    if totals["link_drops_units"]:
+        print(f"    {totals['link_drops_total']} link entr(ies) dropped "
+              f"before extraction across {totals['link_drops_units']} "
+              f"unit(s), never scanned")
+    if totals["escape_drops_units"]:
+        print(f"    {totals['escape_drops_total']} containment escape(s) "
+              f"dropped before extraction across "
+              f"{totals['escape_drops_units']} unit(s), never scanned")
+    if totals["unknown_drop_units"]:
+        print(f"    {totals['unknown_drop_units']} cached unit(s) have no "
+              f"drop record (fetched by a build before this one tracked "
+              f"them) — their link/containment drops are unknown, not zero")
 
     if len(fetched) < len(requested):
         print(f"\n{YELLOW}DID NOT RUN{RESET}  {len(fetch_failures)} of "
@@ -552,6 +748,7 @@ def main(argv: list[str]) -> int:
     report["limit"] = limit
     report["marketplace_json_sha256"] = corpus["provenance"]["marketplace_json_sha256"]
     report["unit_names"] = sorted(name for name, _ in fetched)
+    report.update(totals)
 
     print(f"\n{_summary(report)}")
     _breakdown(report)
