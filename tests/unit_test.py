@@ -4321,15 +4321,20 @@ def _fetch_and_freeze_cases() -> None:
 
     TOP = "repo-deadbeef"
 
+    HARDLINK = object()  # sentinel: like None (a symlink), but tarfile.LNKTYPE —
+    # the other half of `issym() or islnk()` that no fixture has exercised.
+
     def tarball(entries: dict) -> bytes:
         """`entries` maps a path under the archive's top directory to its text,
-        or to None for a symlink pointing outside the unit."""
+        to None for a symlink pointing outside the unit, or to HARDLINK for a
+        hardlink doing the same — the two arms of the link filter below."""
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:
             for name, body in entries.items():
                 info = tarfile.TarInfo(f"{TOP}/{name}")
-                if body is None:
-                    info.type, info.linkname = tarfile.SYMTYPE, "../../../etc/passwd"
+                if body is None or body is HARDLINK:
+                    info.type = tarfile.SYMTYPE if body is None else tarfile.LNKTYPE
+                    info.linkname = "../../../etc/passwd"
                     tar.addfile(info)
                     continue
                 data = body.encode()
@@ -4399,6 +4404,71 @@ def _fetch_and_freeze_cases() -> None:
           "number this benchmark publishes")
     cache.cleanup()
 
+    # The symlink case above never reaches the containment check at all —
+    # `issym()`/`islnk()` discards it first, so containment has only ever
+    # been exercised by members that never got that far. Here the `..`
+    # lives in the NAME of an ordinary regular file, the one thing the link
+    # filter does not look at, so it survives to the guard below it.
+    root, reason, _, cache = fetch(tarball(
+        {"skills/a/SKILL.md": "kept", "skills/a/../escaped.txt": "pwned"}))
+    check("public", "a member name that climbs out via .. is never written",
+          (reason, root is not None and (root / "SKILL.md").read_text(),
+           (P(cache.name) / "escaped.txt").exists()),
+          ("fetched", "kept", False),
+          "only `target.resolve().is_relative_to(tmp.resolve())` stands "
+          "between a pinned subtree and a member whose own path climbs out "
+          "of the directory being extracted into")
+    cache.cleanup()
+
+    # The fixture above only ever drove `issym()`; `islnk()` — the hardlink
+    # half of the same `or` — has never been called with a link entry to
+    # discard, so losing that arm would still leave the suite green.
+    root, reason, drops, cache = fetch(tarball(
+        {"skills/a/SKILL.md": "kept", "skills/a/hard": HARDLINK}))
+    check("public", "a hardlink entry is dropped exactly like a symlink",
+          (reason, root is not None and (root / "hard").exists(), drops),
+          ("fetched", False, [("u", 1)]),
+          "the filter reads `issym() or islnk()`; a hardlink that reached "
+          "the cache would be exactly as unproven-safe as the symlink case "
+          "this test's sibling exists to refuse")
+    cache.cleanup()
+
+    # The recursive wipe at line 270 only matters when `dest` already
+    # exists, and a `dest` that already holds content never reaches it — the
+    # cache check above returns "cached" first, by design, since a pinned
+    # sha is never re-verified once fetched. The only way execution reaches
+    # the wipe is a `dest` that pre-exists EMPTY: a leftover directory from
+    # before this call. Without the wipe, `shutil.move` treats an existing
+    # directory as a container and moves the fetch INSIDE it
+    # (`dest/<tmp-name>/...`) instead of replacing it, so `root / "SKILL.md"`
+    # would silently stop existing where every caller expects it.
+    stale_unit = {"name": "u", "sha": "b" * 40, "path": "skills/a",
+                  "url": "https://github.com/o/r.git"}
+    cache = tempfile.TemporaryDirectory()
+    stale_dest = P(cache.name) / stale_unit["sha"] / stale_unit["path"]
+    stale_dest.mkdir(parents=True)
+    real_urlopen = urllib.request.urlopen
+    urllib.request.urlopen = serving(tarball({"skills/a/SKILL.md": "fresh"}))
+    try:
+        root, reason = PB.fetch_unit(stale_unit, P(cache.name), 5, [])
+    finally:
+        urllib.request.urlopen = real_urlopen
+    # Read defensively. The failure this pins is precisely SKILL.md landing
+    # somewhere else, so an eager `.read_text()` here would raise before
+    # `check` ever compared, and a regression would arrive as a traceback
+    # that stops the whole suite instead of as one named FAIL beside the
+    # other two guards in this block.
+    fresh = root / "SKILL.md" if root is not None else None
+    check("public", "a stale pre-existing destination is wiped, not nested into",
+          (reason, root == stale_dest,
+           fresh.read_text() if fresh is not None and fresh.is_file() else "not at the path every caller reads"),
+          ("fetched", True, "fresh"),
+          "`shutil.move` onto an existing directory moves the source INSIDE "
+          "it rather than replacing it; the wipe one line above is what "
+          "keeps a leftover directory from silently relocating every file "
+          "this fetch was supposed to produce")
+    cache.cleanup()
+
     # The freeze refusals. `freeze_report` reads and writes the module-level
     # BASELINE, so the constant is what has to be substituted.
     def frozen(names: list[str], **over) -> dict:
@@ -4440,6 +4510,14 @@ def _fetch_and_freeze_cases() -> None:
           freezing(frozen(["a", "b"]), existing=["a", "b"])[0], 0,
           "refusing every re-freeze would make the guard unusable, and an "
           "unusable guard gets deleted rather than obeyed")
+    check("public", "a freeze that only adds units is allowed",
+          freezing(frozen(["a", "b", "c"]), existing=["a", "b"])[0], 0,
+          "the guard computes `existing - report`, not `existing != "
+          "report`; a set that loses no name is a superset, and corpus "
+          "growth is exactly what a re-freeze is for — R4-freeze-narrowing-"
+          "gap read this as a hole, but the LIMIT=5 incident this guard "
+          "cites was a shrink, never a grow, and the module docstring says "
+          "so by name")
     check("public", "a report of zero scanned units is never frozen",
           freezing(frozen([], discovered=3))[0], PB.DID_NOT_RUN,
           "a baseline of zero successful scans makes every later run look "
@@ -4448,6 +4526,124 @@ def _fetch_and_freeze_cases() -> None:
           freezing(frozen(["a"], surprise=1))[0], PB.DID_NOT_RUN,
           "a field reaching a committed file because nobody subtracted it "
           "out is not a decision anybody made")
+
+    # main()'s own comparison, and read_baseline's three outcomes, driven
+    # end to end. `load_corpus` and `urlopen` get the same module-attribute
+    # substitution `BASELINE` already gets above — `main` reads all three as
+    # globals at call time, so reassigning the attribute reaches every call
+    # inside it without a real network or a real bench/public-corpus.json.
+    QUIET = ("---\nname: quiet\ndescription: explains a language feature\n"
+             "---\n\nThis document explains what a comprehension is.\n")
+
+    def run_main(units: list[dict], payload, baseline_path: P,
+                 argv_extra: tuple = ()) -> tuple[int, str]:
+        cache = tempfile.TemporaryDirectory()
+        real_baseline, real_load = PB.BASELINE, PB.load_corpus
+        real_urlopen = urllib.request.urlopen
+        PB.BASELINE = baseline_path
+        PB.load_corpus = lambda: {
+            "provenance": {"pinned": len(units), "marketplace_json_sha256": "m"},
+            "units": units}
+        urllib.request.urlopen = serving(payload)
+        out = io.StringIO()
+        try:
+            with redirect_stdout(out):
+                code = PB.main(["--cache", cache.name, *argv_extra])
+        finally:
+            PB.BASELINE, PB.load_corpus = real_baseline, real_load
+            urllib.request.urlopen = real_urlopen
+        cache.cleanup()
+        return code, out.getvalue()
+
+    # THE ASYMMETRY, driven rather than argued: the exact corpus growth the
+    # guard above just proved `freeze_report` allows is a DID-NOT-RUN the
+    # very next time `main` compares against it — deliberately, per the
+    # module docstring, because comparing needs exact identity and cannot
+    # tell "the corpus grew" from "someone ran a different --limit".
+    units_ab = [
+        {"name": "a", "sha": "c" * 40, "path": "skills/a", "url": "https://github.com/o/r.git"},
+        {"name": "b", "sha": "d" * 40, "path": "skills/a", "url": "https://github.com/o/r.git"},
+    ]
+    base_dir = tempfile.TemporaryDirectory()
+    base_path = P(base_dir.name) / "public-baseline.json"
+    base_path.write_text(J.dumps(frozen(["a"])))
+    code, output = run_main(units_ab, tarball({"skills/a/SKILL.md": QUIET}), base_path)
+    check("public", "the comparison rejects a superset the freeze guard would allow",
+          code, PB.DID_NOT_RUN,
+          "freeze_report only refuses a NARROWING re-freeze; main's own "
+          "comparison rejects ANY set mismatch, growth included — the two "
+          "guards are asymmetric on purpose, and a test that only pinned "
+          "one of them could not tell a widened comparison from a narrowed "
+          "freeze if either one broke")
+    check("public", "the mismatch names what is missing and what is new",
+          "0 missing, 1 new" in output, True,
+          "an operator staring at DID_NOT_RUN needs the two sets sized, not "
+          "just told they disagree")
+    base_dir.cleanup()
+
+    # read_baseline's tri-state, and that `main` really branches on all
+    # three rather than treating "damaged" as a fourth, dead outcome.
+    units_a = [{"name": "a", "sha": "e" * 40, "path": "skills/a",
+                "url": "https://github.com/o/r.git"}]
+    quiet_tar = tarball({"skills/a/SKILL.md": QUIET})
+    base_dir = tempfile.TemporaryDirectory()
+
+    absent_path = P(base_dir.name) / "absent-baseline.json"
+    code, output = run_main(units_a, quiet_tar, absent_path)
+    check("public", "no frozen baseline yet is a pass, not a failure",
+          (code, "no frozen public baseline yet" in output), (0, True),
+          "every corpus looks exactly like this before its first --freeze; "
+          "reading absence as damage would fail the first run a public "
+          "baseline ever gets the chance to exist for")
+
+    damaged_path = P(base_dir.name) / "damaged-baseline.json"
+    damaged_path.write_bytes(b"{not valid json")
+    code, output = run_main(units_a, quiet_tar, damaged_path)
+    check("public", "a damaged baseline is a DID-NOT-RUN, not a silent pass",
+          (code, "could not be read" in output), (PB.DID_NOT_RUN, True),
+          "a gate that cannot read its own reference reports neither a "
+          "pass nor a regression; reading it as absent would silently "
+          "start comparing against nothing and calling that clean")
+
+    # Unparseable JSON is only the first of read_baseline's three damaged
+    # routes, and it was the only one under test: flipping either of the
+    # other two to "absent" left the suite green, which is the exact
+    # absence-read-as-damage confusion this function's docstring exists to
+    # refuse. A baseline written by a future build, and one a hand-edit
+    # truncated, both parse fine and both must still refuse to compare.
+    stale_schema_path = P(base_dir.name) / "stale-schema-baseline.json"
+    stale_schema_path.write_text(J.dumps(frozen(["a"], schema=PB.SCHEMA + 1)))
+    code, output = run_main(units_a, quiet_tar, stale_schema_path)
+    check("public", "a baseline from another schema is a DID-NOT-RUN",
+          (code, "could not be read" in output), (PB.DID_NOT_RUN, True),
+          "it parses, so nothing throws — the version is the only thing "
+          "saying these two files do not mean the same by field, and "
+          "comparing across that boundary would call a renamed field a "
+          "regression or a changed one clean")
+
+    truncated_path = P(base_dir.name) / "truncated-baseline.json"
+    truncated = frozen(["a"])
+    del truncated["unit_names"]
+    truncated_path.write_text(J.dumps(truncated))
+    code, output = run_main(units_a, quiet_tar, truncated_path)
+    check("public", "a baseline missing a required key is a DID-NOT-RUN",
+          (code, "could not be read" in output), (PB.DID_NOT_RUN, True),
+          "the comparison indexes the keys in REQUIRED without asking "
+          "whether they are there; a truncated baseline reaching it either "
+          "raises inside the gate or compares against a field that silently "
+          "defaulted, and neither of those is an answer")
+
+    present_path = P(base_dir.name) / "present-baseline.json"
+    freeze_code, _ = run_main(units_a, quiet_tar, present_path, argv_extra=("--freeze",))
+    compare_code, compare_out = run_main(units_a, quiet_tar, present_path)
+    check("public", "a present baseline lets the comparison actually run",
+          (freeze_code, compare_code,
+           "no drift against the public baseline" in compare_out),
+          (0, 0, True),
+          "absent and damaged are covered above; this is the third branch "
+          "read_baseline can return, and the one where main is actually "
+          "supposed to compare rather than refuse to")
+    base_dir.cleanup()
 
 
 _fetch_and_freeze_cases()
