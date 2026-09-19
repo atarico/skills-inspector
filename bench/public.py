@@ -830,7 +830,17 @@ def main(argv: list[str]) -> int:
     fetch_failures: list[tuple[str, str]] = []
     drops: list[tuple[str, dict | None]] = []
     for unit in requested:
-        root, reason = fetch_unit(unit, cache_dir, timeout, drops)
+        # fetch_unit's own try/except does not cover its heaviest I/O — the
+        # temp mkdir, the cache-hit stat/iterdir, and the destination
+        # mkdir/rmtree/move — so an ENOSPC, a lost-permission cache
+        # directory, or an EDQUOT/NotADirectoryError on the final rename is
+        # not a detection regression either: it is the same environment
+        # failure fetch_unit's internal handler already turns into a named
+        # fetch failure, just raised one call frame earlier.
+        try:
+            root, reason = fetch_unit(unit, cache_dir, timeout, drops)
+        except OSError as exc:
+            root, reason = None, f"{type(exc).__name__}: {exc}"
         if root is None:
             fetch_failures.append((unit["name"], reason))
         else:

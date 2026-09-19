@@ -5219,6 +5219,36 @@ def _fetch_and_freeze_cases() -> None:
           "a committed tree a cache hit can never go back and re-price")
     guard_cache.cleanup()
 
+    # R4-fetch-oserror-exits-as-regression: the loop that drives fetch_unit
+    # has no exception handling of its own, and fetch_unit's own try/except
+    # does not cover its heaviest I/O — the temp mkdir, the cache-hit
+    # stat/iterdir, and the destination mkdir/rmtree/move. An OSError from
+    # any of those (ENOSPC, a cache directory that loses write permission
+    # mid-run, EDQUOT or NotADirectoryError on the final rename) must reach
+    # the same fetch-failure gate an OSError INSIDE fetch_unit's own try
+    # already reaches, never escape main() uncaught into the exit code
+    # this module reserves for a regression a human has to justify.
+    oserror_unit = {"name": "u", "sha": "6" * 40, "path": "skills/a",
+                    "url": "https://github.com/o/r.git"}
+    real_fetch_unit = PB.fetch_unit
+    PB.fetch_unit = lambda *a, **k: (_ for _ in ()).throw(OSError("ENOSPC"))
+    escaped = None
+    try:
+        code, output = run_main([oserror_unit], quiet_tar, absent_path)
+    except OSError as exc:
+        escaped = exc
+        code = None
+    finally:
+        PB.fetch_unit = real_fetch_unit
+    check("public", "an OSError out of fetch_unit is DID-NOT-RUN, never an escape",
+          (escaped, code), (None, PB.DID_NOT_RUN),
+          "every cited I/O window in fetch_unit funnels through this one "
+          "call site; guarding it here turns the error into the named "
+          "fetch-failure path that already reaches the exit-2 gate, "
+          "instead of an uncaught exception the interpreter would turn "
+          "into exit 1 — the code compare()'s own verdict reserves for a "
+          "regression a human has to justify")
+
     # R4-registry-rewrite-destroys-peers: an interrupted replace must
     # leave the PREVIOUS registry complete — the write goes to a temp
     # file first, and only a successful os.replace touches drops.json.
