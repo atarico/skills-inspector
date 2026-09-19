@@ -77,6 +77,16 @@ shas actually contain, unless the gap between the two is on the record too.
 are unknown (a cache entry from a build that predates this registry) — a
 partial total published as the total would understate every comparison run
 against it forever after.
+
+It also carries `listings`, next to `discovered`. `bench/public-corpus.json`
+lists the same byte-identical tree — same `sha` + `path` — under several
+marketplace names (see `select`), and scanning it once per name inflated the
+published clean rate: every redundant scan landed on the flattering side of
+both the numerator and the denominator. `select` folds a group down to one
+tree before anything is fetched, so `discovered` counts distinct TREES and
+`listings` remembers how many marketplace LISTINGS folded into them — without
+it, "clean 26 of 248" reads as a number somebody typed, not one this file
+derived from `bench/public-corpus.json`'s own 253 rows.
 """
 
 from __future__ import annotations
@@ -128,13 +138,16 @@ CODELOAD = "https://codeload.github.com/{owner}/{repo}/tar.gz/{sha}"
 
 # What compare()/_summary() read, plus `unit_names` — the extra field this
 # benchmark's comparability check needs that bench.drift cannot publish (see
-# module docstring) — and the four drop totals, missing which a baseline is
+# module docstring) — the four drop totals, missing which a baseline is
 # truncated, not a corpus with nothing dropped: a hand-edited or pre-registry
-# file that simply lacks the field must never read as zero drops.
-REQUIRED = ("discovered", "units", "clean_units", "clean_pct", "median", "mean",
-            "p90", "max", "crashes", "headline_total", "rule_headline_counts",
-            "finding_total", "rule_finding_counts", "unit_names",
-            "link_drops_total", "link_drops_units",
+# file that simply lacks the field must never read as zero drops — and
+# `listings`, added deliberately alongside `discovered` so a baseline frozen
+# before the alias collapse (see `select`) reads as truncated rather than as
+# a corpus that always had 248 trees and no marketplace duplication at all.
+REQUIRED = ("discovered", "listings", "units", "clean_units", "clean_pct",
+            "median", "mean", "p90", "max", "crashes", "headline_total",
+            "rule_headline_counts", "finding_total", "rule_finding_counts",
+            "unit_names", "link_drops_total", "link_drops_units",
             "escape_drops_total", "escape_drops_units")
 
 # Every key that may be written to bench/public-baseline.json. Enumerated
@@ -142,8 +155,8 @@ REQUIRED = ("discovered", "units", "clean_units", "clean_pct", "median", "mean",
 # the report is a decision somebody makes on purpose, not something that
 # reaches a committed file because nobody subtracted it out.
 FROZEN_KEYS = ("schema", "limit", "marketplace_json_sha256", "unit_names",
-               "discovered", "units", "clean_units", "clean_pct", "median",
-               "mean", "p90", "max", "crashes", "headline_total",
+               "discovered", "listings", "units", "clean_units", "clean_pct",
+               "median", "mean", "p90", "max", "crashes", "headline_total",
                "rule_headline_counts", "finding_total", "rule_finding_counts",
                "unit_histogram", "link_drops_total", "link_drops_units",
                "escape_drops_total", "escape_drops_units")
@@ -161,7 +174,17 @@ FROZEN_KEYS = ("schema", "limit", "marketplace_json_sha256", "unit_names",
 # publishing the count itself would be publishing a number about this one
 # run's cache, not about the corpus, and the next run's cache state would
 # make it drift for no reason a diff could explain.
-LOCAL_KEYS = ("unit_fingerprints", "unknown_drop_units")
+#
+# `collapsed_aliases` joins them for a narrower reason: it is `select()`'s
+# alias map (see its docstring), carried on the report only so
+# `freeze_report`'s anti-narrowing guard can tell a name lost because its
+# tree collapsed into its group's canonical entry from a name lost because
+# it is actually gone. It is not a fact about the corpus a third party needs
+# to check — `bench/public-corpus.json` already publishes every name and
+# sha, so the mapping is always reconstructible from that file — and keeping
+# it out of the frozen baseline keeps FROZEN_KEYS meaning "what this file
+# publishes", not "everything `main` happened to compute".
+LOCAL_KEYS = ("unit_fingerprints", "unknown_drop_units", "collapsed_aliases")
 
 # How many rows each census in `_breakdown` prints before it stops. Twelve is
 # `bench.corpus`'s number, kept so the two benchmarks read the same way; the
@@ -173,13 +196,51 @@ def load_corpus(path: Path = CORPUS) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def select(corpus: dict, limit: int | None) -> list[dict]:
-    """The units this run measures: the first `limit` by name, or all of
-    them. Sorted explicitly rather than trusting the file's own order, so a
+def select(corpus: dict, limit: int | None) -> tuple[list[dict], dict[str, str]]:
+    """The distinct trees this run measures, plus the alias map naming
+    every listing the collapse folded away: the first `limit` distinct
+    trees by name, or all of them.
+
+    Sorted explicitly rather than trusting the file's own order, so a
     hand-edited or regenerated corpus.json cannot silently change which
-    units a fixed `--limit` picks."""
+    units a fixed `--limit` picks.
+
+    COLLAPSE BEFORE LIMIT. `bench/public-corpus.json` publishes what the
+    marketplace publishes, and the marketplace lists the same byte-identical
+    tree — same `sha` + `path`, the identity `_drop_key` already keys the
+    drop registry on — under several `name`s. Scanning that tree twice under
+    two names is not two units measured; it is one unit measured twice and
+    counted twice, on the flattering side of both the numerator and the
+    denominator. Folding groups AFTER truncating to `limit` would let a
+    duplicate inside the cut silently hand back fewer than `limit` distinct
+    trees; folding first is the only order where `--limit N` always means
+    "N distinct trees", not "N listings, some of which are the same tree".
+
+    The canonical survivor of a group is its alphabetically-first name — the
+    same ordering this function already sorts by — so which listing a group
+    collapses TO is deterministic, never the order the corpus file happens
+    to list them in.
+    """
     units = sorted(corpus["units"], key=lambda u: u["name"])
-    return units[:limit] if limit else units
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for unit in units:
+        key = _drop_key(unit["sha"], unit["path"])
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(unit)
+
+    keys = order[:limit] if limit else order
+    selected: list[dict] = []
+    aliases: dict[str, str] = {}
+    for key in keys:
+        members = groups[key]
+        canonical = members[0]  # alphabetically first: `units` was sorted above
+        selected.append(canonical)
+        for extra in members[1:]:
+            aliases[extra["name"]] = canonical["name"]
+    return selected, dict(sorted(aliases.items()))
 
 
 def _owner_repo(url: str) -> tuple[str, str]:
@@ -637,6 +698,17 @@ def freeze_report(report: dict) -> int:
     existing, status = read_baseline(BASELINE)
     if status == "present":
         lost = sorted(set(existing["unit_names"]) - set(report["unit_names"]))
+        # A name in `lost` is not always a deletion: `select()`'s alias
+        # collapse (see its docstring) can make a previously-frozen name
+        # disappear because its tree is now measured under its group's
+        # canonical name instead — a row rename, not the corpus shrinking.
+        # Only exempt it when the canonical name it folded into is actually
+        # in THIS run's unit_names; a report's alias map is never trusted to
+        # excuse a loss it does not itself explain.
+        aliases = report.get("collapsed_aliases", {})
+        measured = set(report["unit_names"])
+        renamed = sorted(name for name in lost if aliases.get(name) in measured)
+        lost = sorted(set(lost) - set(renamed))
         if lost:
             print(f"{YELLOW}DID NOT RUN{RESET}  the frozen baseline covers "
                   f"{len(existing['unit_names'])} unit(s); this run measured "
@@ -644,6 +716,11 @@ def freeze_report(report: dict) -> int:
                   f"Nothing was written — re-run without --limit, or remove "
                   f"{BASELINE.name} first if starting over is the intent.")
             return DID_NOT_RUN
+        if renamed:
+            print(f"  {len(renamed)} previously-frozen name(s) folded into "
+                  f"their canonical entry, not lost:")
+            for name in renamed:
+                print(f"    {name} -> {aliases[name]}")
 
     published = {key: published[key] for key in FROZEN_KEYS}
     BASELINE.write_text(json.dumps(published, indent=2) + "\n", encoding="utf-8")
@@ -687,7 +764,7 @@ def main(argv: list[str]) -> int:
               f"not be read ({type(exc).__name__}).")
         return DID_NOT_RUN
 
-    requested = select(corpus, limit)
+    requested, aliases = select(corpus, limit)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     fetched: list[tuple[str, Path]] = []
@@ -705,6 +782,12 @@ def main(argv: list[str]) -> int:
     print(f"public corpus: {len(requested)} unit(s) requested "
           f"({corpus['provenance']['pinned']} pinned in {CORPUS.name}"
           f"{f', limit={limit}' if limit else ''})")
+    if aliases:
+        print(f"    {len(aliases)} listing(s) collapsed into their "
+              f"canonical entry — same sha + path published under another "
+              f"marketplace name, never scanned twice:")
+        for alias, canonical in aliases.items():
+            print(f"      {alias} -> {canonical}")
     print(f"  fetched {len(fetched)}/{len(requested)}" +
           (f", {len(fetch_failures)} failure(s) below" if fetch_failures else ""))
     for name, reason in fetch_failures:
@@ -749,6 +832,12 @@ def main(argv: list[str]) -> int:
     report["marketplace_json_sha256"] = corpus["provenance"]["marketplace_json_sha256"]
     report["unit_names"] = sorted(name for name, _ in fetched)
     report.update(totals)
+    # `requested` is post-collapse; `aliases` names every listing that
+    # collapsed into one of its members. Their sum is the raw marketplace
+    # listing count behind this run's `unit_names` — `listings` next to
+    # `discovered`, never implied by subtracting one frozen file from another.
+    report["listings"] = len(requested) + len(aliases)
+    report["collapsed_aliases"] = aliases
 
     print(f"\n{_summary(report)}")
     _breakdown(report)

@@ -4296,6 +4296,96 @@ def _report_for_units_cases() -> None:
 _report_for_units_cases()
 
 
+# --------------------------------------------- select(): alias collapse, driven
+# Promise (bench/public.py): `bench/public-corpus.json` lists four
+# byte-identical trees under nine marketplace names — same `sha` + `path`,
+# published as several `name`s. `select()` must fold each group down to one
+# unit, identified the same way `_drop_key` already identifies a cached
+# tree, so a selection entry and the drop registry's record of that same
+# tree can never disagree about what a "unit" is. The canonical survivor is
+# the alphabetically-first name, matching the sort `select()` already does;
+# the fold must happen before `--limit` truncates the list, or `--limit N`
+# would silently hand back fewer than N distinct trees whenever a duplicate
+# falls inside the cut.
+
+def _alias_collapse_cases() -> None:
+    from bench import public as PB
+
+    def unit(name: str, sha: str, path: str = "") -> dict:
+        return {"name": name, "sha": sha, "path": path,
+                "url": "https://github.com/o/r.git"}
+
+    # Two collapse groups (m/z share sha1, b/y share sha2) interleaved with
+    # two untouched trees (a, c), so both the fold and the alias ordering
+    # have more than one group to get right.
+    corpus = {"units": [
+        unit("z", "1" * 40, ""),   # alias of m
+        unit("m", "1" * 40, ""),   # canonical of group 1
+        unit("y", "2" * 40, ""),   # alias of b
+        unit("b", "2" * 40, ""),   # canonical of group 2
+        unit("a", "3" * 40, ""),
+        unit("c", "4" * 40, "sub"),
+    ]}
+
+    selected, aliases = PB.select(corpus, None)
+    check("public", "groups collapse by sha+path; alphabetically-first name survives",
+          [u["name"] for u in selected], ["a", "b", "c", "m"],
+          "m sorts before z and b sorts before y, so each group's canonical "
+          "is its own alphabetically-first member, not the first one the "
+          "corpus file happens to list")
+    check("public", "the returned alias mapping is correct and deterministically ordered",
+          list(aliases.items()), [("y", "b"), ("z", "m")],
+          "y and z are the two listings the fold discarded; the map is "
+          "ordered by alias name so two runs over the same corpus print "
+          "the collapse identically")
+
+    # --limit applies AFTER collapse: a naive "take the first `limit` raw
+    # listings, then dedupe" would pick "a" and "b" here (both sha 9...9)
+    # and hand back one distinct tree for a --limit 2 request.
+    corpus_limit = {"units": [
+        unit("a", "9" * 40, ""),
+        unit("b", "9" * 40, ""),
+        unit("c", "a" * 40, ""),
+    ]}
+    selected_l, aliases_l = PB.select(corpus_limit, 2)
+    check("public", "--limit applies after collapse",
+          ([u["name"] for u in selected_l], aliases_l),
+          (["a", "c"], {"b": "a"}),
+          "collapsing first means --limit always counts distinct trees, "
+          "never marketplace listings")
+
+    # Same sha, different path: two distinct trees pinned at the same
+    # commit, not the same tree.
+    corpus_path = {"units": [unit("x", "4" * 40, "one"),
+                              unit("w", "4" * 40, "two")]}
+    selected_p, aliases_p = PB.select(corpus_path, None)
+    check("public", "same sha but different path does not collapse",
+          ([u["name"] for u in selected_p], aliases_p), (["w", "x"], {}),
+          "_drop_key keys on sha AND path; dropping the path half would "
+          "fold two different subtrees of the same commit into one")
+
+    # Same path, different sha: a changed pin is a changed tree.
+    corpus_sha = {"units": [unit("p", "5" * 40, "shared"),
+                             unit("q", "6" * 40, "shared")]}
+    selected_s, aliases_s = PB.select(corpus_sha, None)
+    check("public", "same path but different sha does not collapse",
+          ([u["name"] for u in selected_s], aliases_s), (["p", "q"], {}),
+          "a different pinned commit is a different tree even at an "
+          "identical subdirectory")
+
+    # No duplicates: the fold must be a no-op, not just a safe one.
+    corpus_clean = {"units": [unit("n", "7" * 40, ""), unit("o", "8" * 40, "")]}
+    selected_c, aliases_c = PB.select(corpus_clean, None)
+    check("public", "a corpus with no duplicates collapses nothing and changes no count",
+          ([u["name"] for u in selected_c], aliases_c, len(selected_c)),
+          (["n", "o"], {}, len(corpus_clean["units"])),
+          "a collapse that only ever removes something has never been run "
+          "against the case where there is nothing to remove")
+
+
+_alias_collapse_cases()
+
+
 # ------------------------------- fetch_unit and the freeze refusals, driven
 # Promise (bench/public.py): `fetch_unit` decides WHICH BYTES the published
 # number is computed over, and `freeze_report`'s three refusals are the only
@@ -4655,6 +4745,7 @@ def _fetch_and_freeze_cases() -> None:
     def frozen(names: list[str], **over) -> dict:
         row = {"schema": PB.SCHEMA, "limit": None, "marketplace_json_sha256": "m",
                "unit_names": sorted(names), "discovered": len(names),
+               "listings": len(names),
                "units": len(names), "clean_units": 0, "clean_pct": 0,
                "median": 0, "mean": 0.0, "p90": 0, "max": 0, "crashes": 0,
                "headline_total": 0, "rule_headline_counts": {},
@@ -4721,6 +4812,53 @@ def _fetch_and_freeze_cases() -> None:
           "the guard reads the count itself, not merely whether the key is "
           "present; a report where every unit's drops are known must still "
           "be freezable, or the guard would refuse every run forever")
+
+    # A name a report never explains through `collapsed_aliases` is a
+    # deletion, exactly as before — the false-positive twin of the alias
+    # exemption right below it. Without this case, the exemption could be
+    # implemented as "never refuse when collapsed_aliases is present" and
+    # this whole guard would go quiet.
+    check("public", "the freeze guard still refuses when a non-alias name disappears",
+          freezing(frozen(["a", "b"], collapsed_aliases={"z": "q"}),
+                   existing=["a", "b", "c"]),
+          (PB.DID_NOT_RUN, True),
+          "collapsed_aliases says nothing about c; a report carrying an "
+          "unrelated alias map must not excuse a loss it never named")
+    check("public", "the freeze guard refuses an alias whose canonical this run never measured",
+          freezing(frozen(["a", "b"], collapsed_aliases={"c": "q"}),
+                   existing=["a", "b", "c"]),
+          (PB.DID_NOT_RUN, True),
+          "c claims to have folded into q, but no unit_name in this run is "
+          "q, so nothing measured that tree under any name — the loss is a "
+          "deletion wearing a rename's clothes. The exemption reads the "
+          "canonical it was handed and checks that THIS run measured it; "
+          "trusting the map's mere mention of c would let any report "
+          "narrow a frozen baseline by naming an arbitrary destination")
+    check("public", "the freeze guard proceeds when the only lost names are collapsed aliases",
+          freezing(frozen(["a", "b"], collapsed_aliases={"c": "a"}),
+                   existing=["a", "b", "c"])[0],
+          0,
+          "c folded into a, its group's canonical entry, which this run "
+          "still measured under the name a — a row rename, not the "
+          "deletion this guard exists to catch")
+
+    rename_dir = tempfile.TemporaryDirectory()
+    rename_path = P(rename_dir.name) / "public-baseline.json"
+    rename_path.write_text(J.dumps(frozen(["a", "b", "c"])))
+    real_baseline = PB.BASELINE
+    PB.BASELINE = rename_path
+    rename_out = io.StringIO()
+    try:
+        with redirect_stdout(rename_out):
+            rename_code = PB.freeze_report(frozen(["a", "b"], collapsed_aliases={"c": "a"}))
+    finally:
+        PB.BASELINE = real_baseline
+    rename_dir.cleanup()
+    check("public", "a collapsed alias is named in the freeze output, not just excused",
+          (rename_code, "c -> a" in rename_out.getvalue()), (0, True),
+          "excluding it from `lost` silently would be the same class of "
+          "omission this file refuses everywhere else — a member the next "
+          "reader cannot see is a member that was still dropped")
 
     field_cache = tempfile.TemporaryDirectory()
     field_path = P(field_cache.name) / "public-baseline.json"
@@ -4894,6 +5032,37 @@ def _fetch_and_freeze_cases() -> None:
           "read_baseline can return, and the one where main is actually "
           "supposed to compare rather than refuse to")
     base_dir.cleanup()
+
+    # main() end to end over a corpus with one duplicated tree: `listings`
+    # must carry the pre-collapse count, `discovered` the post-collapse
+    # one, and the collapse itself must be named in the printed output —
+    # never a silent drop from 253 (or here, 3) to fewer.
+    units_dup = [
+        {"name": "dup-b", "sha": "f" * 40, "path": "skills/a",
+         "url": "https://github.com/o/r.git"},
+        {"name": "dup-a", "sha": "f" * 40, "path": "skills/a",
+         "url": "https://github.com/o/r.git"},
+        {"name": "solo", "sha": "e" * 40, "path": "skills/b",
+         "url": "https://github.com/o/r.git"},
+    ]
+    dup_tar = tarball({"skills/a/SKILL.md": QUIET, "skills/b/SKILL.md": QUIET})
+    listings_dir = tempfile.TemporaryDirectory()
+    listings_path = P(listings_dir.name) / "public-baseline.json"
+    freeze_code, freeze_out = run_main(units_dup, dup_tar, listings_path,
+                                        argv_extra=("--freeze",))
+    written = J.loads(listings_path.read_text())
+    check("public", "listings carries the pre-collapse count, discovered the post-collapse one",
+          (freeze_code, written["listings"], written["discovered"]), (0, 3, 2),
+          "dup-a and dup-b are the same sha + path; three marketplace "
+          "listings measure two distinct trees, and both numbers have to "
+          "reach the frozen file for the disclosure sentence to be "
+          "generated rather than hand-written")
+    check("public", "the collapse is printed, not just counted",
+          "dup-b -> dup-a" in freeze_out, True,
+          "a member the scanner never sees under its own name must still "
+          "be named in the report — the same contract the link-drop "
+          "census already keeps")
+    listings_dir.cleanup()
 
 
 _fetch_and_freeze_cases()
