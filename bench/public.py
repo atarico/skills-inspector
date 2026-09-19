@@ -16,9 +16,11 @@ access to reproduce. Those 253 entries resolve to 248 distinct trees — the
 marketplace publishes some of them under more than one name, and `select`
 folds each group down to one before anything is fetched, so `discovered`
 counts trees and `listings` remembers how many names folded into them. Fetching happens here, one unit at a time, from the
-GitHub codeload tarball for the pinned sha; measurement reuses
-`bench.corpus.report_for_units` — the exact arithmetic `bench.drift` freezes
-— rather than a second copy of it.
+GitHub codeload tarball for the pinned sha; measurement uses
+`bench.corpus.report_for_units`, a reduction kept deliberately identical to
+`bench.drift.collect_report()` and `bench.drift.restrict_report()` — three
+parallel copies of the same arithmetic, not one shared function, so a change
+to one must be mirrored in the other two by hand.
 
     python -m bench.public --limit 5            fetch, measure, print
     python -m bench.public --limit 5 --freeze    record bench/public-baseline.json
@@ -565,11 +567,13 @@ def _breakdown(report: dict) -> None:
     """Print the per-rule and per-unit censuses behind the summary line.
 
     NOTHING HERE IS COMPUTED. `rule_headline_counts` and `unit_fingerprints`
-    come straight out of `bench.corpus.report_for_units` — the same function
-    `bench.drift` freezes — and this only orders and prints them. That is the
-    point: a breakdown doing its own arithmetic could disagree with the
-    aggregate it sits under, and a report whose halves contradict each other
-    is the defect class this whole benchmark exists to refuse.
+    come straight out of `bench.corpus.report_for_units` — kept deliberately
+    identical to, but not shared with, the arithmetic `bench.drift` freezes
+    in its own `collect_report()`/`restrict_report()` — and this only orders
+    and prints them. That is the point: a breakdown doing its own arithmetic
+    could disagree with the aggregate it sits under, and a report whose
+    halves contradict each other is the defect class this whole benchmark
+    exists to refuse.
 
     WHY IT EXISTS. Issue #53 asks for benchmark evidence a third party can
     check, and `_summary`'s single line cannot be checked — it says
@@ -719,6 +723,18 @@ def freeze_report(report: dict) -> int:
     # bench-public-freeze` forwards the measuring target's --limit, and that
     # replaced a 253-unit baseline with a five-unit one that still parsed.
     existing, status = read_baseline(BASELINE)
+    if status == "damaged":
+        # read_baseline() already printed why. A damaged file still exists —
+        # this is not the fresh-freeze case ("absent") — so falling through
+        # to an unconditional overwrite below would destroy whatever the
+        # existing file recorded without ever checking it for narrowing.
+        # The guard cannot prove the new report is not narrower than a
+        # baseline it cannot read, so it refuses rather than assumes.
+        print(f"{YELLOW}DID NOT RUN{RESET}  nothing was written — a damaged "
+              f"baseline cannot be checked for narrowing, so overwriting it "
+              f"could silently delete units the same way a bad --limit "
+              f"would.")
+        return DID_NOT_RUN
     if status == "present":
         lost = sorted(set(existing["unit_names"]) - set(report["unit_names"]))
         # A name in `lost` is not always a deletion: `select()`'s alias
@@ -770,13 +786,23 @@ def main(argv: list[str]) -> int:
         if arg == "--freeze":
             freeze = True
         elif arg == "--limit" and i + 1 < len(args):
-            limit = int(args[i + 1])
+            try:
+                limit = int(args[i + 1])
+            except ValueError:
+                print(f"{YELLOW}DID NOT RUN{RESET}  --limit expects an "
+                      f"integer, got {args[i + 1]!r}.")
+                return DID_NOT_RUN
             i += 1
         elif arg == "--cache" and i + 1 < len(args):
             cache_dir = Path(args[i + 1]).expanduser()
             i += 1
         elif arg == "--timeout" and i + 1 < len(args):
-            timeout = int(args[i + 1])
+            try:
+                timeout = int(args[i + 1])
+            except ValueError:
+                print(f"{YELLOW}DID NOT RUN{RESET}  --timeout expects an "
+                      f"integer, got {args[i + 1]!r}.")
+                return DID_NOT_RUN
             i += 1
         i += 1
 
@@ -787,8 +813,18 @@ def main(argv: list[str]) -> int:
               f"not be read ({type(exc).__name__}).")
         return DID_NOT_RUN
 
-    requested, aliases = select(corpus, limit)
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Neither of these is a detection regression: `select()` reading a
+    # corpus shaped wrong (a missing/malformed 'units' list) and the cache
+    # directory failing to come into existence are both environment/input
+    # failures, not the scanner finding something new. Exit 1 is reserved
+    # for compare()'s own verdict below.
+    try:
+        requested, aliases = select(corpus, limit)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except (KeyError, TypeError, OSError) as exc:
+        print(f"{YELLOW}DID NOT RUN{RESET}  could not prepare the run "
+              f"({type(exc).__name__}: {exc}).")
+        return DID_NOT_RUN
 
     fetched: list[tuple[str, Path]] = []
     fetch_failures: list[tuple[str, str]] = []

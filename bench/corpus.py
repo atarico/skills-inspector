@@ -118,14 +118,11 @@ def report_for_units(units: list[tuple[str, Path]]) -> dict | None:
     `bench.drift` freezes: clean/median/mean/p90/max, the precision and
     recall per-rule censuses, and the crash count.
 
-    `bench.drift.collect_report()` computes the same arithmetic starting from
-    `discover(root)` — a filesystem walk over a machine-specific directory.
-    `bench.public` cannot start there: its units are fetched by exact git sha
-    into a cache, one at a time, and never share a single scannable root. This
-    is the smallest cut that lets both corpora reduce through one function
-    instead of two copies of the same math drifting apart — the caller
-    supplies the `(name, root)` pairs, this function never calls `discover()`
-    or walks a filesystem on its own.
+    `bench.drift.collect_report()` and `bench.drift.restrict_report()` compute
+    the same arithmetic from `discover(root)`, a walk over a machine-specific
+    directory `bench.public` cannot start from: its units arrive by exact git
+    sha into a cache, one at a time. This is a third parallel copy, not a
+    merge of those two, and nothing holds the three in step — mirror by hand.
 
     Unlike `bench.drift`, the per-unit identity here is the caller-supplied
     NAME, not a content signature. `bench.drift`'s corpus is software one
