@@ -4743,6 +4743,92 @@ def _fetch_and_freeze_cases() -> None:
           "subtree forever")
     cache.cleanup()
 
+    # R1-cache-destination-path-traversal, side one: `path` climbing out of
+    # `cache_dir` itself, not out of `tmp`. The escape checked at line ~449
+    # only defends the extraction directory; `dest` is built from the same
+    # untrusted `path` and was never checked at all, so a pinned unit could
+    # make the cache-hit branch return an arbitrary directory elsewhere on
+    # disk as if it were this unit's cached root. `network_calls` proves the
+    # refusal happens before any fetch is attempted, not just before a
+    # write — a regression that only guarded the destructive branch would
+    # still leak `victim`'s contents through the "cached" read path.
+    escape_base = tempfile.TemporaryDirectory()
+    escape_cache = P(escape_base.name) / "cache"
+    escape_cache.mkdir()
+    victim = P(escape_base.name) / "victim"
+    victim.mkdir()
+    (victim / "precious.txt").write_text("do not delete me")
+    escape_unit = {"name": "u", "sha": "a" * 40, "path": "../../victim",
+                   "url": "https://github.com/o/r.git"}
+    escape_network_calls: list = []
+    real_urlopen = urllib.request.urlopen
+
+    def _escape_network_forbidden(*_a, **_k):
+        escape_network_calls.append(1)
+        raise urllib.error.URLError("containment must refuse before any fetch")
+    urllib.request.urlopen = _escape_network_forbidden
+    try:
+        root, reason = PB.fetch_unit(escape_unit, escape_cache, 5, [])
+    finally:
+        urllib.request.urlopen = real_urlopen
+    check("public", "a path that climbs out of the cache root is refused, "
+          "not returned as a cache hit",
+          (root, isinstance(reason, str) and "cache" in reason.lower(),
+           escape_network_calls,
+           (victim / "precious.txt").read_text() if (victim / "precious.txt").exists()
+           else "victim was removed"),
+          (None, True, [], "do not delete me"),
+          "`dest.is_dir() and any(dest.iterdir())` reads `dest` before "
+          "anything else in this function; unchecked, a `path` of "
+          "`../../victim` makes it read (and would let a later fetch write "
+          "or delete) a directory outside `cache_dir` entirely")
+    escape_base.cleanup()
+
+    # R1-cache-destination-path-traversal, side two: an empty (or otherwise
+    # malformed) `sha` collapsing `dest` onto `cache_dir` itself. A bare
+    # `dest.is_relative_to(cache_dir)` containment check would NOT catch
+    # this — a path is relative to its own equal — so this needs its own
+    # assertion, separate from the escape case above. Pre-existing cache
+    # content (another unit's extracted tree, plus the drop registry) stands
+    # in for "every other unit's drop records": if the guard is missing or
+    # only checks `is_relative_to`, the unfixed code reads `cache_dir`
+    # itself back as this unit's "cached" root instead of refusing it.
+    collapse_base = tempfile.TemporaryDirectory()
+    collapse_cache = P(collapse_base.name) / "cache"
+    collapse_cache.mkdir()
+    (collapse_cache / "drops.json").write_text(
+        J.dumps({"b" * 40 + "/skills/a": {"links": 0, "escapes": 0}}))
+    other_unit_dir = collapse_cache / ("b" * 40) / "skills" / "a"
+    other_unit_dir.mkdir(parents=True)
+    (other_unit_dir / "SKILL.md").write_text("a real cached unit")
+    collapse_unit = {"name": "u", "sha": "", "path": "",
+                      "url": "https://github.com/o/r.git"}
+    collapse_network_calls: list = []
+    real_urlopen = urllib.request.urlopen
+
+    def _collapse_network_forbidden(*_a, **_k):
+        collapse_network_calls.append(1)
+        raise urllib.error.URLError("containment must refuse before any fetch")
+    urllib.request.urlopen = _collapse_network_forbidden
+    try:
+        root, reason = PB.fetch_unit(collapse_unit, collapse_cache, 5, [])
+    finally:
+        urllib.request.urlopen = real_urlopen
+    check("public", "an empty sha that collapses dest onto the cache root "
+          "is refused, not returned as the whole cache",
+          (root, isinstance(reason, str) and "cache" in reason.lower(),
+           collapse_network_calls,
+           (other_unit_dir / "SKILL.md").exists(),
+           (collapse_cache / "drops.json").exists()),
+          (None, True, [], True, True),
+          "`is_relative_to` treats a path as relative to itself, so "
+          "checking containment alone lets `sha=\"\"` through; past this "
+          "point `shutil.rmtree(dest, ignore_errors=True)` acts on `dest` "
+          "directly, and `dest` here IS `cache_dir` — every other unit's "
+          "extracted tree and its drop record sit exactly where that call "
+          "would remove them")
+    collapse_base.cleanup()
+
     # The freeze refusals. `freeze_report` reads and writes the module-level
     # BASELINE, so the constant is what has to be substituted.
     def frozen(names: list[str], **over) -> dict:

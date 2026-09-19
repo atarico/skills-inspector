@@ -400,6 +400,22 @@ def fetch_unit(unit: dict, cache_dir: Path,
     """
     sha, path = unit["sha"], unit["path"]
     dest = cache_dir / sha / path if path else cache_dir / sha
+    # `sha` and `path` are vendored from a third-party marketplace manifest —
+    # the same provenance the tar member checks below (`issym()`/`islnk()`,
+    # the `..`-in-a-member-name check further down) already distrust — and
+    # this is the destination those checked members land in, so it needs
+    # the same defense they get. A `path` that climbs out via `..` moves
+    # `dest` outside `cache_dir` entirely; a `sha` that is empty (or `.`)
+    # collapses `dest` onto `cache_dir` itself, and a bare containment check
+    # would not catch that second case — a path is `is_relative_to` its own
+    # equal — which would hand the cache-hit read below an arbitrary
+    # directory, and the `shutil.rmtree` further down the whole cache, to
+    # act on. Checked once, here, before the cache-hit branch reads `dest`
+    # and before anything below ever writes to it.
+    resolved_cache = cache_dir.resolve()
+    resolved_dest = dest.resolve()
+    if resolved_dest == resolved_cache or not resolved_dest.is_relative_to(resolved_cache):
+        return None, f"unsafe cache destination for sha={sha!r} path={path!r}"
     if dest.is_dir() and any(dest.iterdir()):
         if drops is not None:
             drops.append((unit["name"], _read_drop_record(cache_dir, sha, path)))
