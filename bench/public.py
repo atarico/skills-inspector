@@ -9,17 +9,20 @@ the report cannot be published either. `openclaw/clawscan` issue #53 asks for
 benchmark evidence a third party can check; a number nobody else can
 reproduce is not evidence.
 
-This is the second corpus: `bench/public-corpus.json`, 253 plugins pinned by
-exact git sha out of Anthropic's `claude-plugins-official` marketplace
+This is the second corpus: `bench/public-corpus.json`, 253 marketplace
+entries pinned by exact git sha out of Anthropic's `claude-plugins-official`
 manifest, vendored and committed so this benchmark needs nothing but network
-access to reproduce. Fetching happens here, one unit at a time, from the
+access to reproduce. Those 253 entries resolve to 248 distinct trees — the
+marketplace publishes some of them under more than one name, and `select`
+folds each group down to one before anything is fetched, so `discovered`
+counts trees and `listings` remembers how many names folded into them. Fetching happens here, one unit at a time, from the
 GitHub codeload tarball for the pinned sha; measurement reuses
 `bench.corpus.report_for_units` — the exact arithmetic `bench.drift` freezes
 — rather than a second copy of it.
 
     python -m bench.public --limit 5            fetch, measure, print
     python -m bench.public --limit 5 --freeze    record bench/public-baseline.json
-    python -m bench.public                       the full 253-unit corpus (network-heavy)
+    python -m bench.public                       all 248 trees of the corpus (network-heavy)
 
 THE GOVERNING PRINCIPLE, and it is why `bench/public-corpus.json` has two
 top-level lists instead of one. This benchmark refuses to measure what it
@@ -112,7 +115,7 @@ PROJECT = Path(__file__).resolve().parent.parent
 CORPUS = PROJECT / "bench" / "public-corpus.json"
 BASELINE = PROJECT / "bench" / "public-baseline.json"
 # OUTSIDE THE REPOSITORY, and that is not a preference. This cache is a full
-# checkout of 253 pinned third-party subtrees — a gigabyte of other people's
+# checkout of every pinned third-party subtree — a gigabyte of other people's
 # plugins — and `make selftest` and `make schema` scan `.` to prove the
 # scanner stays quiet on its own source. With the cache inside the tree those
 # targets scan the corpus instead: the self-scan went from 8.8 seconds and 14
