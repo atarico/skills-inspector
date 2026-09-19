@@ -5064,6 +5064,91 @@ def _fetch_and_freeze_cases() -> None:
           "census already keeps")
     listings_dir.cleanup()
 
+    # R4-drop-record-committed-after-tree: a `_record_drops` that raises
+    # proves the order — dest existing here would mean the tree committed
+    # with no record, the unrecoverable window the fix removes.
+    order_unit = {"name": "u", "sha": "4" * 40, "path": "skills/a",
+                  "url": "https://github.com/o/r.git"}
+    order_cache = tempfile.TemporaryDirectory()
+    order_dest = P(order_cache.name) / order_unit["sha"] / "skills/a"
+    real_urlopen = urllib.request.urlopen
+    urllib.request.urlopen = serving(tarball({"skills/a/SKILL.md": "kept"}))
+    real_record = PB._record_drops
+    PB._record_drops = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    raised = None
+    try:
+        PB.fetch_unit(order_unit, P(order_cache.name), 5, [])
+    except RuntimeError as exc:
+        raised = exc
+    finally:
+        PB._record_drops = real_record
+        urllib.request.urlopen = real_urlopen
+    check("public", "the drop record is written before the tree is committed",
+          (raised is not None, order_dest.exists()), (True, False),
+          "a raise here must run before shutil.move; dest existing would "
+          "mean the tree committed with no record")
+    order_cache.cleanup()
+
+    # The reachable version of the same failure: a registry _record_drops
+    # refuses to trust must stop the commit as an ordinary fetch failure
+    # — never a committed tree with nothing backing its drop count, and
+    # never an uncaught exception out of fetch_unit.
+    guard_unit = {"name": "u", "sha": "5" * 40, "path": "skills/a",
+                  "url": "https://github.com/o/r.git"}
+    guard_cache = tempfile.TemporaryDirectory()
+    (P(guard_cache.name) / "drops.json").write_text("{not valid json")
+    guard_dest = P(guard_cache.name) / guard_unit["sha"] / "skills/a"
+    real_urlopen = urllib.request.urlopen
+    urllib.request.urlopen = serving(tarball({"skills/a/SKILL.md": "kept"}))
+    try:
+        root, reason = PB.fetch_unit(guard_unit, P(guard_cache.name), 5, [])
+    finally:
+        urllib.request.urlopen = real_urlopen
+    check("public", "a record that cannot be written stops the commit, not the run",
+          (root, isinstance(reason, str), guard_dest.exists()),
+          (None, True, False),
+          "an unrecordable drop count is an ordinary fetch failure, never "
+          "a committed tree a cache hit can never go back and re-price")
+    guard_cache.cleanup()
+
+    # R4-registry-rewrite-destroys-peers: an interrupted replace must
+    # leave the PREVIOUS registry complete — the write goes to a temp
+    # file first, and only a successful os.replace touches drops.json.
+    atomic_cache = tempfile.TemporaryDirectory()
+    atomic_registry = P(atomic_cache.name) / "drops.json"
+    peer_registry = {"1111111111111111111111111111111111111111/skills/a":
+                      {"links": 3, "escapes": 1}}
+    atomic_registry.write_text(J.dumps(peer_registry))
+    before_bytes = atomic_registry.read_bytes()
+    real_replace = os.replace
+    os.replace = lambda src, dst: (_ for _ in ()).throw(
+        OSError("simulated ENOSPC after the temp file was written"))
+    try:
+        ok = PB._record_drops(P(atomic_cache.name), "2" * 40, "skills/a", 0, 0)
+    finally:
+        os.replace = real_replace
+    check("public", "an interrupted registry write leaves the previous registry intact",
+          (ok, atomic_registry.read_bytes() == before_bytes,
+           J.loads(atomic_registry.read_bytes())),
+          (False, True, peer_registry),
+          "write_text truncates in place; temp file + os.replace leaves "
+          "the OLD complete file exactly where it was, never truncated")
+    atomic_cache.cleanup()
+
+    # The corrupt-file counterpart: an unparseable registry must never be
+    # treated as empty and safe to overwrite — the old behaviour that
+    # discarded every peer record on one corrupt write.
+    corrupt_write_cache = tempfile.TemporaryDirectory()
+    corrupt_write_registry = P(corrupt_write_cache.name) / "drops.json"
+    corrupt_bytes = b"{not valid json, mid-write when something died"
+    corrupt_write_registry.write_bytes(corrupt_bytes)
+    ok = PB._record_drops(P(corrupt_write_cache.name), "7" * 40, "skills/a", 2, 0)
+    check("public", "an unparseable registry is refused, not replaced with an empty one",
+          (ok, corrupt_write_registry.read_bytes()), (False, corrupt_bytes),
+          "the old code treated an unreadable registry as `{}` and wrote "
+          "one entry over it, discarding every surviving peer")
+    corrupt_write_cache.cleanup()
+
 
 _fetch_and_freeze_cases()
 

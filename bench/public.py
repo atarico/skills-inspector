@@ -292,7 +292,9 @@ def _read_drop_registry(cache_dir: Path) -> dict | None:
     dropped nothing, and that caller is the one this signature refuses to
     mislead. Mutation-checking found the claim that used to sit here —
     that substituting `{}` would publish known-zero — asserting a
-    protection the `.get()` below was already providing.
+    protection the `.get()` below was already providing. `_record_drops`
+    used to be exactly that caller, and now refuses instead, for the
+    same reason.
     """
     path = _drop_registry_path(cache_dir)
     if not path.exists():
@@ -321,27 +323,40 @@ def _read_drop_record(cache_dir: Path, sha: str, path: str) -> dict | None:
 
 
 def _record_drops(cache_dir: Path, sha: str, path: str,
-                   links: int, escapes: int) -> None:
-    """Write one unit's drop counts into the registry.
+                   links: int, escapes: int) -> bool:
+    """Write one unit's drop counts into the registry. True on success.
 
-    Called at the same moment `fetch_unit` commits the extraction — right
-    after `shutil.move` promotes `tmp` into `dest` — so a unit that exists in
-    the cache and its drop record always agree; there is no window where a
-    unit is cached but its record is not, or the reverse.
+    Called BEFORE `fetch_unit`'s `shutil.move` commits the extraction, not
+    after, so the only reachable disagreement is a record with no tree —
+    which the next run heals on its own, since a missing tree is a cache
+    miss that re-extracts and rewrites the record. The old ordering left
+    the other disagreement reachable instead (a tree with no record), and
+    that one is unrecoverable: a cache hit never re-reads to fix it.
 
-    Read-modify-write, no locking: `main()` calls `fetch_unit` once per unit,
-    in a single sequential loop, so there is never a second writer racing
-    this read against this write. A registry this call cannot parse is
-    treated as empty rather than refused — this unit's own count is known
-    right now and worth keeping, and a prior corruption already cost every
-    other unit's record whether this write proceeds or not.
+    Returns False, touching nothing, when the registry cannot be trusted:
+    an unparseable file is left as-is rather than replaced with `{}`,
+    which used to discard every peer's record on one corrupt write. The
+    write itself goes through a temp file and `os.replace` — atomic on
+    the same filesystem — so a kill or ENOSPC mid-write leaves the
+    untouched previous registry, never a truncated one.
+
+    Read-modify-write, no locking: `main()` calls `fetch_unit` once per
+    unit, sequentially, so there is never a second writer racing this
+    write.
     """
     registry = _read_drop_registry(cache_dir)
     if registry is None:
-        registry = {}
+        return False
     registry[_drop_key(sha, path)] = {"links": links, "escapes": escapes}
-    _drop_registry_path(cache_dir).write_text(
-        json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+    dest = _drop_registry_path(cache_dir)
+    tmp = dest.with_name(f"{dest.name}.tmp-{uuid.uuid4().hex[:12]}")
+    try:
+        tmp.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+        os.replace(str(tmp), str(dest))
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        return False
+    return True
 
 
 def fetch_unit(unit: dict, cache_dir: Path,
@@ -486,13 +501,15 @@ def fetch_unit(unit: dict, cache_dir: Path,
         shutil.rmtree(tmp, ignore_errors=True)
         return None, f"{path or '(repository root)'} not present at {sha[:12]}"
 
+    # Written BEFORE the tree is committed — see _record_drops. An
+    # unrecordable count stops the commit as an ordinary fetch failure.
+    if not _record_drops(cache_dir, sha, path, links, escapes):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None, "drop registry could not be written; unit not cached"
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(dest, ignore_errors=True)
     shutil.move(str(tmp), str(dest))
-    # Written at the same instant the extraction is committed, so a unit
-    # that exists in the cache and its drop record can never disagree — see
-    # _record_drops.
-    _record_drops(cache_dir, sha, path, links, escapes)
     if drops is not None:
         drops.append((unit["name"], {"links": links, "escapes": escapes}))
     return dest, "fetched"
