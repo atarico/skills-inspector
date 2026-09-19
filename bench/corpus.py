@@ -113,6 +113,88 @@ def discover(root: Path) -> list[Path]:
     return sorted(by_content.values())
 
 
+def report_for_units(units: list[tuple[str, Path]]) -> dict | None:
+    """Reduce an explicit, already-resolved unit list to the aggregate shape
+    `bench.drift` freezes: clean/median/mean/p90/max, the precision and
+    recall per-rule censuses, and the crash count.
+
+    `bench.drift.collect_report()` and `bench.drift.restrict_report()` compute
+    the same arithmetic from `discover(root)`, a walk over a machine-specific
+    directory `bench.public` cannot start from: its units arrive by exact git
+    sha into a cache, one at a time. This is a third parallel copy, not a
+    merge of those two, and nothing holds the three in step — mirror by hand.
+
+    Unlike `bench.drift`, the per-unit identity here is the caller-supplied
+    NAME, not a content signature. `bench.drift`'s corpus is software one
+    person installed, so a content hash is the only identity its frozen file
+    may carry — see that module's docstring. `bench.public`'s corpus is a
+    public marketplace manifest; the names in it are already published, so
+    naming a unit in this benchmark's output leaks nothing that
+    `bench/public-corpus.json` does not already say.
+
+    Returns None when `units` is empty — the caller (a fetch stage with zero
+    successes) already knows that story and tells it without guessing at
+    counts from an empty aggregate.
+    """
+    if not units:
+        return None
+
+    rule_headline: collections.Counter = collections.Counter()
+    rule_finding: collections.Counter = collections.Counter()
+    histogram: collections.Counter = collections.Counter()
+    crashes = 0
+    clean = 0
+    counts: list[int] = []
+    findings_seen = 0
+    fingerprints: dict[str, dict] = {}
+
+    for name, path in units:
+        try:
+            unit = collect(path)
+            findings, _ = engine.scan(unit)
+        except Exception:
+            # No exception text: it names a path inside the local cache
+            # directory, and this report is the one meant to be published.
+            crashes += 1
+            fingerprints[name] = {"crashed": True, "headline_ids": [],
+                                   "finding_ids": []}
+            continue
+        head = engine.headline(findings)
+        counts.append(len(head))
+        histogram[len(head)] += 1
+        headline_ids = [f.id for f in head]
+        for rule_id in headline_ids:
+            rule_headline[rule_id] += 1
+        finding_ids = [f.id for f in findings]
+        findings_seen += len(finding_ids)
+        for rule_id in finding_ids:
+            rule_finding[rule_id] += 1
+        if not head:
+            clean += 1
+        fingerprints[name] = {"crashed": False, "headline_ids": headline_ids,
+                               "finding_ids": finding_ids}
+
+    counts.sort()
+    total = len(counts) or 1
+    return {
+        "discovered": len(units),
+        "units": len(counts),
+        "clean_units": clean,
+        "clean_pct": 100 * clean // total,
+        "median": counts[len(counts) // 2] if counts else 0,
+        "mean": round(sum(counts) / total, 2),
+        "p90": counts[int(total * 0.9) - 1] if counts else 0,
+        "max": max(counts) if counts else 0,
+        "crashes": crashes,
+        "headline_total": sum(counts),
+        "rule_headline_counts": dict(sorted(rule_headline.items())),
+        "finding_total": findings_seen,
+        "rule_finding_counts": dict(sorted(rule_finding.items())),
+        "unit_histogram": {str(k): histogram[k] for k in sorted(histogram)},
+        "unit_fingerprints": fingerprints,
+    }
+
+
 def main(argv: list[str]) -> int:
     root = Path(argv[0] if argv else Path.home() / ".claude").expanduser()
     units = discover(root)
