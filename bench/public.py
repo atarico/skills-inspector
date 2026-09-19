@@ -83,13 +83,16 @@ against it forever after.
 
 It also carries `listings`, next to `discovered`. `bench/public-corpus.json`
 lists the same byte-identical tree — same `sha` + `path` — under several
-marketplace names (see `select`), and scanning it once per name inflated the
-published clean rate: every redundant scan landed on the flattering side of
-both the numerator and the denominator. `select` folds a group down to one
-tree before anything is fetched, so `discovered` counts distinct TREES and
-`listings` remembers how many marketplace LISTINGS folded into them — without
-it, "clean 26 of 248" reads as a number somebody typed, not one this file
-derived from `bench/public-corpus.json`'s own 253 rows.
+marketplace names (see `select`), and scanning it once per name reported the
+same findings again: 911 of 37310, 2.4%, were copies, and the per-rule census
+carried that inflation rule by rule. The clean rate is what did NOT move, and
+the reason is worth keeping: none of the duplicated trees was clean, so the
+duplication had been making the measured ecosystem look WORSE than it is.
+`select` folds a group down to one tree before anything is fetched, so
+`discovered` counts distinct TREES and `listings` remembers how many
+marketplace LISTINGS folded into them — without it, "clean 31 of 248" reads
+as a number somebody typed, not one this file derived from
+`bench/public-corpus.json`'s own 253 rows.
 """
 
 from __future__ import annotations
