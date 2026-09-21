@@ -587,6 +587,18 @@ RULE_PATTERN_CASES = [
      "nslookup +short api.example $TOKEN", True),
     ("NET-004", "an ordinary lookup with nothing interpolated is not",
      "dig api.example +short", False),
+    # Defect: `_r` compiles case-insensitively, so the bare word list also
+    # matched the conventional shell variable HOST. Command position alone
+    # does not discriminate `HOST="$(detect_host)"` from a real invocation —
+    # the assignment sits at line start too — so the rule also has to reject
+    # the token when it is the left-hand side of `=`.
+    ("NET-004", "GAP-killed: an assignment to a variable named HOST is not a lookup",
+     'HOST="$(detect_host)"', False),
+    # The word also shows up in prose ("host" as a noun), which command
+    # position already excludes since it never opens a command and never
+    # follows a shell separator.
+    ("NET-004", "GAP-killed: the word in a log message is not a lookup either",
+     'err "Unknown host: $HOST"', False),
     ("NET-012", "a runtime-wide CA override is the same class as a proxy",
      "export NODE_EXTRA_CA_CERTS=/tmp/extra.pem", True),
     ("NET-012", "installing a trust store change from the shell too",
