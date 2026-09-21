@@ -774,6 +774,29 @@ RULE_PATTERN_CASES = [
     ("FSW-002", "settings.json", 'echo x > ~/.claude/settings.json', True),
     ("FSW-002", "CLAUDE.md", 'echo evil >> CLAUDE.md', True),
     ("FSW-002", "mcp config", 'echo x > .mcp.json', True),
+    # D4 (odd/tasks/declaration-files-and-fsw002.md): the bare `>` alternative
+    # had nothing requiring it to be a shell redirect, so every HTML tag within
+    # 80 characters of a control-plane filename fired CRITICAL at high
+    # confidence — every tag in HTML ends in `>`. Measured verbatim against a
+    # real skill's rendered documentation.
+    ("FSW-002", "GAP-killed: a paragraph tag's '>' is not a redirect",
+     "<p>Edit <code>AGENTS.md</code> directly.</p>", False),
+    ("FSW-002", "GAP-killed: a list-item tag's '>' is not a redirect either",
+     "<li>AGENTS.md に追記してください</li>", False),
+    # The unrelated near miss that must stay quiet regardless: naming the file
+    # in prose, no punctuation that could be misread as shell syntax at all.
+    ("FSW-002", "prose that only NAMES the file is not a write",
+     "see AGENTS.md for details", False),
+    # D4's anchor set: start-of-line, whitespace, a file-descriptor digit, or
+    # `&` — every real redirect shape must keep matching.
+    ("FSW-002", "a redirect preceded by whitespace still fires",
+     'echo "x" >> AGENTS.md', True),
+    ("FSW-002", "a redirect at the start of the line still fires",
+     "> AGENTS.md", True),
+    ("FSW-002", "a numbered file-descriptor redirect still fires",
+     "2> AGENTS.md", True),
+    ("FSW-002", "the combined stdout+stderr redirect still fires",
+     "&> AGENTS.md", True),
 
     # FSW-004's `rm` branch is a disjunction, not the single discriminant
     # RULES.md used to name. There is a case per alternative of

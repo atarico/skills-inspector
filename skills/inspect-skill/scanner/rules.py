@@ -562,7 +562,39 @@ RULES: list[Rule] = [
          # rule's own name is "modifies agent instructions or CONFIG", and a log,
          # lock or cache file is neither. Writing `.claude/commands/x.md` still
          # fires, because that IS a command definition.
-         _r(r"(>>|>|tee\s+-a?|write_text|writeFile|open\s*\([^)]{0,60}[\"']w)"
+         #
+         # The bare `>` / `>>` alternative used to have nothing requiring it to
+         # be a shell redirect at all, so it read the CLOSE of an HTML tag the
+         # same way — every tag in HTML ends in `>`. Measured verbatim against a
+         # real skill's rendered documentation: `<p>…<code>AGENTS.md</code>…`
+         # matched on the `<p>`'s `>`, and `<li>AGENTS.md に追記してください</li>`
+         # matched on the `<li>`'s. Any tag within 80 characters of a
+         # control-plane filename fired CRITICAL at high confidence — this is
+         # the third instance of the same shape in this repository; the same
+         # rule already fired on the `>` of a markdown arrow `->` in a fixture
+         # note (odd/tasks/declaration-files-and-fsw002.md, D4).
+         #
+         # The fix requires the `>` / `>>` to be preceded by start-of-line,
+         # whitespace, a file-descriptor digit, or `&` — the shapes a shell
+         # redirect actually takes (`> f`, `>> f`, `2> f`, `&> f`), which an
+         # HTML tag's closing `>` never is: it is always preceded by an
+         # attribute value, a tag name, or a self-closing `/`, none of which
+         # are in that set. Rejected: deleting the bare `>` alternative
+         # entirely and requiring `>>` — a redirect with no space before a
+         # single `>` (`echo x>f`) is real shell, and the doubled form is not
+         # the only one that matters.
+         #
+         # This narrows only the `>` / `>>` branch. The other alternatives
+         # (`tee`, `write_text`, `writeFile`, `open(...` w") already carry
+         # their own distinguishing tokens that markup never produces, so they
+         # are untouched.
+         #
+         # A markdown blockquote `> …` still matches this anchor (start-of-line
+         # then `>`) — it is prose inside a `.md` file, which the position
+         # taxonomy already reads as documentary rather than active shell.
+         # Noted, not chased here (D4).
+         _r(r"((?:^|(?<=[\s\d&]))(?:>>|>)|tee\s+-a?|write_text|writeFile"
+            r"|open\s*\([^)]{0,60}[\"']w)"
             r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
             r"|settings\.local\.json|settings\.json"
             r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
