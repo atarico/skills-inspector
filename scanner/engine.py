@@ -625,9 +625,27 @@ def _dedupe(raw: list[Finding]) -> list[Finding]:
 
 def profile(findings: list[Finding], unit: Unit) -> dict:
     """Capability profile. CHN-003 lives here and only here: co-occurrence is
-    reported, never escalated."""
+    reported, never escalated.
+
+    A finding located in a `.d.ts` file is excluded here, and only here — it
+    stays in `findings` untouched (D3, odd/tasks/declaration-files-and-fsw002.md).
+    A TypeScript declaration file cannot execute, fetch, or evaluate anything,
+    so it must not make this profile claim Network / Reads secrets / Executes
+    code for a unit that does none of it.
+
+    Targeted at the declaration-file case by re-checking the finding's own
+    `location`, not by reading `finding.position`: `pos.file_base_position`
+    already demotes that position to `documentary` for every line of the file,
+    but `documentary` is also what a `.md` file, or anything under
+    `fixtures/`/`examples/`, gets — and filtering THIS function on position or
+    confidence generally is the broad, unmeasured semantic change D3 rejects.
+    Checking the suffix again keeps the exclusion exactly as narrow as the
+    fact that motivates it.
+    """
     caps: dict[str, list[str]] = {}
     for finding in findings:
+        if pos.is_declaration_file(finding.location):
+            continue
         if finding.severity == "INFO" and finding.capability in caps:
             continue
         detail = f"{finding.location}:{finding.line}"
