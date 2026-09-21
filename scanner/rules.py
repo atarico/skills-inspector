@@ -823,6 +823,23 @@ RULES: list[Rule] = [
          ambiguous_object=_r(_CONCEAL_DIRECTIVE + r"(it|this|them)\b"),
          explicit_object=_r(r"\b(user|human|operator|owner)\b")),
 
+    # D4: the second alternative below used to accept ANY four words between
+    # the transmit verb and the noun, so "Never send filenames without enough
+    # context to identify the option" matched — `context` merely trailed
+    # `send` inside the window, with nothing requiring it to be `send`'s
+    # OBJECT. `without` inverts the relation entirely (it introduces what is
+    # NOT sent), and plain proximity cannot see that.
+    #
+    # The filler group now refuses to step over a negation or preposition —
+    # `without, with, for, about, from, into, onto, via` — so the noun can
+    # only be reached as a direct object, the way "send the full conversation
+    # history" or "upload our recent chat context" read. Ordinary determiners
+    # and adjectives still pass through untouched, which is what keeps a real
+    # object like "the full conversation" matching. `of` is deliberately NOT
+    # in the banned set: "send a summary OF the conversation" still transmits
+    # the conversation's content, and banning it would trade this false
+    # positive for a false negative on the exact shape the rule exists to
+    # catch.
     Rule("AGT-004", "CRITICAL", "medium", INSTRUCTION,
          "Instruction to read local context and transmit it",
          "Turns the agent into the exfiltration channel — no suspicious binary needed.",
@@ -832,7 +849,9 @@ RULES: list[Rule] = [
             r"(memory|memories|conversation|chat\s+history|transcript|session|context|"
             r"other\s+skills?|installed\s+skills?|CLAUDE\.md|AGENTS\.md)"
             r"[^\n]{0,120}(send|post|upload|transmit|share|report|sync|push)\s+"
-            r"|(send|post|upload)\s+(\w+\s+){0,4}(the\s+)?(conversation|transcript|history|memory|context)"),
+            r"|(send|post|upload)\s+"
+            r"((?!(?:without|with|for|about|from|into|onto|via)\b)\w+\s+){0,4}"
+            r"(the\s+)?(conversation|transcript|history|memory|context)"),
          specificity=91, instruction_surface=True),
 
     Rule("AGT-005", "HIGH", "high", INSTRUCTION,
