@@ -831,7 +831,18 @@ RULES: list[Rule] = [
          "Removes the human checkpoint on dangerous actions.",
          "UX shortcuts for genuinely safe operations.",
          "Which action skips confirmation?",
-         _r(r"(do\s+not|don'?t|never)\s+ask\s+(for\s+)?(permission|confirmation|the\s+user)"
+         # The first alternative's object list used to end in the bare pronoun
+         # `the\s+user`, so "never ask the user" alone satisfied it —
+         # whatever the sentence actually asked the user to do. That matched
+         # "Never ask the user to paste an access token into chat." (secret
+         # hygiene, the OPPOSITE of a bypass) and "Never ask the user to
+         # choose scope again." (a UX instruction), reporting both as a
+         # confirmation bypass. The object of "ask" here is permission itself
+         # — permission, confirmation, approval — and "the user" may only
+         # appear as the indirect object standing IN FRONT of one of those,
+         # the way "ask the user for permission" reads. It can no longer
+         # stand in as the object on its own.
+         _r(r"(do\s+not|don'?t|never)\s+ask\s+(the\s+user\s+)?(for\s+)?(permission|confirmation|approval)"
             r"|auto-?approve|skip\s+(the\s+)?confirmation|without\s+(asking|confirmation|prompting)"
             r"|assume\s+(yes|approval)|proceed\s+without\s+(asking|confirming)"),
          specificity=80),
