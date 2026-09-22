@@ -1,0 +1,6 @@
+{
+  "must_detect": ["FSW-004"],
+  "must_headline": ["FSW-004"],
+  "note": "odd/tasks/install-line-severity.md's false-positive twin. Same Dockerfile RUN line as fixtures/benign/container-build-prereqs, one extra operand appended after the cache glob. The tempering shape has to fullmatch the WHOLE segment, so the extra operand alone is enough to keep this at the rule's own HIGH severity and back in the headline.",
+  "category": "malicious"
+}

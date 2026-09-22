@@ -65,10 +65,54 @@ class Rule:
     # object outright, the pronoun beside it is no longer unbound and the veto
     # does not apply. Both are read from `match.group(0)`, never from the line.
     explicit_object: re.Pattern | None = None
+    # A narrower, PROVABLY benign shape of this rule's own pattern that earns a
+    # lower severity while the match stays REPORTED (RULES.md §2.1, not §2.2:
+    # this is not a confidence question, the match is real either way, and not
+    # a position demotion either — see §3.3, the audited unit controls both
+    # `references/` and a fenced dockerfile block, so either could buy its own
+    # demotion). `Tempered.pattern` must FULLMATCH the whole command segment
+    # the match sits in — see `engine._tempered_severity` — never just the
+    # rule's own match span, and only when EVERY segment where the rule fires
+    # on the line qualifies. One extra argument anywhere breaks it back to
+    # this rule's own `severity`.
+    tempered: "Tempered | None" = None
+
+
+@dataclass(frozen=True)
+class Tempered:
+    """See `Rule.tempered`. `pattern` is matched with `re.fullmatch`, never
+    `search` — a shape eligible for this has to own the ENTIRE segment, not
+    just the part the base rule's own pattern happened to match."""
+    pattern: re.Pattern
+    severity: str
+    reason: str
 
 
 def _r(pattern: str, flags: int = re.IGNORECASE) -> re.Pattern:
     return re.compile(pattern, flags)
+
+
+# odd/tasks/install-line-severity.md. FSW-004's `rm -rf` of a literal
+# package-manager cache path: the RUN line every base-image Dockerfile ships
+# to keep the layer small. The flag group only spells the two-cluster and
+# single-cluster canonical orders (`-rf`/`-fr`/`-r -f`/`-f -r`) — narrower than
+# FSW-004's own detection lookahead on purpose, since a spelling this shape
+# does not name (`-force`, `--recursive`) has no business earning a discount.
+_FSW004_TEMPER_FLAGS = r"(?:-rf|-fr|-r\s+-f|-f\s+-r)"
+_FSW004_TEMPER_CACHE_ROOT = (
+    r"(?:/var/lib/apt/lists|/var/cache/apt/archives|/var/cache/apt"
+    r"|/var/cache/dnf|/var/cache/yum|/var/cache/apk)"
+)
+# Optional trailing `/` and/or a bare `*` — nothing else. `*.bak`, `..`, `$X`,
+# `~` and a second untouched path all fail this and keep the line HIGH; see
+# the FULLMATCH requirement on `Tempered.pattern` and the both-directions
+# cases in tests/unit_test.py.
+_FSW004_TEMPER_PATH = rf"{_FSW004_TEMPER_CACHE_ROOT}/?\*?"
+FSW004_TEMPERED = Tempered(
+    _r(rf"rm\s+{_FSW004_TEMPER_FLAGS}\s+{_FSW004_TEMPER_PATH}"
+       rf"(?:\s+{_FSW004_TEMPER_PATH})*"),
+    "INFO",
+    "every operand is a literal package-manager cache path")
 
 
 # A destination is only local when the host ENDS at a real boundary. A bare
@@ -635,7 +679,7 @@ RULES: list[Rule] = [
          _r(r"\brm\s+(-(?=\w*[rf])\w+\s+)+[^\n]{0,80}(\$\{?\w|\$\(|`|~|/\*)"
             r"|\bshred\b|\bdd\s+[^\n]{0,60}of=|\bmkfs\b"
             r"|git\s+(reset\s+--hard|clean\s+-\w*f)"),
-         specificity=80),
+         specificity=80, tempered=FSW004_TEMPERED),
 
     Rule("FSW-006", "HIGH", "medium", DESTRUCTIVE,
          "Mass file rewrite across a tree",

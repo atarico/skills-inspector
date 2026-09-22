@@ -859,6 +859,77 @@ for rule_id, name, line, want in RULE_PATTERN_CASES:
           "the rule must match its own stated scope, no wider")
 
 
+# ------------------------------------------------------------- severity tempering
+# odd/tasks/install-line-severity.md. RULES.md §2.1: severity is set by the
+# rule, never by context — but a rule may name a narrower, PROVABLY benign
+# shape of its OWN pattern that earns a lower severity while the match stays
+# reported. Two invariants pinned here, both directions each:
+#
+# 1. The benign shape must fullmatch the WHOLE command segment the match sits
+#    in (bounded by `;`, `&&`, `||`, `|`), not just the rule's own match span
+#    — an extra operand, a substitution, or a chained command must break it.
+# 2. A line tempers only if EVERY segment where the rule fires on that line
+#    tempers. One HIGH sibling on the line keeps the whole line HIGH.
+#
+# `want` is the tempered (severity, reason) tuple, or None when the line must
+# stay at the rule's own base severity untouched.
+
+def _temper_fsw004_cases() -> None:
+    from scanner import engine
+
+    TEMPERED_CASES = [
+        # -- rm -rf of a literal package-manager cache path -> INFO --
+        ("FSW-004", "apt lists cache alone tempers",
+         "rm -rf /var/lib/apt/lists/*", "INFO"),
+        ("FSW-004", "chained after a real apt install still tempers",
+         "RUN apt-get update && apt-get install -y curl && "
+         "rm -rf /var/lib/apt/lists/*", "INFO"),
+        ("FSW-004", "several literal cache paths in one rm still temper",
+         "rm -rf /var/lib/apt/lists/ /var/cache/apt/archives/*", "INFO"),
+        ("FSW-004", "the other flag order tempers too",
+         "rm -fr /var/cache/dnf/*", "INFO"),
+        ("FSW-004", "flags split across two clusters temper",
+         "rm -r -f /var/cache/yum/*", "INFO"),
+
+        # -- evasions: one extra token anywhere and the shape does not fullmatch --
+        ("FSW-004", "an extra operand keeps HIGH",
+         "rm -rf /var/lib/apt/lists/* ~", None),
+        ("FSW-004", "a second untouched path keeps HIGH",
+         "rm -rf /var/lib/apt/lists/* /home/*", None),
+        ("FSW-004", "path traversal keeps HIGH",
+         "rm -rf /var/lib/apt/lists/../../*", None),
+        ("FSW-004", "a bare variable operand keeps HIGH",
+         "rm -rf /var/lib/apt/lists/$X", None),
+        ("FSW-004", "a brace variable operand keeps HIGH",
+         "rm -rf /var/lib/apt/lists/${X}", None),
+        ("FSW-004", "a chained second rm keeps the WHOLE LINE HIGH",
+         "rm -rf /var/lib/apt/lists/*; rm -rf ~/", None),
+        ("FSW-004", "a flag outside the allowed shape keeps HIGH",
+         "rm -rf --no-preserve-root /var/lib/apt/lists/*", None),
+        ("FSW-004", "a glob suffix beyond a bare * keeps HIGH",
+         "rm -rf /var/lib/apt/lists/*.bak", None),
+        ("FSW-004", "a path outside the allowlist is untouched",
+         "rm -rf /tmp/build-cache/*", None),
+    ]
+
+    for rule_id, name, line, want in TEMPERED_CASES:
+        rule = _rule(rule_id)
+        result = engine._tempered_severity(rule, line)
+        got = result[0] if result else None
+        check(f"tempered/{rule_id}", name, got, want,
+              "install-line-severity: tempering needs a fullmatch of the whole "
+              "segment, and every segment where the rule fires on the line")
+
+    # The rule's own severity is untouched — tempering only ever LOWERS what a
+    # Finding carries, never the Rule's declared base (RULES.md §2.1).
+    check("tempered/FSW-004", "the rule's own severity field stays HIGH",
+          _rule("FSW-004").severity, "HIGH",
+          "severity is set by the rule; tempering is a per-line REPORT decision")
+
+
+_temper_fsw004_cases()
+
+
 # ------------------------------------------------------------------- taint helpers
 # _is_shell decides which reference syntax is used AND whether the
 # literal_demotion probe runs at all, so getting it wrong silently changes how a
