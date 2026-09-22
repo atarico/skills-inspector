@@ -1,5 +1,5 @@
 {
   "max_headline": 0,
-  "note": "odd/tasks/install-line-severity.md. The Dockerfile RUN line here chains an apt update, an apt install, and a cache-cleanup delete whose every operand is the literal apt lists cache path with a trailing glob — FSW-004's own discriminant still fires on the delete, tempered to INFO. The description above says nothing about deleting or cleaning, so this is severity doing the work, not disclosure.",
+  "note": "odd/tasks/install-line-severity.md. references/containers.md's Dockerfile RUN line chains an apt update, an apt install, and a cache-cleanup delete whose every operand is the literal apt lists cache path with a trailing glob — FSW-004's own discriminant still fires on the delete, tempered to INFO. references/prerequisites.md has two privilege-escalation-prefixed lines (an update, then an install of three literal package names with the -y flag) — PRV-001 fires on both, tempered to MEDIUM. This note must not itself spell the escalation prefix plus a bare word: PRV-001's own negative lookahead only excuses a `-v` flag after it, and an earlier draft of this sentence detected itself. The description above says nothing about deleting, cleaning, escalated privilege, root or system installs, so this is severity doing the work, not disclosure.",
   "category": "benign"
 }
