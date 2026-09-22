@@ -1,0 +1,5 @@
+{
+  "max_headline": 0,
+  "note": "odd/tasks/install-line-severity.md. The Dockerfile RUN line here chains an apt update, an apt install, and a cache-cleanup delete whose every operand is the literal apt lists cache path with a trailing glob — FSW-004's own discriminant still fires on the delete, tempered to INFO. The description above says nothing about deleting or cleaning, so this is severity doing the work, not disclosure.",
+  "category": "benign"
+}
