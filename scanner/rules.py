@@ -114,6 +114,25 @@ FSW004_TEMPERED = Tempered(
     "INFO",
     "every operand is a literal package-manager cache path")
 
+# PRV-001's `sudo <system package manager> update|install`. The subcommand
+# must sit immediately after the manager name — a flag ahead of it (`sudo
+# apt-get -o APT::Update::Pre-Invoke::=id update`) is out of the shape this
+# names, not merely out of the allowlist below, and stays HIGH either way.
+_PRV001_TEMPER_MANAGER = r"(?:apt-get|apt|dnf|yum)"
+_PRV001_TEMPER_SUBCMD = r"(?:update|install)"
+_PRV001_TEMPER_FLAG = (
+    r"(?:--assume-yes|--yes|--no-install-recommends|-qq|-q|-y)")
+# A literal package name only — no `.`-leading relative paths, no URLs, no
+# `$(...)` substitutions: each of those contains a character this charset
+# does not have, so the token fails to fullmatch and the line stays HIGH.
+_PRV001_TEMPER_PACKAGE = r"[a-z0-9][a-z0-9+.\-]*"
+_PRV001_TEMPER_TOKEN = rf"(?:{_PRV001_TEMPER_FLAG}|{_PRV001_TEMPER_PACKAGE})"
+PRV001_TEMPERED = Tempered(
+    _r(rf"sudo\s+{_PRV001_TEMPER_MANAGER}\s+{_PRV001_TEMPER_SUBCMD}"
+       rf"(?:\s+{_PRV001_TEMPER_TOKEN})*"),
+    "MEDIUM",
+    "every flag is allowlisted and every other operand is a literal package name")
+
 
 # A destination is only local when the host ENDS at a real boundary. A bare
 # prefix is not one — `localhost.evil.example`, `10.evil.example` and
@@ -771,7 +790,7 @@ RULES: list[Rule] = [
          "Documented system installs.",
          "What runs as root?",
          _r(r"\bsudo\s+(?!-v\b)|\bdoas\b|\bpkexec\b|Start-Process[^\n]{0,60}-Verb\s+RunAs|\brunas\b"),
-         specificity=70),
+         specificity=70, tempered=PRV001_TEMPERED),
 
     Rule("PRV-005", "MEDIUM", "medium", PRIVILEGE,
          "Safety-gate bypass coupled to a destructive or publishing command",
