@@ -1,0 +1,8 @@
+{
+  "known_miss": [
+    "NET-010",
+    "NET-001"
+  ],
+  "note": "mirrors ramus-dev/android-use: prose only names an already-installed external CLI and an env var it reads; the CLI is the thing that calls out, not the bundle text, so no network pattern ever has bytes to match",
+  "category": "known-miss"
+}
