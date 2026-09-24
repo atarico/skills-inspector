@@ -12,6 +12,16 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import reachability as _reachability
+
+# The one pattern among reachability's reference shapes that resolves against
+# the PLUGIN root, not the referencing file's own directory — found by
+# content, not a hardcoded index, so a reorder in reachability.py cannot
+# silently change which base directory this module resolves it against.
+_CLAUDE_PLUGIN_ROOT_PATTERN_INDEX = next(
+    i for i, p in enumerate(_reachability._REF_PATTERNS)
+    if "CLAUDE_PLUGIN_ROOT" in p.pattern)
+
 # Per-file read cap. Deliberately generous, because the old 512 KB limit was a
 # one-line evasion: a file over the cap was given `text=None` and the engine
 # skipped it outright, so padding a payload script past the limit produced a scan
@@ -484,12 +494,71 @@ def _walk_into(walk_root: Path, root: Path, unit: Unit, count: int) -> int:
     return count
 
 
+def _escapes_narrowed_root(root: Path, files: list[FileEntry]) -> bool:
+    """True when a text file in this unit references a path that resolves,
+    on the REAL filesystem, to something that EXISTS outside `root`.
+
+    Reuses reachability.py's own reference patterns — the exact shapes that
+    already produce a graph edge or a dangling reference inside one unit —
+    rather than a second, parallel parser. The only new work here is
+    resolving a raw reference against the real filesystem, which
+    reachability.py deliberately never does: it is a pure function of one
+    unit's own file set, by design, and has no I/O of its own to reuse.
+
+    A reference whose resolved path does NOT exist anywhere is not an escape:
+    there is nothing there for narrowing to have hidden, and the ordinary
+    dangling-reference report (BND-002) already covers it inside the narrowed
+    scan. Only a REAL file outside root is what a manifest could use to
+    smuggle a payload past a narrower audit — RULES.md section 0.1.
+    """
+    for entry in files:
+        if entry.text is None:
+            continue
+        file_dir = (root / entry.relpath).parent
+        for line in entry.text.splitlines():
+            for idx, pattern in enumerate(_reachability._REF_PATTERNS):
+                for match in pattern.finditer(line):
+                    raw = match.group(1).strip()
+                    if not raw or raw.startswith(
+                            ("http://", "https://", "mailto:", "data:")):
+                        continue
+                    # ${CLAUDE_PLUGIN_ROOT}/... anchors at the plugin root,
+                    # never at the referencing file's own directory.
+                    base = root if idx == _CLAUDE_PLUGIN_ROOT_PATTERN_INDEX else file_dir
+                    try:
+                        resolved = (base / raw).resolve()
+                    except (OSError, RuntimeError, ValueError):
+                        continue
+                    if resolved.exists() and not resolved.is_relative_to(root):
+                        return True
+    return False
+
+
+def _build_unit(root: Path, kind: str, requested: Path, widened: bool,
+                scope_search: str, scope_levels: int, marketplace_narrowing: str,
+                outside: list[tuple[str, str]], manifest_dir: Path | None) -> Unit:
+    unit = Unit(root=root, kind=kind, requested=requested, widened=widened,
+                scope_search=scope_search, scope_levels=scope_levels, name=root.name,
+                marketplace_narrowing=marketplace_narrowing)
+    for rel, reason in outside:
+        unit.skipped.append((rel, reason))
+
+    count = _walk_into(root, root, unit, 0)
+    if manifest_dir is not None:
+        count = _walk_into(manifest_dir, root, unit, count)
+
+    _read_manifest(unit)
+    unit.files.sort(key=scan_priority)
+    return unit
+
+
 def collect(target: Path) -> Unit:
     root, kind, widened, scope_search, scope_levels = resolve(target)
     target_resolved = target.resolve()
     marketplace_narrowing = ""
     outside: list[tuple[str, str]] = []
     manifest_dir: Path | None = None
+    marketplace_root: Path | None = None
     if kind == "claude marketplace":
         marketplace_root = root
         narrowed_root, marketplace_narrowing, outside = _narrow_marketplace(
@@ -506,18 +575,27 @@ def collect(target: Path) -> Unit:
             if candidate.is_dir():
                 manifest_dir = candidate
 
-    unit = Unit(root=root, kind=kind, requested=target_resolved, widened=widened,
-                scope_search=scope_search, scope_levels=scope_levels, name=root.name,
-                marketplace_narrowing=marketplace_narrowing)
-    for rel, reason in outside:
-        unit.skipped.append((rel, reason))
+    unit = _build_unit(root, kind, target_resolved, widened, scope_search,
+                       scope_levels, marketplace_narrowing, outside, manifest_dir)
 
-    count = _walk_into(root, root, unit, 0)
-    if manifest_dir is not None:
-        count = _walk_into(manifest_dir, root, unit, count)
+    # A narrowed unit's own content can still reach OUTSIDE it: a relative
+    # path in a skill's prose, or a ${CLAUDE_PLUGIN_ROOT}/../.. hook command,
+    # can point at a real file this audit would otherwise never read — the
+    # payload hides in an undeclared sibling, and something inside the
+    # narrowed unit tells the reader (or the harness) to go get it. FAIL
+    # WIDE, never try to pull the individual referenced files in: an
+    # unbounded set of possible references cannot be whitelisted safely, and
+    # widening back to the marketplace directory (today's pre-narrowing
+    # behavior) cannot miss a transitive reference the way a targeted
+    # inclusion could.
+    if (marketplace_root is not None and root != marketplace_root
+            and _escapes_narrowed_root(root, unit.files)):
+        reason = "a file in the plugin references a path outside its declared source"
+        start = target_resolved if target_resolved.is_dir() else target_resolved.parent
+        wide_widened = marketplace_root != start
+        unit = _build_unit(marketplace_root, kind, target_resolved, wide_widened,
+                           scope_search, scope_levels, reason, [], None)
 
-    _read_manifest(unit)
-    unit.files.sort(key=scan_priority)
     return unit
 
 
