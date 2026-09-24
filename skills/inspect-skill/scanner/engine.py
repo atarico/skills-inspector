@@ -274,6 +274,13 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     # a live evasion if left in place.
     is_code = pos.is_code_suffix(relpath)
     shell_fence = pos.shell_fence_lines(text) if is_md else None
+    # The opposite end of the same axis: a genuine `.html`/`.htm`/`.xhtml`
+    # DOCUMENT has no shell in it at all, so the HTML-tag exclusion some rules
+    # carry can be at its strictest there — see `Rule.html_pattern` and
+    # FSW-002's comment. `is_html` and `in_shell_context` are mutually
+    # exclusive: `pos.is_code_suffix` deliberately excludes every suffix
+    # `pos.is_html_suffix` recognizes.
+    is_html = pos.is_html_suffix(relpath)
 
     base_position = pos.file_base_position(relpath, invoked)
     hidden = ev.invisible_counts(text)
@@ -305,6 +312,8 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                 continue
             active_pattern = (rule.shell_pattern
                               if rule.shell_pattern is not None and in_shell_context
+                              else rule.html_pattern
+                              if rule.html_pattern is not None and is_html
                               else rule.pattern)
             match = active_pattern.search(line)
             if not match:

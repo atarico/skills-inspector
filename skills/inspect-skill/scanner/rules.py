@@ -87,6 +87,18 @@ class Rule:
     # `pattern`, only to drop an exclusion that a non-markup context makes
     # meaningless.
     shell_pattern: re.Pattern | None = None
+    # The other end of the same axis: a NARROWER variant of `pattern`, used
+    # ONLY on a file `position.is_html_suffix` recognizes as genuine rendered
+    # markup (`.html`/`.htm`/`.xhtml`). `pattern`'s HTML-tag exclusion stays
+    # deliberately narrow there too — it only refuses a `>` closing a BARE
+    # opening tag, not one closing a tag with an attribute (`<p class="x">`),
+    # because in prose or any other file a real redirect could sit right next
+    # to real markup and the exclusion cannot afford to swallow it. A genuine
+    # `.html` document has no such redirect to protect — nothing in it is a
+    # shell command — so `html_pattern` can use the strictest anchor instead
+    # (FSW-002's 0df3477 anchor: a `>`/`>>` counts only at line start or after
+    # whitespace/a digit/`&`) without losing any real detection.
+    html_pattern: re.Pattern | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +228,59 @@ _CONCEAL_DIRECTIVE = (
     r"(do\s+not|don'?t|never|avoid)\s+(\w+\s+){0,3}"
     r"(mention|tell|inform|notify|show|display|report|reveal|disclose|log)"
     r"\s+(\w+\s+){0,2}")
+
+# FSW-002's target alternation — which control-plane filename must sit within
+# 80 characters of the write for the rule to fire — used to be spelled out
+# TWICE, once in `pattern` and once in `shell_pattern`, so a change to the
+# allowlist could drift between the two without either test suite noticing
+# (R2-dup-target-alternation). One shared fragment now feeds every pattern
+# variant below, including the `.html`-only one, so they cannot drift.
+_FSW002_TARGETS = (
+    r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
+    r"|settings\.local\.json|settings\.json"
+    r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
+    r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))"
+)
+# The non-redirect write forms (`tee -a`, `write_text(...)`, `writeFile(...)`,
+# `open(..., "w")`) already carry their own distinguishing tokens that markup
+# never produces, so all three redirect variants below share this half too —
+# it is untouched by the HTML/shell/prose split.
+_FSW002_WRITE_FORMS = (
+    r"tee\s+-a?|write_text|writeFile"
+    r"|open\s*\([^)]{0,60}[\"']w"
+)
+# Three redirect shapes, one per context `engine._scan_text` can tell apart
+# (see `Rule.shell_pattern` / `Rule.html_pattern` and the FSW-002 comment
+# below for the full history):
+#
+# - STRICT (the original 0df3477 anchor): a `>`/`>>` counts only at line
+#   start or after whitespace/a digit/`&`. Every real shell redirect shape
+#   satisfies this, and nothing an HTML tag's own close can — a tag always
+#   closes right after its name, an attribute value, or a `/`. Used for a
+#   genuine `.html`/`.htm`/`.xhtml` DOCUMENT (`position.is_html_suffix`),
+#   where nothing is prose: any `>` that fails this anchor is markup.
+# - MIDDLE (`pattern`'s own shape): STRICT, OR a `>`/`>>` preceded by a
+#   word/quote/bracket character that is NOT the close of a bare HTML opening
+#   tag (`(?<!<[A-Za-z]{1,8})`, chained because `re` has no variable-width
+#   lookbehind — see the FSW-002 comment). Used everywhere else: markdown
+#   prose and any other file, where real HTML might sit beside a real
+#   redirect. Only excludes a BARE tag close (`<p>`, `<li>`); a `>` that
+#   closes a tag WITH an attribute (`<p class="x">`) is preceded by a quote,
+#   not a tag-name letter, so it is not excluded and can still fire — known
+#   gap, see the FSW-002 comment.
+# - SHELL (`shell_pattern`'s own shape): MIDDLE with the HTML-tag exclusion
+#   dropped entirely. Used only where `engine._scan_text` judges the line
+#   genuine shell/code (`position.is_code_suffix` / `shell_fence_lines`),
+#   where an HTML tag is never real and the exclusion is a live evasion
+#   (`cat<p>CLAUDE.md`, `echo x<in>>~/.claude/settings.json`).
+_FSW002_REDIRECT_STRICT = r"(?:^|(?<=[\s\d&]))(?:>>|>)"
+_FSW002_REDIRECT_MIDDLE = (
+    _FSW002_REDIRECT_STRICT
+    + r"|(?<!<[A-Za-z])(?<!<[A-Za-z]{2})"
+      r"(?<!<[A-Za-z]{3})(?<!<[A-Za-z]{4})(?<!<[A-Za-z]{5})(?<!<[A-Za-z]{6})"
+      r"(?<!<[A-Za-z]{7})(?<!<[A-Za-z]{8})(?<=[\w\"'`)}\]])(?:>>|>)"
+)
+_FSW002_REDIRECT_SHELL = r"(?:^|(?<=[\s\d&\w\"'`)}\]]))(?:>>|>)"
 
 
 RULES: list[Rule] = [
@@ -650,16 +715,16 @@ RULES: list[Rule] = [
          #
          # That over-corrected, silencing the real no-space redirect
          # (`echo x>AGENTS.md`) the comment above still claims is covered. The
-         # anchored alternative stays; a second one below excludes an HTML
-         # OPEN tag's close instead of every bare `>`, via `(?<!<[A-Za-z]{N})`
-         # chained for N=1..8 (`re` has no variable-width lookbehind). A tag
-         # name over 8 letters is a known gap; a CLOSING tag needs no
-         # exclusion — its `>` sits after the content it names.
+         # anchored alternative (`_FSW002_REDIRECT_STRICT`) stays; a second one
+         # excludes an HTML OPEN tag's close instead of every bare `>`, via
+         # `(?<!<[A-Za-z]{N})` chained for N=1..8 (`re` has no variable-width
+         # lookbehind). A tag name over 8 letters is a known gap; a CLOSING tag
+         # needs no exclusion — its `>` sits after the content it names.
          #
          # This narrows only the `>` / `>>` branch. The other alternatives
          # (`tee`, `write_text`, `writeFile`, `open(...` w") already carry
          # their own distinguishing tokens that markup never produces, so they
-         # are untouched.
+         # are untouched — `_FSW002_WRITE_FORMS`, shared by every variant below.
          #
          # A markdown blockquote `> …` still matches this anchor (start-of-line
          # then `>`) — it is prose inside a `.md` file, which the position
@@ -675,38 +740,52 @@ RULES: list[Rule] = [
          # exactly where main (before this branch) still fired.
          #
          # The exclusion is only ever meaningful where HTML can plausibly
-         # appear: prose and markup. `shell_pattern` below is the same pattern
-         # with the `(?<!<[A-Za-z]{1,8})` exclusion dropped, and
-         # `engine._scan_text` swaps to it only on a line it judges to be
-         # genuine shell/code — a shell/code file suffix (`position.
-         # is_code_suffix`) or inside a markdown fence explicitly labeled
-         # bash/sh/shell/zsh/console (`position.shell_fence_lines`). Declaring
-         # a fence `bash` cannot buy a demotion this way, only detection: the
-         # exclusion is dropped, never added, so the audited unit has nothing
-         # cheap to gain by labeling its fences.
+         # appear ALONGSIDE a real redirect: prose and markup mixed in the same
+         # file. `shell_pattern` (`_FSW002_REDIRECT_SHELL`) is the same shape
+         # with the exclusion dropped, and `engine._scan_text` swaps to it only
+         # on a line it judges to be genuine shell/code — a shell/code file
+         # suffix (`position.is_code_suffix`) or inside a markdown fence
+         # explicitly labeled bash/sh/shell/zsh/console
+         # (`position.shell_fence_lines`). Declaring a fence `bash` cannot buy
+         # a demotion this way, only detection: the exclusion is dropped,
+         # never added, so the audited unit has nothing cheap to gain by
+         # labeling its fences.
          #
-         # KNOWN GAP, not chased here: the same shapes in markdown prose OUTSIDE
-         # a shell-labeled fence (`<p>CLAUDE.md` sitting in body text, no
-         # fence at all) still read as an HTML tag and stay silent, because
-         # prose is exactly where a real `<p>` tag can legitimately appear and
-         # this scanner has no way to tell the two apart without semantics.
-         _r(r"((?:^|(?<=[\s\d&]))(?:>>|>)|(?<!<[A-Za-z])(?<!<[A-Za-z]{2})"
-            r"(?<!<[A-Za-z]{3})(?<!<[A-Za-z]{4})(?<!<[A-Za-z]{5})(?<!<[A-Za-z]{6})"
-            r"(?<!<[A-Za-z]{7})(?<!<[A-Za-z]{8})(?<=[\w\"'`)}\]])(?:>>|>)"
-            r"|tee\s+-a?|write_text|writeFile"
-            r"|open\s*\([^)]{0,60}[\"']w)"
-            r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
-            r"|settings\.local\.json|settings\.json"
-            r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
-            r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))"),
+         # A THIRD context needs neither shape: a genuine `.html`/`.htm`/
+         # `.xhtml` DOCUMENT (`position.is_html_suffix`) has no prose and no
+         # shell in it at all — every `>` is markup. The base `pattern` above
+         # only excludes a `>` closing a BARE opening tag (`<p>`), not one
+         # closing a tag WITH an attribute (`<p class="x">…</p>`), because the
+         # character right before that `>` is a quote, not a tag-name letter —
+         # so in prose or any other file, `pattern` still fires on it. Measured
+         # verbatim against a real public repo's rendered release notes
+         # (`release-notes-v1.5.0.html:924`,
+         # `<p class="text-[11px] …"><code>AGENTS.md</code> …</p>`): silent at
+         # 0df3477 and a2aca1a, CRITICAL again from `pattern` at 6676b17
+         # onward. `html_pattern` (`_FSW002_REDIRECT_STRICT`) fixes this by
+         # using the strictest anchor for `.html` files only — a `>` counts
+         # only at line start or after whitespace/a digit/`&` — since there is
+         # no redirect beside it to protect there.
+         #
+         # KNOWN GAPS, not chased here:
+         # - Markdown prose OUTSIDE a shell-labeled fence, or ANY non-`.html`
+         #   file: the same input-redirect shapes (`<p>CLAUDE.md`,
+         #   `cat<p>CLAUDE.md`) still read as an HTML tag and stay silent,
+         #   because a real `<p>` tag can legitimately appear there too and
+         #   this scanner has no way to tell the two apart without semantics
+         #   (false-NEGATIVE direction).
+         # - Markdown prose or any non-`.html` file, RAW HTML with an
+         #   attribute (`<p class="x">AGENTS.md` sitting in a `.md` file's
+         #   body): `pattern`'s exclusion does not reach it — see above — so it
+         #   can still fire (false-POSITIVE direction, the mirror of the bug
+         #   this fix closes, just outside a real `.html` document).
+         _r(rf"({_FSW002_REDIRECT_MIDDLE}|{_FSW002_WRITE_FORMS})"
+            rf"{_FSW002_TARGETS}"),
          specificity=93,
-         shell_pattern=_r(r"((?:^|(?<=[\s\d&\w\"'`)}\]]))(?:>>|>)"
-            r"|tee\s+-a?|write_text|writeFile"
-            r"|open\s*\([^)]{0,60}[\"']w)"
-            r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
-            r"|settings\.local\.json|settings\.json"
-            r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
-            r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))")),
+         shell_pattern=_r(rf"({_FSW002_REDIRECT_SHELL}|{_FSW002_WRITE_FORMS})"
+            rf"{_FSW002_TARGETS}"),
+         html_pattern=_r(rf"({_FSW002_REDIRECT_STRICT}|{_FSW002_WRITE_FORMS})"
+            rf"{_FSW002_TARGETS}")),
 
     Rule("AGT-015", "HIGH", "high", CONTROL_PLANE,
          "Writes instructions for a different assistant",

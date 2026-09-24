@@ -1857,6 +1857,91 @@ def _fsw002_shell_context_cases() -> None:
 _fsw002_shell_context_cases()
 
 
+# --------------------------------------------------- FSW-002 HTML-file context
+# The HTML-tag exclusion `_fsw002_shell_context_cases` above pins as correct in
+# markdown prose over-corrects in the one context where NOTHING is prose: a
+# genuine `.html`/`.htm`/`.xhtml` document. There, `pattern`'s exclusion
+# `(?<!<[A-Za-z]{1,8})` only refuses a `>` that closes a BARE opening tag
+# (`<p>`, `<li>`) — it does nothing for a `>` that closes a tag with an
+# attribute, because the character right before that `>` is a quote, not a
+# tag-name letter. Measured verbatim against a real public repo's rendered
+# release notes (`release-notes-v1.5.0.html:924`): silent at 0df3477 and
+# a2aca1a, CRITICAL again at 6676b17 and unpatched HEAD. `Rule.html_pattern`
+# fixes this by using the STRICT 0df3477 anchor for `.html` files, where a `>`
+# after a quote, a tag name, or `/` is always markup, never a redirect.
+
+def _fsw002_html_context_cases() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+
+        real_bug = base / "real-bug"
+        _write(real_bug, {"SKILL.md": SKILL,
+                          "release-notes-v1.5.0.html":
+                              '<p class="text-[11px] sm:text-xs text-zinc-500">'
+                              '<code>AGENTS.md</code> '
+                              'を介してあらゆる'
+                              'エージェントで'
+                              '利用可能。</p>\n'})
+        _, all_ids = _scan_tree(real_bug)
+        check("fsw002-html-context",
+              "a quote-preceded '>' in a real minified .html attribute stays quiet",
+              "FSW-002" in all_ids, False,
+              "an attribute quote's close is never a shell redirect in HTML")
+
+        attrs = base / "attrs"
+        _write(attrs, {"SKILL.md": SKILL,
+                       "notes.html":
+                           '<p class="x">AGENTS.md</p>\n'
+                           '<a href="/x">CLAUDE.md</a>\n'})
+        _, all_ids = _scan_tree(attrs)
+        check("fsw002-html-context",
+              "attribute-quoted tag closes around control filenames stay quiet",
+              "FSW-002" in all_ids, False,
+              "the middle pattern's word/quote allowance would fire here; strict must not")
+
+        real_redirect = base / "real-redirect"
+        _write(real_redirect, {"SKILL.md": SKILL,
+                               "notes.html": " echo x > AGENTS.md\n"})
+        _, all_ids = _scan_tree(real_redirect)
+        check("fsw002-html-context",
+              "a genuine space-separated redirect inside a .html file still fires",
+              "FSW-002" in all_ids, True,
+              "the strict anchor still catches a real shell redirect, HTML or not")
+
+        combined_shell = base / "combined-shell"
+        _write(combined_shell, {"SKILL.md": SKILL,
+                                "setup.sh":
+                                    'printf a "$P">>~/.claude/settings.json\n'
+                                    'echo x>AGENTS.md\n'
+                                    'cat<p>CLAUDE.md\n'})
+        _, all_ids = _scan_tree(combined_shell)
+        check("fsw002-html-context",
+              "the printf/echo/cat<p> redirect trio all still fire in a .sh file",
+              "FSW-002" in all_ids, True,
+              "shell_pattern is untouched by the HTML-file split")
+
+        md_prose = base / "md-prose"
+        _write(md_prose, {"SKILL.md": SKILL +
+                          "echo x>AGENTS.md\n"})
+        _, all_ids = _scan_tree(md_prose)
+        check("fsw002-html-context",
+              "a no-space redirect in markdown prose still fires",
+              "FSW-002" in all_ids, True,
+              "the middle pattern used for prose is untouched by the HTML-file split")
+
+        md_tag = base / "md-tag"
+        _write(md_tag, {"SKILL.md": SKILL +
+                        "<p><code>AGENTS.md</code></p>\n"})
+        _, all_ids = _scan_tree(md_tag)
+        check("fsw002-html-context",
+              "a bare opening tag around a control filename stays quiet in markdown",
+              "FSW-002" in all_ids, False,
+              "the middle pattern's bare-tag exclusion is untouched by the HTML-file split")
+
+
+_fsw002_html_context_cases()
+
+
 # ---------------------------------------------------- declaration-file capability profile
 # Promise (D2/D3, odd/tasks/declaration-files-and-fsw002.md): a finding located
 # in a `.d.ts` file is still REPORTED — nothing is deleted from `findings[]` —
