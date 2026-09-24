@@ -38,10 +38,25 @@ def _scan(path: Path):
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
+    # The subcommands below are routed on argv[0] before this parser runs, so
+    # argparse cannot list them itself; the epilog is the only place `--help`
+    # can show them.
     parser = argparse.ArgumentParser(
         prog="inspector-skills",
         description="Static audit of an agent extension before installation. "
-                    "Reports; never blocks.")
+                    "Reports; never blocks.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="subcommands (each takes --help):\n"
+               "  python3 -m scanner diff <old-path> <new-path> [--json]\n"
+               "      capability delta between two versions\n"
+               "  python3 -m scanner baseline <path> [--json]\n"
+               "      record the current state as approved\n"
+               "  python3 -m scanner check <path> [--json]\n"
+               "      compare against the approved baseline; never records\n"
+               "  python3 -m scanner semantic-prep <path>\n"
+               "      emit quarantined chunks for the semantic pass\n"
+               "  python3 -m scanner semantic-verify <path> <answers> [--json]\n"
+               "      cross-check judge descriptions against the scanner")
     parser.add_argument("--version", action="version", version=f"inspector-skills {__version__}")
     parser.add_argument("path", type=Path, help="file or directory to audit")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
