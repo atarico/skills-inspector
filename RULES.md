@@ -301,10 +301,11 @@ evasion, and the reason this section exists instead of a silent heuristic.
 ### 3.3 Declaration-only files, and the header this deliberately does not trust
 
 A TypeScript declaration file emits nothing. `tsc` erases it, so it cannot fetch,
-execute or evaluate anything, whatever its contents look like. `position.is_declaration_file`
-reads that from the name alone and `file_base_position` applies it before the
-sample-directory and `invoked` rules, so no location and no manifest can restore
-it. `engine.profile` then leaves its findings out of the capability map.
+execute or evaluate anything, whatever its contents look like — provided `tsc`
+is what reads it. `position.is_declaration_file` reads the fact from the name
+alone; `file_base_position` applies it before the sample-directory rule, except
+when `invoked`: something else was told to RUN the file, so `tsc` never
+touches it. `engine.profile` grants the same exception.
 
 The findings are still REPORTED. Nothing is deleted — a declaration file that
 names a credential is still worth a reader's eye, it is simply not evidence that
@@ -323,7 +324,8 @@ audited unit, which means the audited unit writes it. A payload that types one
 comment line would buy its own demotion, and an evasion that costs one line is
 not a trade this tool makes. The `.d.ts` rule above is safe for the opposite
 reason: it follows from what the compiler does with the file, and the file
-cannot argue with it.
+cannot argue with it — except by getting something other than `tsc` to run it,
+which is what `invoked` detects, and the one thing that can.
 
 This distinction is the general test for any future demotion here. A signal is
 eligible when the audited unit cannot forge it. Positions keyed on a directory

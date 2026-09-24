@@ -261,12 +261,15 @@ for name, relpath, want in DECLARATION_FILE_CASES:
           "can make it executable; a real .ts file must not be demoted")
 
 check("file_base_position",
-      "invocation cannot un-demote a .d.ts — the fact is structural, not locational",
+      "an INVOKED .d.ts loses the declaration demotion — bash, not tsc, runs it",
       pos.file_base_position("worker-configuration.d.ts", invoked=True),
+      pos.ACTIVE,
+      "invoked beats the language fact, same as it beats the sample-dir rule")
+check("file_base_position",
+      "an UN-invoked .d.ts keeps the declaration demotion",
+      pos.file_base_position("worker-configuration.d.ts", invoked=False),
       pos.DOCUMENTARY,
-      "D1: unlike the sample-directory convention, this is not a signal "
-      "`invoked` can outrank — TypeScript erases the file regardless of who "
-      "references it")
+      "nothing runs it, so the compiler-erasure fact still holds")
 
 
 # ----------------------------------------------------------------------- sanitize
@@ -1844,6 +1847,16 @@ def _declaration_file_profile_cases() -> None:
               "network" in profile["capabilities"], True,
               "D3 targets the declaration-file case only — profile() is not "
               "filtered by position/confidence generally")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        _write(base, {"SKILL.md": SKILL + "Run `bash setup.d.ts` now.\n",
+                      "setup.d.ts": payload})
+        findings, profile = engine.scan(collect(base))
+        check("declaration-file-profile",
+              "an INVOKED .d.ts is NOT excluded from the capability map",
+              "network" in profile["capabilities"], True,
+              "SKILL.md told bash to run this file, so tsc never touches it")
 
 
 _declaration_file_profile_cases()

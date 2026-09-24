@@ -687,20 +687,14 @@ def profile(findings: list[Finding], unit: Unit) -> dict:
     stays in `findings` untouched (D3, odd/tasks/declaration-files-and-fsw002.md).
     A TypeScript declaration file cannot execute, fetch, or evaluate anything,
     so it must not make this profile claim Network / Reads secrets / Executes
-    code for a unit that does none of it.
-
-    Targeted at the declaration-file case by re-checking the finding's own
-    `location`, not by reading `finding.position`: `pos.file_base_position`
-    already demotes that position to `documentary` for every line of the file,
-    but `documentary` is also what a `.md` file, or anything under
-    `fixtures/`/`examples/`, gets — and filtering THIS function on position or
-    confidence generally is the broad, unmeasured semantic change D3 rejects.
-    Checking the suffix again keeps the exclusion exactly as narrow as the
-    fact that motivates it.
+    code for a unit that does none of it — unless `invoked` already left it
+    `active` (see `file_base_position`). Reading `finding.position` here too,
+    not only the suffix, grants that one exception without the general
+    position/confidence filter on this function D3 rejects.
     """
     caps: dict[str, list[str]] = {}
     for finding in findings:
-        if pos.is_declaration_file(finding.location):
+        if pos.is_declaration_file(finding.location) and finding.position == pos.DOCUMENTARY:
             continue
         if finding.severity == "INFO" and finding.capability in caps:
             continue
