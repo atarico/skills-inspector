@@ -346,7 +346,7 @@ directory of extensions you already trust, CI does not have one, and it exits
 | Ruleset exercised by the corpus | **70%** — 78 of 111 implemented rules have a fixture; one family (`SEM`) has none |
 | Documented blind spots, confirmed still open | **4** (prose exfiltration; HOK-004's two documented locations, neither implemented; an external CLI holding the network capability the bundle only names) |
 | Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **29/29** survived, no crash or hang |
-| Headline findings across 101 distinct installed extensions | **73% completely silent** (74/101), median **0**, p90 **1** |
+| Headline findings across 127 distinct installed extensions | **73% completely silent** (93/127), median **0**, p90 **1** |
 
 ### That 73% is not a false-positive rate, and it should not be 100%
 
@@ -355,7 +355,7 @@ driving it to zero as the goal. Both readings are wrong, and acting on them
 would gut the tool.
 
 A headline finding means *"a capability that needs your decision"* — not
-*"a bug"*. Of the 27 units that produce one, the single most common finding is
+*"a bug"*. Of the 34 units that produce one, the single most common finding is
 `HOK-003`: the extension registers an MCP server. The Discord bridge really does
 register an MCP server. That is a true statement about a real capability, and
 suppressing it because the plugin is popular would mean deciding on the user's

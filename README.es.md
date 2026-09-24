@@ -358,7 +358,7 @@ corrió — en vez de reportar un pass que no midió.
 | Ruleset ejercitado por el corpus | **70%** — 78 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
 | Puntos ciegos documentados, confirmados aún abiertos | **4** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa; un CLI externo que se queda con la capacidad de red que el bundle sólo nombra) |
 | Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **29/29** sobrevividos, sin crash ni cuelgue |
-| Hallazgos de titular sobre 101 extensiones instaladas distintas | **73% completamente silenciosas** (74/101), mediana **0**, p90 **1** |
+| Hallazgos de titular sobre 127 extensiones instaladas distintas | **73% completamente silenciosas** (93/127), mediana **0**, p90 **1** |
 
 ### Ese 73% no es una tasa de falsos positivos, y no debería llegar a 100%
 
@@ -367,7 +367,7 @@ objetivo llevarla a cero. Las dos lecturas son incorrectas, y actuar sobre ellas
 vaciaría la herramienta.
 
 Un hallazgo de titular significa *"una capacidad sobre la que tenés que
-decidir"*, no *"un bug"*. De las 27 unidades que producen uno, el hallazgo más
+decidir"*, no *"un bug"*. De las 34 unidades que producen uno, el hallazgo más
 frecuente es `HOK-003`: la extensión registra un servidor MCP. El puente de
 Discord realmente registra un servidor MCP. Es una afirmación verdadera sobre una
 capacidad real, y suprimirla porque el plugin es popular sería decidir en nombre
