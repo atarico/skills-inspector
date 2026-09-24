@@ -65,10 +65,73 @@ class Rule:
     # object outright, the pronoun beside it is no longer unbound and the veto
     # does not apply. Both are read from `match.group(0)`, never from the line.
     explicit_object: re.Pattern | None = None
+    # A narrower, PROVABLY benign shape of this rule's own pattern that earns a
+    # lower severity while the match stays REPORTED (RULES.md §2.1, not §2.2:
+    # this is not a confidence question, the match is real either way, and not
+    # a position demotion either — see §3.3, the audited unit controls both
+    # `references/` and a fenced dockerfile block, so either could buy its own
+    # demotion). `Tempered.pattern` must FULLMATCH the whole command segment
+    # the match sits in — see `engine._tempered_severity` — never just the
+    # rule's own match span, and only when EVERY segment where the rule fires
+    # on the line qualifies. One extra argument anywhere breaks it back to
+    # this rule's own `severity`.
+    tempered: "Tempered | None" = None
+
+
+@dataclass(frozen=True)
+class Tempered:
+    """See `Rule.tempered`. `pattern` is matched with `re.fullmatch`, never
+    `search` — a shape eligible for this has to own the ENTIRE segment, not
+    just the part the base rule's own pattern happened to match."""
+    pattern: re.Pattern
+    severity: str
+    reason: str
 
 
 def _r(pattern: str, flags: int = re.IGNORECASE) -> re.Pattern:
     return re.compile(pattern, flags)
+
+
+# odd/tasks/install-line-severity.md. FSW-004's `rm -rf` of a literal
+# package-manager cache path: the RUN line every base-image Dockerfile ships
+# to keep the layer small. The flag group only spells the two-cluster and
+# single-cluster canonical orders (`-rf`/`-fr`/`-r -f`/`-f -r`) — narrower than
+# FSW-004's own detection lookahead on purpose, since a spelling this shape
+# does not name (`-force`, `--recursive`) has no business earning a discount.
+_FSW004_TEMPER_FLAGS = r"(?:-rf|-fr|-r\s+-f|-f\s+-r)"
+_FSW004_TEMPER_CACHE_ROOT = (
+    r"(?:/var/lib/apt/lists|/var/cache/apt/archives|/var/cache/apt"
+    r"|/var/cache/dnf|/var/cache/yum|/var/cache/apk)"
+)
+# Optional trailing `/` and/or a bare `*` — nothing else. `*.bak`, `..`, `$X`,
+# `~` and a second untouched path all fail this and keep the line HIGH; see
+# the FULLMATCH requirement on `Tempered.pattern` and the both-directions
+# cases in tests/unit_test.py.
+_FSW004_TEMPER_PATH = rf"{_FSW004_TEMPER_CACHE_ROOT}/?\*?"
+FSW004_TEMPERED = Tempered(
+    _r(rf"rm\s+{_FSW004_TEMPER_FLAGS}\s+{_FSW004_TEMPER_PATH}"
+       rf"(?:\s+{_FSW004_TEMPER_PATH})*"),
+    "INFO",
+    "every operand is a literal package-manager cache path")
+
+# PRV-001's `sudo <system package manager> update|install`. The subcommand
+# must sit immediately after the manager name — a flag ahead of it (`sudo
+# apt-get -o APT::Update::Pre-Invoke::=id update`) is out of the shape this
+# names, not merely out of the allowlist below, and stays HIGH either way.
+_PRV001_TEMPER_MANAGER = r"(?:apt-get|apt|dnf|yum)"
+_PRV001_TEMPER_SUBCMD = r"(?:update|install)"
+_PRV001_TEMPER_FLAG = (
+    r"(?:--assume-yes|--yes|--no-install-recommends|-qq|-q|-y)")
+# A literal package name only — no `.`-leading relative paths, no URLs, no
+# `$(...)` substitutions: each of those contains a character this charset
+# does not have, so the token fails to fullmatch and the line stays HIGH.
+_PRV001_TEMPER_PACKAGE = r"[a-z0-9][a-z0-9+.\-]*"
+_PRV001_TEMPER_TOKEN = rf"(?:{_PRV001_TEMPER_FLAG}|{_PRV001_TEMPER_PACKAGE})"
+PRV001_TEMPERED = Tempered(
+    _r(rf"sudo\s+{_PRV001_TEMPER_MANAGER}\s+{_PRV001_TEMPER_SUBCMD}"
+       rf"(?:\s+{_PRV001_TEMPER_TOKEN})*"),
+    "MEDIUM",
+    "every flag is allowlisted and every other operand is a literal package name")
 
 
 # A destination is only local when the host ENDS at a real boundary. A bare
@@ -574,15 +637,13 @@ RULES: list[Rule] = [
          # rule already fired on the `>` of a markdown arrow `->` in a fixture
          # note (odd/tasks/declaration-files-and-fsw002.md, D4).
          #
-         # The fix requires the `>` / `>>` to be preceded by start-of-line,
-         # whitespace, a file-descriptor digit, or `&` — the shapes a shell
-         # redirect actually takes (`> f`, `>> f`, `2> f`, `&> f`), which an
-         # HTML tag's closing `>` never is: it is always preceded by an
-         # attribute value, a tag name, or a self-closing `/`, none of which
-         # are in that set. Rejected: deleting the bare `>` alternative
-         # entirely and requiring `>>` — a redirect with no space before a
-         # single `>` (`echo x>f`) is real shell, and the doubled form is not
-         # the only one that matters.
+         # That over-corrected, silencing the real no-space redirect
+         # (`echo x>AGENTS.md`) the comment above still claims is covered. The
+         # anchored alternative stays; a second one below excludes an HTML
+         # OPEN tag's close instead of every bare `>`, via `(?<!<[A-Za-z]{N})`
+         # chained for N=1..8 (`re` has no variable-width lookbehind). A tag
+         # name over 8 letters is a known gap; a CLOSING tag needs no
+         # exclusion — its `>` sits after the content it names.
          #
          # This narrows only the `>` / `>>` branch. The other alternatives
          # (`tee`, `write_text`, `writeFile`, `open(...` w") already carry
@@ -593,7 +654,10 @@ RULES: list[Rule] = [
          # then `>`) — it is prose inside a `.md` file, which the position
          # taxonomy already reads as documentary rather than active shell.
          # Noted, not chased here (D4).
-         _r(r"((?:^|(?<=[\s\d&]))(?:>>|>)|tee\s+-a?|write_text|writeFile"
+         _r(r"((?:^|(?<=[\s\d&]))(?:>>|>)|(?<!<[A-Za-z])(?<!<[A-Za-z]{2})"
+            r"(?<!<[A-Za-z]{3})(?<!<[A-Za-z]{4})(?<!<[A-Za-z]{5})(?<!<[A-Za-z]{6})"
+            r"(?<!<[A-Za-z]{7})(?<!<[A-Za-z]{8})(?<=[\w\"'`)}\]])(?:>>|>)"
+            r"|tee\s+-a?|write_text|writeFile"
             r"|open\s*\([^)]{0,60}[\"']w)"
             r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
             r"|settings\.local\.json|settings\.json"
@@ -635,7 +699,7 @@ RULES: list[Rule] = [
          _r(r"\brm\s+(-(?=\w*[rf])\w+\s+)+[^\n]{0,80}(\$\{?\w|\$\(|`|~|/\*)"
             r"|\bshred\b|\bdd\s+[^\n]{0,60}of=|\bmkfs\b"
             r"|git\s+(reset\s+--hard|clean\s+-\w*f)"),
-         specificity=80),
+         specificity=80, tempered=FSW004_TEMPERED),
 
     Rule("FSW-006", "HIGH", "medium", DESTRUCTIVE,
          "Mass file rewrite across a tree",
@@ -727,7 +791,7 @@ RULES: list[Rule] = [
          "Documented system installs.",
          "What runs as root?",
          _r(r"\bsudo\s+(?!-v\b)|\bdoas\b|\bpkexec\b|Start-Process[^\n]{0,60}-Verb\s+RunAs|\brunas\b"),
-         specificity=70),
+         specificity=70, tempered=PRV001_TEMPERED),
 
     Rule("PRV-005", "MEDIUM", "medium", PRIVILEGE,
          "Safety-gate bypass coupled to a destructive or publishing command",

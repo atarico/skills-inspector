@@ -5,6 +5,7 @@ The four axes are computed independently and never multiplied together.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from . import evidence as ev
@@ -326,16 +327,71 @@ def _scan_text(unit: Unit, relpath: str, text: str,
             if not is_md:
                 for _ in range(pos.literal_demotion(line, match.start())):
                     confidence = pos.demote(confidence, pos.ILLUSTRATIVE)
+            severity = rule.severity
+            evidence = ev.sanitize(line, centre=(match.start(), match.end()))
+            temper = _tempered_severity(rule, line)
+            if temper is not None:
+                severity, reason = temper
+                evidence = f"{evidence} — tempered: {reason}"
             out.append(Finding(
-                id=rule.id, severity=rule.severity, confidence=confidence,
+                id=rule.id, severity=severity, confidence=confidence,
                 status="active", disclosure="undeclared", capability=rule.capability,
                 location=relpath, line=idx + 1,
                 detects=rule.detects,
-                evidence=ev.sanitize(line, centre=(match.start(), match.end())),
+                evidence=evidence,
                 impact=rule.impact, legitimate_use=rule.legitimate,
                 what_to_check=rule.check, position=reported,
                 specificity=rule.specificity))
     return out
+
+
+# A command segment boundary: the same set odd/tasks/install-line-severity.md
+# names — `;`, `&&`, `||`, `|` — each one hands a command's exit status or
+# output to something else, so what precedes it is a complete, independently
+# judged command. `$(` and a backtick are NOT split points here: they open a
+# substitution INSIDE an operand rather than sequencing a new command, and a
+# `Tempered.pattern` fullmatch already refuses them on its own — the literal
+# charsets in rules.py have no `$`, `(` or backtick in them, so an operand
+# carrying one simply fails to fullmatch instead of being cut away and
+# forgotten. Splitting on them here would have done the opposite: turning
+# `sudo apt-get install $(curl -s x)` into a harmless leading segment "sudo
+# apt-get install" (zero operands, which DOES fullmatch) plus a trailing
+# fragment the rule never fires on at all — exactly the evasion this function
+# exists to refuse.
+_SEGMENT_SPLIT = re.compile(r"&&|\|\||;|\|")
+
+
+def _command_segments(line: str) -> list[str]:
+    return _SEGMENT_SPLIT.split(line)
+
+
+def _tempered_severity(rule, line: str) -> tuple[str, str] | None:
+    """RULES.md §2.1 / odd/tasks/install-line-severity.md: same detection,
+    narrower severity, when the rule's own pattern fires on nothing but a
+    provably benign shape.
+
+    Every command segment on the LINE where this rule fires (`rule.pattern`
+    matches somewhere inside it) must FULLMATCH `rule.tempered.pattern` — not
+    just the span the base rule matched. One segment that fires without
+    fullmatching the benign shape (a second, unsafe command chained on the
+    same line; an evasion the benign shape does not cover) sends the whole
+    line back to `rule.severity`, because a Finding is one row per line and
+    cannot report "half of this line is fine."
+    """
+    tempered = rule.tempered
+    if tempered is None:
+        return None
+    matched_any = False
+    for segment in _command_segments(line):
+        segment = segment.strip()
+        if not segment or not rule.pattern.search(segment):
+            continue
+        matched_any = True
+        if not tempered.pattern.fullmatch(segment):
+            return None
+    if not matched_any:
+        return None
+    return tempered.severity, tempered.reason
 
 
 def _instruction_is_live(rule, line: str, match, kind: str, position: str,
@@ -631,20 +687,14 @@ def profile(findings: list[Finding], unit: Unit) -> dict:
     stays in `findings` untouched (D3, odd/tasks/declaration-files-and-fsw002.md).
     A TypeScript declaration file cannot execute, fetch, or evaluate anything,
     so it must not make this profile claim Network / Reads secrets / Executes
-    code for a unit that does none of it.
-
-    Targeted at the declaration-file case by re-checking the finding's own
-    `location`, not by reading `finding.position`: `pos.file_base_position`
-    already demotes that position to `documentary` for every line of the file,
-    but `documentary` is also what a `.md` file, or anything under
-    `fixtures/`/`examples/`, gets — and filtering THIS function on position or
-    confidence generally is the broad, unmeasured semantic change D3 rejects.
-    Checking the suffix again keeps the exclusion exactly as narrow as the
-    fact that motivates it.
+    code for a unit that does none of it — unless `invoked` already left it
+    `active` (see `file_base_position`). Reading `finding.position` here too,
+    not only the suffix, grants that one exception without the general
+    position/confidence filter on this function D3 rejects.
     """
     caps: dict[str, list[str]] = {}
     for finding in findings:
-        if pos.is_declaration_file(finding.location):
+        if pos.is_declaration_file(finding.location) and finding.position == pos.DOCUMENTARY:
             continue
         if finding.severity == "INFO" and finding.capability in caps:
             continue

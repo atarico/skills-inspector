@@ -261,12 +261,15 @@ for name, relpath, want in DECLARATION_FILE_CASES:
           "can make it executable; a real .ts file must not be demoted")
 
 check("file_base_position",
-      "invocation cannot un-demote a .d.ts — the fact is structural, not locational",
+      "an INVOKED .d.ts loses the declaration demotion — bash, not tsc, runs it",
       pos.file_base_position("worker-configuration.d.ts", invoked=True),
+      pos.ACTIVE,
+      "invoked beats the language fact, same as it beats the sample-dir rule")
+check("file_base_position",
+      "an UN-invoked .d.ts keeps the declaration demotion",
+      pos.file_base_position("worker-configuration.d.ts", invoked=False),
       pos.DOCUMENTARY,
-      "D1: unlike the sample-directory convention, this is not a signal "
-      "`invoked` can outrank — TypeScript erases the file regardless of who "
-      "references it")
+      "nothing runs it, so the compiler-erasure fact still holds")
 
 
 # ----------------------------------------------------------------------- sanitize
@@ -797,6 +800,16 @@ RULE_PATTERN_CASES = [
      "2> AGENTS.md", True),
     ("FSW-002", "the combined stdout+stderr redirect still fires",
      "&> AGENTS.md", True),
+    # A no-space redirect is real shell too; the HTML-tag fix above must not
+    # cost the rule this shape.
+    ("FSW-002", "a no-space single redirect still fires",
+     "echo x>AGENTS.md", True),
+    ("FSW-002", "a no-space redirect after another command still fires",
+     "cat p>CLAUDE.md", True),
+    ("FSW-002", "a no-space doubled redirect to a nested path still fires",
+     'printf a "$P">>~/.claude/settings.json', True),
+    ("FSW-002", "a no-space doubled redirect with a bare filename still fires",
+     "echo x>>AGENTS.md", True),
 
     # FSW-004's `rm` branch is a disjunction, not the single discriminant
     # RULES.md used to name. There is a case per alternative of
@@ -857,6 +870,133 @@ RULE_PATTERN_CASES = [
 for rule_id, name, line, want in RULE_PATTERN_CASES:
     check(f"rules/{rule_id}", name, bool(_rule(rule_id).pattern.search(line)), want,
           "the rule must match its own stated scope, no wider")
+
+
+# ------------------------------------------------------------- severity tempering
+# odd/tasks/install-line-severity.md. RULES.md §2.1: severity is set by the
+# rule, never by context — but a rule may name a narrower, PROVABLY benign
+# shape of its OWN pattern that earns a lower severity while the match stays
+# reported. Two invariants pinned here, both directions each:
+#
+# 1. The benign shape must fullmatch the WHOLE command segment the match sits
+#    in (bounded by `;`, `&&`, `||`, `|`), not just the rule's own match span
+#    — an extra operand, a substitution, or a chained command must break it.
+# 2. A line tempers only if EVERY segment where the rule fires on that line
+#    tempers. One HIGH sibling on the line keeps the whole line HIGH.
+#
+# `want` is the tempered (severity, reason) tuple, or None when the line must
+# stay at the rule's own base severity untouched.
+
+def _temper_fsw004_cases() -> None:
+    from scanner import engine
+
+    TEMPERED_CASES = [
+        # -- rm -rf of a literal package-manager cache path -> INFO --
+        ("FSW-004", "apt lists cache alone tempers",
+         "rm -rf /var/lib/apt/lists/*", "INFO"),
+        ("FSW-004", "chained after a real apt install still tempers",
+         "RUN apt-get update && apt-get install -y curl && "
+         "rm -rf /var/lib/apt/lists/*", "INFO"),
+        ("FSW-004", "several literal cache paths in one rm still temper",
+         "rm -rf /var/lib/apt/lists/ /var/cache/apt/archives/*", "INFO"),
+        ("FSW-004", "the other flag order tempers too",
+         "rm -fr /var/cache/dnf/*", "INFO"),
+        ("FSW-004", "flags split across two clusters temper",
+         "rm -r -f /var/cache/yum/*", "INFO"),
+
+        # -- evasions: one extra token anywhere and the shape does not fullmatch --
+        ("FSW-004", "an extra operand keeps HIGH",
+         "rm -rf /var/lib/apt/lists/* ~", None),
+        ("FSW-004", "a second untouched path keeps HIGH",
+         "rm -rf /var/lib/apt/lists/* /home/*", None),
+        ("FSW-004", "path traversal keeps HIGH",
+         "rm -rf /var/lib/apt/lists/../../*", None),
+        ("FSW-004", "a bare variable operand keeps HIGH",
+         "rm -rf /var/lib/apt/lists/$X", None),
+        ("FSW-004", "a brace variable operand keeps HIGH",
+         "rm -rf /var/lib/apt/lists/${X}", None),
+        ("FSW-004", "a chained second rm keeps the WHOLE LINE HIGH",
+         "rm -rf /var/lib/apt/lists/*; rm -rf ~/", None),
+        ("FSW-004", "a flag outside the allowed shape keeps HIGH",
+         "rm -rf --no-preserve-root /var/lib/apt/lists/*", None),
+        ("FSW-004", "a glob suffix beyond a bare * keeps HIGH",
+         "rm -rf /var/lib/apt/lists/*.bak", None),
+        ("FSW-004", "a path outside the allowlist is untouched",
+         "rm -rf /tmp/build-cache/*", None),
+    ]
+
+    for rule_id, name, line, want in TEMPERED_CASES:
+        rule = _rule(rule_id)
+        result = engine._tempered_severity(rule, line)
+        got = result[0] if result else None
+        check(f"tempered/{rule_id}", name, got, want,
+              "install-line-severity: tempering needs a fullmatch of the whole "
+              "segment, and every segment where the rule fires on the line")
+
+    # The rule's own severity is untouched — tempering only ever LOWERS what a
+    # Finding carries, never the Rule's declared base (RULES.md §2.1).
+    check("tempered/FSW-004", "the rule's own severity field stays HIGH",
+          _rule("FSW-004").severity, "HIGH",
+          "severity is set by the rule; tempering is a per-line REPORT decision")
+
+
+_temper_fsw004_cases()
+
+
+# PRV-001: `sudo <apt|apt-get|dnf|yum> update|install` whose every flag is
+# allowlisted and every other operand is a literal package name -> MEDIUM. The
+# subcommand must sit immediately after the manager name — a flag ahead of it
+# is out of the shape entirely, not merely off the allowlist, and stays HIGH
+# either way.
+
+def _temper_prv001_cases() -> None:
+    from scanner import engine
+
+    TEMPERED_CASES = [
+        ("PRV-001", "a bare update tempers",
+         "sudo apt-get update", "MEDIUM"),
+        ("PRV-001", "install with -y and several literal packages tempers",
+         "sudo apt-get install -y imagemagick librsvg2-bin poppler-utils", "MEDIUM"),
+        ("PRV-001", "dnf tempers the same way",
+         "sudo dnf install -y jq", "MEDIUM"),
+        ("PRV-001", "a second allowed flag still tempers",
+         "sudo apt-get install -y --no-install-recommends imagemagick", "MEDIUM"),
+
+        # -- evasions --
+        ("PRV-001", "a local .deb operand keeps HIGH",
+         "sudo apt-get install ./evil.deb", None),
+        ("PRV-001", "a URL operand keeps HIGH",
+         "sudo apt-get install https://x.example/p.deb", None),
+        ("PRV-001", "a flag ahead of the subcommand keeps HIGH",
+         "sudo apt-get -o APT::Update::Pre-Invoke::=id update", None),
+        ("PRV-001", "a command substitution operand keeps HIGH",
+         "sudo apt-get install $(curl -s x)", None),
+        ("PRV-001", "an unlisted package manager keeps HIGH",
+         "sudo pip install foo", None),
+        ("PRV-001", "a chained unrelated sudo command keeps the WHOLE LINE HIGH",
+         "sudo apt-get update && sudo bash x.sh", None),
+        ("PRV-001", "a chained sudo rm keeps the WHOLE LINE HIGH",
+         "sudo apt-get update; sudo rm -rf /", None),
+        ("PRV-001", "an env-var prefix on the same segment keeps HIGH",
+         "SOMEVAR=1 sudo apt-get update", None),
+        ("PRV-001", "sudo rm of the cache path is not an apt subcommand, keeps HIGH",
+         "sudo rm -rf /var/lib/apt/lists/*", None),
+    ]
+
+    for rule_id, name, line, want in TEMPERED_CASES:
+        rule = _rule(rule_id)
+        result = engine._tempered_severity(rule, line)
+        got = result[0] if result else None
+        check(f"tempered/{rule_id}", name, got, want,
+              "install-line-severity: tempering needs a fullmatch of the whole "
+              "segment, and every segment where the rule fires on the line")
+
+    check("tempered/PRV-001", "the rule's own severity field stays HIGH",
+          _rule("PRV-001").severity, "HIGH",
+          "severity is set by the rule; tempering is a per-line REPORT decision")
+
+
+_temper_prv001_cases()
 
 
 # ------------------------------------------------------------------- taint helpers
@@ -1707,6 +1847,16 @@ def _declaration_file_profile_cases() -> None:
               "network" in profile["capabilities"], True,
               "D3 targets the declaration-file case only — profile() is not "
               "filtered by position/confidence generally")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        _write(base, {"SKILL.md": SKILL + "Run `bash setup.d.ts` now.\n",
+                      "setup.d.ts": payload})
+        findings, profile = engine.scan(collect(base))
+        check("declaration-file-profile",
+              "an INVOKED .d.ts is NOT excluded from the capability map",
+              "network" in profile["capabilities"], True,
+              "SKILL.md told bash to run this file, so tsc never touches it")
 
 
 _declaration_file_profile_cases()

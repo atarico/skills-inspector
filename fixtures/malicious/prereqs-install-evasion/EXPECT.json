@@ -1,0 +1,6 @@
+{
+  "must_detect": ["PRV-001"],
+  "must_headline": ["PRV-001"],
+  "note": "odd/tasks/install-line-severity.md's false-positive twin for PRV-001. Reads like an ordinary apt refresh line, but an APT pre-invoke hook option sits between the manager name and the subcommand, so an arbitrary command runs with the same privilege the apt refresh has. The tempering shape requires the subcommand immediately after the manager name, so this is out of the shape entirely (not merely off the flag allowlist) and stays at the rule's own HIGH.",
+  "category": "malicious"
+}

@@ -9,7 +9,7 @@
 [![Licencia](https://img.shields.io/badge/licencia-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Dependencias](https://img.shields.io/badge/dependencias-ninguna-brightgreen.svg)](#inicio-rápido)
-[![Detección](https://img.shields.io/badge/detecci%C3%B3n-142%2F142-brightgreen.svg)](#medido-no-afirmado)
+[![Detección](https://img.shields.io/badge/detecci%C3%B3n-145%2F145-brightgreen.svg)](#medido-no-afirmado)
 [![Fuzz](https://img.shields.io/badge/entrada%20malformada-28%2F28-brightgreen.svg)](#medido-no-afirmado)
 
 </div>
@@ -353,8 +353,8 @@ corrió — en vez de reportar un pass que no midió.
 
 | Benchmark | Resultado |
 |---|---|
-| Tests unitarios de invariantes | **867/867** — cada caso fija una promesa que hace un docstring |
-| Detección, contra `fixtures/` | **142/142**, más **5/5** contrastes semánticos |
+| Tests unitarios de invariantes | **902/902** — cada caso fija una promesa que hace un docstring |
+| Detección, contra `fixtures/` | **145/145**, más **5/5** contrastes semánticos |
 | Ruleset ejercitado por el corpus | **70%** — 78 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
 | Puntos ciegos documentados, confirmados aún abiertos | **3** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa) |
 | Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **28/28** sobrevividos, sin crash ni cuelgue |

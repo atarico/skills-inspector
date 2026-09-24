@@ -100,6 +100,32 @@ Set by the rule. Never modulated by context, position, or reachability.
 | `LOW` | Poor hygiene or unnecessary privilege. Not an attack on its own. |
 | `INFO` | Neutral capability worth knowing about before installing. |
 
+**A rule may temper its own severity, and that is still "set by the rule,"
+not by context.** `FSW-004` and `PRV-001` each name a narrower shape of their
+own pattern — matched with `re.fullmatch` against the WHOLE command segment
+the match sits in (bounded by `;`, `&&`, `||`, `|`), not just the span the
+base pattern happened to match — that provably cannot do anything worse than
+each rule's own `legitimate_use` already calls the acceptable case, and only
+that shape earns a lower `severity`. Deliberately not a confidence move
+(§2.2: the match is real either way, so lowering confidence to get a lower
+number would be a lie about whether the rule fired) and deliberately not a
+position move (§3.3: a `references/` directory carries no taxonomy weight at
+all, and a fenced code block only demotes when the prose above it does not
+read as an instruction to run it, which a real build or install doc always
+will — either one is a signal the audited unit could forge by writing the
+same command inside a fence or under a different directory). The eligible
+signal is the command's own complete argument list: the shape a rule names
+here is narrower than the discriminant that makes it fire at all, so one
+extra operand, a substitution, a `..`, or a second command chained on the
+same line all fall back out of it — the unit cannot keep the temper while
+doing anything worse, because doing anything worse is exactly what changes
+the argument list. And because a rule can fire more than once on one line, a
+line only tempers when EVERY one of those matches earns it — one untempered
+sibling anywhere on the line keeps the whole line at the rule's own
+severity; a Finding is one row per line and cannot report "half of this line
+is fine." See `Rule.tempered` in `scanner/rules.py` and
+`engine._tempered_severity`.
+
 ### 2.2 `confidence` — is this match real?
 
 Answers one question only: *given where this text sits, is it plausibly an
@@ -275,10 +301,11 @@ evasion, and the reason this section exists instead of a silent heuristic.
 ### 3.3 Declaration-only files, and the header this deliberately does not trust
 
 A TypeScript declaration file emits nothing. `tsc` erases it, so it cannot fetch,
-execute or evaluate anything, whatever its contents look like. `position.is_declaration_file`
-reads that from the name alone and `file_base_position` applies it before the
-sample-directory and `invoked` rules, so no location and no manifest can restore
-it. `engine.profile` then leaves its findings out of the capability map.
+execute or evaluate anything, whatever its contents look like — provided `tsc`
+is what reads it. `position.is_declaration_file` reads the fact from the name
+alone; `file_base_position` applies it before the sample-directory rule, except
+when `invoked`: something else was told to RUN the file, so `tsc` never
+touches it. `engine.profile` grants the same exception.
 
 The findings are still REPORTED. Nothing is deleted — a declaration file that
 names a credential is still worth a reader's eye, it is simply not evidence that
@@ -297,7 +324,8 @@ audited unit, which means the audited unit writes it. A payload that types one
 comment line would buy its own demotion, and an evasion that costs one line is
 not a trade this tool makes. The `.d.ts` rule above is safe for the opposite
 reason: it follows from what the compiler does with the file, and the file
-cannot argue with it.
+cannot argue with it — except by getting something other than `tsc` to run it,
+which is what `invoked` detects, and the one thing that can.
 
 This distinction is the general test for any future demotion here. A signal is
 eligible when the audited unit cannot forge it. Positions keyed on a directory
@@ -441,7 +469,7 @@ position; §3 demotes from there.
 | `FSW-001` | HIGH | high | Writes outside the unit directory and the working directory (absolute paths, `~`, `../` traversal) | Modifies things you did not put in scope | Config setup — must be declared |
 | `FSW-002` | CRITICAL | high | Modifies agent instructions or config (`~/.claude/`, `CLAUDE.md`, `AGENTS.md`, `settings.json`, `.mcp.json`, `~/.codex/config.toml`, `opencode.json`) | Rewrites the rules the agent follows — a persistent foothold in your assistant | Only as the unit's stated purpose |
 | `FSW-003` | HIGH | high | Modifies or deletes other installed extensions | Can neutralize this auditor or backdoor trusted units | Extension-management tooling only |
-| `FSW-004` | HIGH | medium | Destructive commands: `rm -rf`, `shred`, `dd of=`, `truncate`, `mkfs`, `git reset --hard`, `git clean -fdx` | Irreversible data loss | Literal narrow path under a temp dir. **The `rm` discriminant is a disjunction, not interpolation alone** — a variable, a substitution, `~`, or a `/*` in the path each fire on their own: `rm -rf "$DIR"`, `rm -rf ~/.cache/build` and `rm -rf /var/log/*/old.log` are all HIGH, `rm -rf /tmp/build` is clean |
+| `FSW-004` | HIGH, tempered to INFO (§2.1) | medium | Destructive commands: `rm -rf`, `shred`, `dd of=`, `truncate`, `mkfs`, `git reset --hard`, `git clean -fdx` | Irreversible data loss | Literal narrow path under a temp dir. **The `rm` discriminant is a disjunction, not interpolation alone** — a variable, a substitution, `~`, or a `/*` in the path each fire on their own: `rm -rf "$DIR"`, `rm -rf ~/.cache/build` and `rm -rf /var/log/*/old.log` are all HIGH, `rm -rf /tmp/build` is clean. **Tempered to INFO** when `rm -rf`/`-fr`/`-r -f`/`-f -r`'s every operand is a literal `/var/lib/apt/lists`, `/var/cache/apt`, `/var/cache/apt/archives`, `/var/cache/dnf`, `/var/cache/yum`, or `/var/cache/apk`, with an optional trailing `/` or `/*` — the RUN-line apt/dnf/yum/apk cache delete every base-image Dockerfile ships. One extra operand, `..`, a variable, `~`, or a second command chained on the same line keeps it HIGH |
 | `FSW-005` | MEDIUM | high | Permission or ownership changes: `chmod 777`, `chmod +s`, `chown`, ACL edits | Weakens system protections | Rare; read carefully |
 | `FSW-006` | HIGH | medium | Mass file rewrite or rename across a tree | Ransomware and mass-corruption shape | Codemods and formatters — verify scope |
 | `FSW-007` | MEDIUM | medium | Reads broadly outside the project (`$HOME` walks, `find /` sweeps) | Reconnaissance ahead of targeted theft | Disk-usage tooling |
@@ -451,7 +479,7 @@ position; §3 demotes from there.
 
 | ID | Sev | Conf | Detects | Why it matters | Legitimate when |
 |---|---|---|---|---|---|
-| `PRV-001` | HIGH | high | `sudo`, `doas`, `pkexec`, `runas` | Escalates beyond your normal blast radius | Documented system installs |
+| `PRV-001` | HIGH, tempered to MEDIUM (§2.1) | high | `sudo`, `doas`, `pkexec`, `runas` | Escalates beyond your normal blast radius | Documented system installs. **Tempered to MEDIUM** when the line is `sudo` followed immediately by `apt`/`apt-get`/`dnf`/`yum` followed immediately by `update` or `install`, with every remaining token either an allowlisted flag (`-y`, `--yes`, `--assume-yes`, `-q`, `-qq`, `--no-install-recommends`) or a literal package name. A flag ahead of the subcommand, a `.`-leading path, a URL, a `$(...)` substitution, an unlisted manager, or a second `sudo` command chained on the same line all keep it HIGH |
 | `PRV-002` | HIGH | high | Disables shell history (`unset HISTFILE`, `set +o history`, `HISTSIZE=0`) | Deliberately destroys your forensic trail | No legitimate reason here |
 | `PRV-003` | HIGH | high | Clears or truncates logs | Same as PRV-002 | Log rotation tooling only |
 | `PRV-004` | MEDIUM | high | Disables TLS verification (`curl -k`, `verify=False`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized: false`) | Enables interception of everything sent | Local self-signed dev certs |
