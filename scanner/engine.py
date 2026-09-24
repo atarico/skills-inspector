@@ -35,9 +35,11 @@ _MD_SUFFIXES = {".md", ".markdown", ".mdx"}
 # The per-call version (`re.search` against a fresh `line[:pos_]` slice for
 # every rejected `>`) was quadratic in the number of tag closes on a line:
 # each call re-walks the prefix from column zero, so N closes cost O(N^2).
-# Measured on the defect: `'<p >CLAUDE.md ' * 32000` on one line took 21.4s;
-# N=128000 with the single-pass scan below stays under a second (see
-# tests/fuzz.py::quadratic-html-tag-closes). A `<`/`>` character can only ever
+# Measured on the defect, whole `python3 -m scanner` run: `'<p >CLAUDE.md ' *
+# 32000` on one line took 21.4s; with the single-pass scan below the same run
+# takes about 2.7s at N=32000 and 10.2s at N=128000, growing linearly (the fuzz
+# case tests/fuzz.py::quadratic-html-tag-closes pins N=64000 under the suite's
+# per-case timeout). A `<`/`>` character can only ever
 # start or end ONE tag-tail (the char class excludes `<`/`>` from the tail
 # itself), so a single left-to-right scan over just the bracket characters —
 # not the whole line — is enough to decide every position at once.

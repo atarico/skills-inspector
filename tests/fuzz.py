@@ -246,8 +246,8 @@ def _(b: Path):
 # `<p >CLAUDE.md ` (a single ~480KB line) took 21.4s on its own, already
 # close to this suite's 25s CASE_TIMEOUT; doubling N roughly quadruples a
 # quadratic cost, so 64000 clears the budget by a wide, non-flaky margin on
-# the broken code while the fixed single-pass scan — linear in line length —
-# finishes in a fraction of a second regardless of N.
+# the broken code, while the fixed single-pass scan — linear in line length —
+# measured about 5s for this case, well inside the timeout.
 @case("quadratic-html-tag-closes")
 def _(b: Path):
     write(b, "SKILL.md", skill())
