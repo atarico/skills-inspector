@@ -29,6 +29,24 @@ Implementation notes, against the proposal above:
   0.1 documents this truthfully instead of leaving the old, inaccurate claim
   in place.
 
+**Post-implementation fix.** Parent verification caught a CRITICAL evasion in
+the first version of narrowing: `.claude-plugin` was treated as a sibling of
+the chosen plugin source and excluded like any other, but Claude Code lets a
+marketplace plugin ENTRY declare that plugin's hooks/mcpServers/commands
+inline (`"strict": false`) — so `marketplace.json` is itself control plane,
+and excluding it reintroduced the exact false clean this section exists to
+prevent. Fixed by never excluding `.claude-plugin` and instead reading it back
+into the narrowed unit as extra files (a `../`-prefixed relpath, same shape as
+every other outside-root NOT ANALYZED entry). The manifest is now always
+inside the unit, narrowed or not — RULES.md section 0.1 updated to say so.
+
+Also surfaced, and deliberately NOT fixed here: the structural HOK-001/
+HOK-003 checks read only a JSON file's TOP-LEVEL `hooks`/`mcpServers` keys, so
+grants a marketplace entry declares inline (nested one level down, inside
+`plugins[i]`) are invisible to them — only the line-based rules (curl-pipe-
+shell, outbound host) still catch the raw text regardless of nesting. Pinned
+as a known-miss fixture, `fixtures/known-miss/marketplace-inline-hook-structural`.
+
 ## The question
 
 Scanning `coji/natural-japanese/skills/natural-japanese` widens to the whole

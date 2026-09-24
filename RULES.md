@@ -65,6 +65,21 @@ config or MCP registration sitting beside the target inside the same declared
 source is still read, because narrowing changes the unit's ROOT, not the
 walk that happens once it is fixed.
 
+**The marketplace manifest directory (`.claude-plugin/`) always stays inside
+the unit, narrowed or not.** Claude Code lets a marketplace PLUGIN ENTRY
+declare that plugin's hooks, MCP servers, and commands inline
+(`"strict": false`) — `marketplace.json` is not a bystander file, it is
+control plane for every plugin it lists. A first version of this narrowing
+treated `.claude-plugin` as just another sibling of the chosen plugin source
+and excluded it exactly like any other, which reintroduced the false clean
+this whole section widens to prevent: an inline hook the manifest declared
+for the audited plugin went completely unscanned. `_outside_siblings` now
+carves `.claude-plugin` out of the exclusion list, and `collect()` reads it
+back into the unit as extra files whose relpath carries a leading `../` (the
+unit's root moved narrower than it; the manifest did not move with it) — the
+same shape every other outside-root NOT ANALYZED path already used, just
+included instead of excluded.
+
 When the unit ends up wider than the path the user named — narrowed to a
 plugin source larger than the target, or widened by any other marker in the
 table above — the report adds a `target_subtree` attribution: finding count,
