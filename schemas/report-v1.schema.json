@@ -199,9 +199,54 @@
       "additionalProperties": {
         "type": "string"
       }
+    },
+    "target_subtree": {
+      "description": "Present ONLY when unit.scope_widened is true — the unit audited is wider than the path the user named. Attributes findings to inside the named path vs the rest of the unit, so a per-skill tool's numbers can be compared without narrowing what this scanner actually audited (RULES.md section 0.1). The top-level `headline` block above stays computed over the WHOLE unit; this is an additive, second view built by calling headline()/headline_summary() on the same findings, never a re-derivation of the predicate.",
+      "type": "object",
+      "required": [
+        "path",
+        "inside",
+        "rest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The user-named target, relative to unit.root."
+        },
+        "inside": {
+          "$ref": "#/$defs/subtree_counts"
+        },
+        "rest": {
+          "$ref": "#/$defs/subtree_counts"
+        }
+      }
     }
   },
   "$defs": {
+    "subtree_counts": {
+      "type": "object",
+      "required": [
+        "finding_count",
+        "headline_count",
+        "undeclared_critical"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "finding_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "headline_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "undeclared_critical": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "scope_search": {
       "type": "string",
       "enum": [

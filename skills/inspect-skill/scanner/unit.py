@@ -6,7 +6,9 @@ alone misses the entire control plane.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -111,6 +113,12 @@ class Unit:
     description: str = ""
     declared_tools: list[str] = field(default_factory=list)
     name: str = ""
+    # Non-empty only when this unit's marketplace.json could NOT be trusted to
+    # narrow the audit to one declared plugin source (RULES.md section 0.1) —
+    # names the specific reason. Empty when there was nothing to narrow (no
+    # marketplace marker), narrowing succeeded, or narrowing simply found no
+    # single matching source (not a trust failure, just not narrowable).
+    marketplace_narrowing: str = ""
 
 
 def resolve(target: Path) -> tuple[Path, str, bool, str, int]:
@@ -261,10 +269,147 @@ def _skip_dir_reason(name: str) -> str:
             "contents unreviewed")
 
 
+# A plain scheme prefix ("http://", "git://", "ssh://", ...) or an scp-style
+# git remote ("git@host:org/repo"). Either means the source is not a path on
+# this filesystem at all, so treating it as one would be the shrinking defect
+# this whole check exists to prevent.
+_SOURCE_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
+
+
+def _valid_relative_source(source: object) -> bool:
+    """A `source` this audit will trust enough to even ATTEMPT to resolve.
+
+    Only a plain relative string survives: not absolute, not a URL, not the
+    `{"source": "github", ...}` object form a real marketplace.json may use.
+    RULES.md section 0.1 — this is the first half of "fail wide, never narrow"
+    for an untrustworthy manifest; the second half, catching a `..`-escape or a
+    symlink that gets past this, is `_resolve_plugin_source`'s realpath check.
+    """
+    if not isinstance(source, str) or not source:
+        return False
+    if os.path.isabs(source):
+        return False
+    if _SOURCE_SCHEME_RE.match(source):
+        return False
+    if source.startswith("git@"):
+        return False
+    return True
+
+
+def _resolve_plugin_source(marketplace_root: Path, source: object) -> Path | None:
+    """Resolve one plugin's declared `source` to a real directory, or None if
+    it cannot be trusted — an invalid shape, or a resolved realpath (`..` or a
+    symlink) that escapes the marketplace directory. `marketplace_root` is
+    already a real, resolved path (it came out of resolve()'s climb), so the
+    only thing left to resolve is `source` itself.
+    """
+    if not _valid_relative_source(source):
+        return None
+    try:
+        resolved = (marketplace_root / source).resolve()
+    except (OSError, RuntimeError):
+        return None
+    if not resolved.is_relative_to(marketplace_root):
+        return None
+    return resolved
+
+
+def _outside_siblings(marketplace_root: Path, plugin_root: Path) -> list[tuple[str, str]]:
+    """One NOT ANALYZED entry per sibling the narrowed unit excludes, at every
+    level between the marketplace root and the plugin source directory —
+    mirroring SKIP_DIRS pruning in `collect()`: one entry per excluded
+    directory or file, never one per file inside it, and never walked into.
+    Paths are reported relative to `plugin_root` (the new unit root), like
+    every other NOT ANALYZED entry, so a "../" prefix is what says "outside".
+    """
+    if plugin_root == marketplace_root:
+        return []
+    rel_parts = plugin_root.relative_to(marketplace_root).parts
+    out: list[tuple[str, str]] = []
+    current = marketplace_root
+    for part in rel_parts:
+        try:
+            entries = sorted(current.iterdir(), key=lambda p: p.name)
+        except OSError:
+            break
+        for entry in entries:
+            if entry.name != part:
+                rel = os.path.relpath(str(entry), str(plugin_root))
+                out.append((rel, "outside every declared plugin source"))
+        current = current / part
+    return out
+
+
+def _narrow_marketplace(marketplace_root: Path, target: Path) -> tuple[Path, str, list[tuple[str, str]]]:
+    """RULES.md section 0.1: when the target sits inside exactly one plugin's
+    declared `source`, narrow the unit to that directory instead of the whole
+    marketplace. Returns (root, narrowing_failure_reason, outside_siblings).
+
+    FAIL WIDE, never narrow, whenever the manifest cannot be trusted: missing,
+    malformed, or unreadable marketplace.json; a `plugins` field that is not a
+    list; or ANY plugin entry whose `source` this audit will not resolve —
+    absolute, `..`-escaping, a URL, a git/github object form, or a symlink
+    whose realpath escapes the marketplace directory. One untrustworthy entry
+    taints the whole manifest, even if the target would have matched a
+    different, valid one: a manifest must never be able to shrink its own
+    audit, and a scanner that narrows around the one entry it distrusts is
+    exactly that shrinking, just spelled differently.
+
+    `target` matching zero or more-than-one declared source (including the
+    target being the marketplace root itself, matched by no strict
+    subdirectory) is not a trust failure — it is simply not narrowable, so the
+    unit stays the marketplace directory with an EMPTY reason: there was
+    nothing wrong with the manifest, just nothing to narrow into.
+    """
+    manifest_path = marketplace_root / ".claude-plugin" / "marketplace.json"
+    try:
+        raw = manifest_path.read_text(encoding="utf-8", errors="replace")
+        data = json.loads(raw)
+    except (OSError, ValueError):
+        return marketplace_root, "marketplace.json is malformed or unreadable", []
+
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, list):
+        return (marketplace_root,
+                "marketplace.json's plugins field is missing or not a list", [])
+
+    sources: list[Path] = []
+    for entry in plugins:
+        source = entry.get("source") if isinstance(entry, dict) else None
+        resolved = _resolve_plugin_source(marketplace_root, source)
+        if resolved is None:
+            name = entry.get("name", "?") if isinstance(entry, dict) else "?"
+            return (marketplace_root,
+                    f"plugin '{name}' declares a source this audit will not "
+                    f"trust to narrow into ({source!r})", [])
+        sources.append(resolved)
+
+    matches = sorted({s for s in sources if target.is_relative_to(s)}, key=str)
+    if len(matches) != 1:
+        return marketplace_root, "", []
+
+    plugin_root = matches[0]
+    return plugin_root, "", _outside_siblings(marketplace_root, plugin_root)
+
+
 def collect(target: Path) -> Unit:
     root, kind, widened, scope_search, scope_levels = resolve(target)
-    unit = Unit(root=root, kind=kind, requested=target.resolve(), widened=widened,
-                scope_search=scope_search, scope_levels=scope_levels, name=root.name)
+    target_resolved = target.resolve()
+    marketplace_narrowing = ""
+    outside: list[tuple[str, str]] = []
+    if kind == "claude marketplace":
+        narrowed_root, marketplace_narrowing, outside = _narrow_marketplace(
+            root, target_resolved)
+        if narrowed_root != root:
+            root = narrowed_root
+            start = target_resolved if target_resolved.is_dir() else target_resolved.parent
+            widened = root != start
+
+    unit = Unit(root=root, kind=kind, requested=target_resolved, widened=widened,
+                scope_search=scope_search, scope_levels=scope_levels, name=root.name,
+                marketplace_narrowing=marketplace_narrowing)
+    for rel, reason in outside:
+        unit.skipped.append((rel, reason))
 
     count = 0
     for dirpath, dirnames, filenames in os.walk(root):
