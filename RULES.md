@@ -80,6 +80,41 @@ unit's root moved narrower than it; the manifest did not move with it) — the
 same shape every other outside-root NOT ANALYZED path already used, just
 included instead of excluded.
 
+**Narrowing widens back the moment anything inside the narrowed unit reaches
+outside it.** Excluding a sibling directory is not the only way a narrowed
+audit can miss a real payload: the payload can sit in that excluded sibling
+while something INSIDE the narrowed unit tells the reader, or the harness, to
+go get it — a skill's prose invoking `bash ../../../../corpus/gen.sh`, or a
+hook command built from `${CLAUDE_PLUGIN_ROOT}/../../corpus/gen.sh`. Neither
+reference is inside the plugin's own declared source, and corpus/'s own
+content is excluded exactly as designed — so the payload was never unscanned
+because of a gap in the exclusion logic, it was unscanned because narrowing
+shrank what got walked at all, and the plugin's own file told the reader
+where the rest of it lives.
+
+`unit.py::_escapes_narrowed_root` checks every text file already collected
+into a narrowed unit for a reference — reusing `reachability.py`'s own
+reference patterns, never a second parser — whose target resolves, on the
+REAL filesystem, to a path that both (a) exists and (b) sits outside the
+narrowed root. `${CLAUDE_PLUGIN_ROOT}` resolves against the plugin root
+itself; every other reference shape resolves against the referencing file's
+own directory, matching `reachability.py::_candidates`. The moment any
+reference escapes, narrowing is ABANDONED entirely — the unit rebuilds at the
+marketplace directory, exactly as it would have before this section existed,
+and `marketplace_narrowing` records why. Pulling in only the specific
+referenced file was deliberately rejected: an attacker's choice of reference
+shape and depth is unbounded, so a whitelist of "the files narrowing decided
+to also include" can always be evaded by one more hop, while widening back to
+the marketplace directory cannot miss a transitive reference — there is no
+narrower boundary left for one to cross.
+
+A reference whose target does not exist ANYWHERE is not treated as an escape:
+narrowing has not hidden anything real by leaving it out, and the ordinary
+dangling-reference finding (`BND-002`) already reports it from inside the
+narrowed scan. Only a reference that reaches a REAL file outside the narrowed
+root is what a plugin could use to have its own audit look past a payload
+sitting just outside it.
+
 When the unit ends up wider than the path the user named — narrowed to a
 plugin source larger than the target, or widened by any other marker in the
 table above — the report adds a `target_subtree` attribution: finding count,
