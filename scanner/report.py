@@ -206,24 +206,37 @@ RULE_SUMMARY = {
 }
 
 
-# RULES.md section 0.1, "making the numbers comparable without narrowing the
-# audit": when the unit is wider than the path the user named — any widened
-# scan, not only a narrowed marketplace one — attribute findings to "inside
-# the named path" vs "the rest of the unit", so a comparison against a
-# per-skill tool (skills.sh) has numbers to read without shrinking what this
-# scanner actually audited. The headline itself stays computed over the WHOLE
-# unit; this is a second, additive view onto the same findings list, and both
-# counters below are built by calling `headline()` / `headline_summary()`
-# rather than re-deriving the predicate — see headline_summary's own docstring
-# for the drift that duplicating it caused before it was collapsed to one place.
+# RULES.md section 0.1, "comparability, not narrowing": the unit itself is
+# NEVER narrowed — a marketplace stays one unit, every plugin it lists walked
+# and scanned together, exactly like any other marker found above the target.
+# What varies is only whether the RESOLVED unit root sits above the path the
+# user actually named. When it does — a marketplace directory enclosing one
+# plugin, or any other marker in the section 0 table found above the
+# target — this attributes findings to "inside the named path" vs "the rest
+# of the unit", so a comparison against a per-skill tool (skills.sh) has
+# numbers to read without the scanner ever having excluded anything it
+# audited. The headline itself stays computed over the WHOLE unit; this is a
+# second, additive view onto the same findings list, and both counters below
+# are built by calling `headline()` / `headline_summary()` rather than
+# re-deriving the predicate — see headline_summary's own docstring for the
+# drift that duplicating it caused before it was collapsed to one place.
 def _target_subtree(unit: Unit, findings: list[Finding]) -> dict | None:
     if not unit.widened:
         return None
     try:
+        # `unit.requested`/`unit.root` are `pathlib.Path` — the platform's own
+        # flavour (`PosixPath` here; every relpath elsewhere in this codebase,
+        # `Finding.location` included, is likewise built and compared as
+        # POSIX-style, per unit.py). `rel_target` inherits that flavour, and
+        # `_inside` below compares it against `PurePosixPath(loc)` — a
+        # cross-flavour comparison that only holds on a POSIX host.
         rel_target = unit.requested.relative_to(unit.root)
     except ValueError:
         # unit.requested is always inside unit.root by construction (resolve()
-        # only ever climbs to an ANCESTOR); this is defensive, not reachable.
+        # only ever climbs to an ANCESTOR): unreachable, not a degrade path.
+        # If it were ever reached, the return here is the same "no
+        # target_subtree in the report" a caller sees when the unit was never
+        # widened — never a crash, never a silently wrong attribution.
         return None
     target_is_dir = unit.requested.is_dir()
 
