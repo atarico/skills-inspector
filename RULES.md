@@ -20,7 +20,7 @@ The scanner resolves the unit in this order:
 | Marker | Unit |
 |---|---|
 | `.claude-plugin/plugin.json` | the whole plugin directory |
-| `.claude-plugin/marketplace.json` | every plugin it lists, audited separately |
+| `.claude-plugin/marketplace.json` | the whole marketplace directory — every plugin it lists, audited TOGETHER, never separately (see 0.1) |
 | `opencode.json` / `.opencode/` | the whole project directory |
 | `SKILL.md` with no plugin manifest above it | the skill directory |
 | bare directory | the directory, recursively |
@@ -28,6 +28,53 @@ The scanner resolves the unit in this order:
 If a unit marker is found *above* the path the user pointed at, the scanner widens
 the scope and says so in the report. Auditing a skill inside a plugin without
 reading the plugin manifest produces a false clean.
+
+### 0.1 A marketplace is one unit — narrowing was tried and withdrawn
+
+A marketplace can list many independent plugins, and auditing the whole
+marketplace directory for a question about one of them pulls in every
+sibling's files — research notes, other plugins' scripts, whatever else the
+repository ships. `natural-japanese` (defect 6) measured this concretely:
+scanning `skills/natural-japanese` widened to the entire 102-file repository.
+
+Three commits (`0020a49`, `1988d8e`, `6d12cd3`) tried to fix that by narrowing
+the unit to the one declared `plugins[].source` the target sat inside, with a
+fail-wide guarantee for an untrustworthy manifest, then a carve-out to keep
+`.claude-plugin` in the unit, then a real-filesystem check to widen back when
+a plugin's own file referenced a path outside its declared source. All three
+were withdrawn (`docs/2026-09-24-installation-unit.md`) after a third
+adversarial round found that the widen-back check itself could not be
+trusted: it depended on recognizing a REFERENCE, and reachability.py's
+reference patterns — reused deliberately rather than duplicated — do not, and
+cannot, recognize every shape prose or a shell command can take. Two
+equivalent ways of invoking the exact same payload (`bash x.sh` and
+`. x.sh`) widened back correctly; two others (`cd dir && bash x.sh`, and
+plain prose naming the path without an imperative verb in front of it) did
+not, and left the payload with ZERO findings while the pre-narrowing scanner
+had always found it. Excluding content and compensating for the exclusion
+with heuristic reference detection is a race the attacker wins by
+construction: they control the text the heuristic reads, and a parser tuned
+to close one evasion is a parser someone can read and route around.
+
+So a marketplace is one unit, full stop, exactly as it was before defect 6
+was ever measured: every plugin it lists is walked and scanned together, and
+nothing is ever excluded on the strength of a manifest's own claims about
+which files belong to which plugin.
+
+**What defect 6 actually needed was comparability, not narrowing.** The real
+complaint was never that the scanner reads too much — reading `corpus/` is
+correct, because that is what installs — it was that the numbers could not
+be compared against a per-skill tool like skills.sh, which audits a narrower
+slice. `target_subtree` answers that directly, without excluding anything:
+when the unit is wider than the path the user named — a marketplace, or any
+other marker in the table above found above the target — the report adds a
+`target_subtree` attribution: finding count, headline count, and
+undeclared-CRITICAL count for findings inside the named path, and the same
+three counts for the rest of the unit. The top-level headline stays computed
+over the WHOLE unit; `target_subtree` is an additive second view onto the
+same findings, built by calling `headline()` / `headline_summary()` directly
+rather than re-deriving the predicate. A skills.sh comparison reads the
+`target_subtree` numbers, and the audit still covers everything that installs.
 
 ### Auditing an already-installed unit
 
