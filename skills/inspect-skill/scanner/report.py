@@ -74,6 +74,17 @@ _BASE_LIMITS = [
     "dependencies (.git, node_modules, dist, and the rest of SKIP_DIRS) are "
     "never walked. When one is present in the unit it is listed under NOT "
     "ANALYZED, never silently absorbed into a clean report.",
+    # ramus-dev/android-use: every capability reads "no" while its SKILL.md
+    # drives the external `ramus` CLI, and THAT is what uploads an APK, input,
+    # and an API key to a third party. The scanner reads the unit's own files;
+    # it does not simulate or inspect a program the instructions merely name.
+    "The audit reads only the files inside this unit. When its instructions "
+    "drive an external program — a CLI already on PATH, a package the agent "
+    "is told to install and run, a remote service — whatever that program "
+    "does with the arguments, files, and environment it is handed (network "
+    "calls, uploads, credential use) is outside this scan; a report with no "
+    "network capability does not mean the instructed workflow makes no "
+    "network calls.",
     "A clean report is not a safety claim.",
 ]
 

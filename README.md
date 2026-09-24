@@ -341,10 +341,10 @@ directory of extensions you already trust, CI does not have one, and it exits
 
 | Benchmark | Result |
 |---|---|
-| Invariant unit tests | **922/922** — every case pins a promise a docstring makes |
+| Invariant unit tests | **930/930** — every case pins a promise a docstring makes |
 | Detection, against `fixtures/` | **145/145**, plus **5/5** semantic cross-checks |
 | Ruleset exercised by the corpus | **70%** — 78 of 111 implemented rules have a fixture; one family (`SEM`) has none |
-| Documented blind spots, confirmed still open | **3** (prose exfiltration; HOK-004's two documented locations, neither implemented) |
+| Documented blind spots, confirmed still open | **4** (prose exfiltration; HOK-004's two documented locations, neither implemented; an external CLI holding the network capability the bundle only names) |
 | Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **28/28** survived, no crash or hang |
 | Headline findings across 101 distinct installed extensions | **73% completely silent** (74/101), median **0**, p90 **1** |
 

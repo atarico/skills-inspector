@@ -856,6 +856,11 @@ COVERAGE LIMITS
   • Taint tracking covers direct and one-hop-indirect flows only.
   • Semantic findings read adversarial input and can be steered. Low confidence
     by construction.
+  • The audit reads only the files inside this unit. When its instructions
+    drive an external program — a CLI, an installed package, a remote
+    service — whatever that program does is outside this scan; no network
+    capability here does not mean the instructed workflow makes no network
+    calls.
   • A clean report is not a safety claim.
 ```
 
