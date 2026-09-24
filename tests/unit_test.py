@@ -2043,6 +2043,55 @@ def _fsw002_html_context_cases() -> None:
               "FSW-002" in all_ids, False,
               "the middle pattern's bare-tag exclusion is untouched by the HTML-file split")
 
+        # A tag close with a SPACE before `>` satisfies the STRICT anchor
+        # itself (preceded by whitespace), which used to read it as a real
+        # redirect: `<p >CLAUDE.md</p>`, `<img src="x.png" >` near AGENTS.md.
+        # Verified against a previous writer's report before this fix.
+        spaced_bare = base / "spaced-bare"
+        _write(spaced_bare, {"SKILL.md": SKILL,
+                             "notes.html": "<p >CLAUDE.md</p>\n"})
+        _, all_ids = _scan_tree(spaced_bare)
+        check("fsw002-html-context",
+              "a bare tag close with a space before '>' stays quiet",
+              "FSW-002" in all_ids, False,
+              "the space satisfies STRICT's own anchor, but this '>' still "
+              "closes an open tag, not a redirect")
+
+        spaced_attr = base / "spaced-attr"
+        _write(spaced_attr, {"SKILL.md": SKILL,
+                             "notes.html":
+                                 '<img src="x.png" >AGENTS.md\n'})
+        _, all_ids = _scan_tree(spaced_attr)
+        check("fsw002-html-context",
+              "an attribute tag close with a space before '>' stays quiet",
+              "FSW-002" in all_ids, False,
+              "an attribute before the space does not make the close a redirect")
+
+        # The false-positive twin's twin: a real redirect on the SAME line,
+        # after a tag that closes cleanly earlier, must still fire — the fix
+        # must reject only the '>' that closes an open tag, not every '>' on
+        # a line that happens to contain one.
+        spaced_then_real = base / "spaced-then-real"
+        _write(spaced_then_real, {"SKILL.md": SKILL,
+                                  "notes.html":
+                                      '<p >note</p> echo x > CLAUDE.md\n'})
+        _, all_ids = _scan_tree(spaced_then_real)
+        check("fsw002-html-context",
+              "a real redirect later on the same line still fires",
+              "FSW-002" in all_ids, True,
+              "the tag-close exclusion must not blind the rest of the line")
+
+        closed_then_real = base / "closed-then-real"
+        _write(closed_then_real, {"SKILL.md": SKILL,
+                                  "notes.html":
+                                      '<p>ok</p> echo x > CLAUDE.md\n'})
+        _, all_ids = _scan_tree(closed_then_real)
+        check("fsw002-html-context",
+              "a redirect after an already-closed tag still fires",
+              "FSW-002" in all_ids, True,
+              "a fully closed tag earlier on the line must not swallow a "
+              "later, genuine redirect")
+
 
 _fsw002_html_context_cases()
 

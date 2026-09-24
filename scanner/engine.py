@@ -21,6 +21,19 @@ from .unit import MAX_TOTAL_LINES, Unit
 
 _MD_SUFFIXES = {".md", ".markdown", ".mdx"}
 
+# `Rule.html_pattern` (FSW-002's STRICT anchor, rules.py) anchors a `>`/`>>`
+# on whitespace/a digit/`&` and, unlike `pattern`'s MIDDLE shape, carries no
+# tag-name lookbehind of its own — so a tag close with a SPACE before `>`
+# (`<p >CLAUDE.md`, `<img src="x.png" >`) satisfies that anchor and used to
+# read as a redirect. This does the html_pattern's own tag-close check: `pos_`
+# sits inside an open tag when the line up to `pos_` ends with an unclosed
+# `<` (a `<` followed by a letter/`/`/`!` and then no further `<`/`>`).
+_HTML_OPEN_TAG_TAIL = re.compile(r"<[A-Za-z/!][^<>]*$")
+
+
+def _closes_open_tag(line: str, pos_: int) -> bool:
+    return bool(_HTML_OPEN_TAG_TAIL.search(line[:pos_]))
+
 
 def scan(unit: Unit) -> tuple[list[Finding], dict]:
     raw: list[Finding] = []
@@ -315,7 +328,34 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                               else rule.html_pattern
                               if rule.html_pattern is not None and is_html
                               else rule.pattern)
-            match = active_pattern.search(line)
+            if active_pattern is rule.html_pattern:
+                # The STRICT anchor's own false positive (see
+                # `_closes_open_tag` above): skip a matched `>`/`>>` that
+                # closes an open tag and keep looking on the same line, so a
+                # genuine redirect later on that line is still found. Re-search
+                # from just past the REJECTED ANCHOR CHARACTER, not past the
+                # whole match — the target alternation looks up to 80 chars
+                # ahead, so a rejected match anchored early on the line can
+                # span all the way to a legitimate control filename near the
+                # end, and restarting after that whole span would skip right
+                # over a real redirect sitting inside it. A write-forms match
+                # (`tee -a`, `write_text`, …) carries its own tokens and is
+                # never a tag close, so only a bare `>`/`>>` capture is
+                # checked here.
+                match = None
+                search_from = 0
+                while search_from <= len(line):
+                    candidate = active_pattern.search(line, search_from)
+                    if candidate is None:
+                        break
+                    if (candidate.group(1) in (">", ">>")
+                            and _closes_open_tag(line, candidate.start(1))):
+                        search_from = candidate.start(1) + 1
+                        continue
+                    match = candidate
+                    break
+            else:
+                match = active_pattern.search(line)
             if not match:
                 continue
             if line_matches is not None:

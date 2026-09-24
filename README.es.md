@@ -353,7 +353,7 @@ corrió — en vez de reportar un pass que no midió.
 
 | Benchmark | Resultado |
 |---|---|
-| Tests unitarios de invariantes | **969/969** — cada caso fija una promesa que hace un docstring |
+| Tests unitarios de invariantes | **973/973** — cada caso fija una promesa que hace un docstring |
 | Detección, contra `fixtures/` | **146/146**, más **5/5** contrastes semánticos |
 | Ruleset ejercitado por el corpus | **70%** — 78 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
 | Puntos ciegos documentados, confirmados aún abiertos | **4** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa; un CLI externo que se queda con la capacidad de red que el bundle sólo nombra) |
