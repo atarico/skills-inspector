@@ -6107,6 +6107,47 @@ def _help_lists_subcommands_cases() -> None:
 _help_lists_subcommands_cases()
 
 
+# --------------------------------------------------- external-CLI coverage limit
+# Real case: github.com/ramus-dev/android-use scans completely clean — every
+# capability "no" — while its SKILL.md instructs the agent to run the external
+# `ramus` CLI, which is the thing that actually uploads an APK, input, and
+# RAMUS_API_KEY to a third party. The network capability lives in the external
+# binary, not in the bundle, so no NET-* pattern can ever see it. Promise:
+# coverage_limits() names this shape explicitly, in both the semantic-ran and
+# semantic-not-ran branches, since it is a standing property of the tool and
+# not conditional on which passes ran. See report.py's module docstring and
+# RULES.md section 11.
+
+def _external_cli_limit_cases() -> None:
+    from scanner import report as report_mod
+    from scanner.finding import Finding
+
+    no_semantic = report_mod.coverage_limits(())
+    check("external-cli limit", "present with no semantic findings",
+          any("external program" in text for text in no_semantic), True,
+          "a report with nothing else to say about coverage still has to "
+          "name the shape it structurally cannot see")
+
+    sem_finding = Finding(
+        id="SEM-001", severity="LOW", confidence="low", status="active",
+        disclosure="undeclared", capability=R.INSTRUCTION,
+        location="SKILL.md", line=1, detects="x", evidence="x",
+        impact="x", legitimate_use="x", what_to_check="x", specificity=1)
+    with_semantic = report_mod.coverage_limits((sem_finding,))
+    check("external-cli limit", "present with semantic findings too",
+          any("external program" in text for text in with_semantic), True,
+          "the limit is standing, not conditional on the semantic pass — "
+          "it must survive the branch coverage_limits() takes on SEM-* ids")
+
+    check("external-cli limit", "never phrased as a safety claim",
+          any("safe" in text.lower() for text in no_semantic
+              if "external program" in text), False,
+          "AGENTS.md: never phrase anything as safe")
+
+
+_external_cli_limit_cases()
+
+
 # ---------------------------------------------------------------------- reporting
 
 def main() -> int:
