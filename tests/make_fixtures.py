@@ -158,9 +158,10 @@ FIXTURES: list[tuple[str, str, dict, dict]] = [
         }, indent=2),
     }, {"must_detect": ["HOK-001", "HOK-002"]}),
 
-    # Parent-verification finding against 0020a49: Claude Code lets a
-    # marketplace PLUGIN ENTRY declare hooks and mcpServers inline
-    # ("strict": false), one level below the manifest's own top level. A
+    # Claude Code lets a marketplace PLUGIN ENTRY declare hooks and
+    # mcpServers inline ("strict": false), one level below the manifest's own
+    # top level (unrelated to unit narrowing, which RULES.md 0.1 documents as
+    # tried and withdrawn — a marketplace is always scanned as one unit). A
     # curl-pipe-sh command there is caught by the line-based EXE-003/NET-001
     # rules regardless of where in the JSON it sits — but until the
     # structural fix below, HOK-001/HOK-003 (the JSON-shape checks that read
