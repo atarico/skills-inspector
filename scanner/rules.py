@@ -776,33 +776,70 @@ RULES: list[Rule] = [
     # weaker evidence about WHO, never about the phrase being concealment.
     #
     # The veto below is the SAME shape as this branch with the object alternation
-    # narrowed to `them` — one string, so the two cannot drift apart — and that
-    # is the whole of its scope, deliberately:
+    # narrowed to the unbound pronouns `it`, `this` and `them` — one string, so
+    # the two cannot drift apart — and that is the whole of its scope,
+    # deliberately:
     #
     # * it is a concealment DIRECTIVE with an unbound pronoun, not the word
-    #   `them` anywhere inside the matched span. Every corpus false positive it
-    #   was measured on ("Don't log them", "Don't include them in tool results")
-    #   is this branch. Scoping it to the span instead let one spliced word
-    #   demote a directive that names its object outright — "do not tell them
-    #   THE USER which files were removed" — and buy a place below the fold.
+    #   itself anywhere inside the matched span. Every corpus false positive it
+    #   was measured on ("Don't log them", "Don't include them in tool results",
+    #   and — the reason `it` and `this` joined `them` here — "never log it" of
+    #   a confirmation token, secret hygiene rather than concealment) is this
+    #   branch. Scoping it to the span instead let one spliced word demote a
+    #   directive that names its object outright — "do not tell them THE USER
+    #   which files were removed", or "do not mention THIS to the user" — and
+    #   buy a place below the fold. That is `explicit_object`'s job below, and
+    #   it reads the whole match, so a pronoun beside a named party still leads
+    #   exactly like the control it copies, for any pronoun in this set.
     # * the second branch is a different idiom: there the phrase itself names
     #   the party being kept in the dark, RULES.md §6 advertises "without
     #   telling *them*" as a canonical example of what this rule catches, and no
     #   unit in the corpus writes it. Its verbs are gerunds, so this branch's
     #   base forms cannot reach them even by accident.
+    #
+    # The `user` alternative below carries its own guard, pattern-level rather
+    # than veto-level: "Do not tell the user to use `workflow get` for a job
+    # result." named the party outright, so `explicit_object` above would
+    # cancel the pronoun veto regardless — the object was never ambiguous, the
+    # OBJECT ITSELF was wrong. Concealment names WHAT is hidden ("do not tell
+    # the user about/that ..."); an infinitive after "the user" names an
+    # ACTION to avoid recommending instead, the same UX shape AGT-003 was
+    # fixed for this session. `(?!\s+to\s+\w)` declines only that shape, and
+    # only on `user`: `human` stays ungated because nothing in the corpus or
+    # the brief measured a false positive on it, and narrowing an unmeasured
+    # branch is exactly the kind of drive-by tightening this file's own tests
+    # exist to catch.
     Rule("AGT-002", "CRITICAL", "medium", INSTRUCTION,
          "Concealment with the user or the log as the object",
          "The user losing visibility is the whole point of the attack.",
          "Requires verb+object proximity. Bare 'silently' is ordinary technical prose.",
          "Who is being kept in the dark, and about what?",
-         _r(_CONCEAL_DIRECTIVE + r"(the\s+)?(user|human|them|operator|owner|it|this)"
+         _r(_CONCEAL_DIRECTIVE +
+            r"(?:(the\s+)?user(?!\s+to\s+\w)|(the\s+)?(human|them|operator|owner|it|this))"
             r"|without\s+(telling|informing|notifying|alerting)\s+(the\s+)?(user|them|anyone)"
             r"|hide\s+(this|it|the\s+\w+)\s+from\s+(the\s+)?(user|human|output|log)"
             r"|suppress\s+the\s+(output|log|message|warning)"),
          specificity=90, instruction_surface=True,
-         ambiguous_object=_r(_CONCEAL_DIRECTIVE + r"them\b"),
+         ambiguous_object=_r(_CONCEAL_DIRECTIVE + r"(it|this|them)\b"),
          explicit_object=_r(r"\b(user|human|operator|owner)\b")),
 
+    # D4: the second alternative below used to accept ANY four words between
+    # the transmit verb and the noun, so "Never send filenames without enough
+    # context to identify the option" matched — `context` merely trailed
+    # `send` inside the window, with nothing requiring it to be `send`'s
+    # OBJECT. `without` inverts the relation entirely (it introduces what is
+    # NOT sent), and plain proximity cannot see that.
+    #
+    # The filler group now refuses to step over a negation or preposition —
+    # `without, with, for, about, from, into, onto, via` — so the noun can
+    # only be reached as a direct object, the way "send the full conversation
+    # history" or "upload our recent chat context" read. Ordinary determiners
+    # and adjectives still pass through untouched, which is what keeps a real
+    # object like "the full conversation" matching. `of` is deliberately NOT
+    # in the banned set: "send a summary OF the conversation" still transmits
+    # the conversation's content, and banning it would trade this false
+    # positive for a false negative on the exact shape the rule exists to
+    # catch.
     Rule("AGT-004", "CRITICAL", "medium", INSTRUCTION,
          "Instruction to read local context and transmit it",
          "Turns the agent into the exfiltration channel — no suspicious binary needed.",
@@ -812,7 +849,9 @@ RULES: list[Rule] = [
             r"(memory|memories|conversation|chat\s+history|transcript|session|context|"
             r"other\s+skills?|installed\s+skills?|CLAUDE\.md|AGENTS\.md)"
             r"[^\n]{0,120}(send|post|upload|transmit|share|report|sync|push)\s+"
-            r"|(send|post|upload)\s+(\w+\s+){0,4}(the\s+)?(conversation|transcript|history|memory|context)"),
+            r"|(send|post|upload)\s+"
+            r"((?!(?:without|with|for|about|from|into|onto|via)\b)\w+\s+){0,4}"
+            r"(the\s+)?(conversation|transcript|history|memory|context)"),
          specificity=91, instruction_surface=True),
 
     Rule("AGT-005", "HIGH", "high", INSTRUCTION,
