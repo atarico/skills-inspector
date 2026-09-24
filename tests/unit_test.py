@@ -6084,8 +6084,9 @@ _directive_cases()
 
 # ------------------------------------------------------------------- --help
 # The subcommands are routed on argv[0] BEFORE argparse sees the arguments, so
-# the top-level parser never learned they exist and `--help` hid four working
-# commands the README documents. Pins that every routed name is listed.
+# the top-level parser never learned they exist and `--help` hid all five
+# (diff, baseline, check, semantic-prep, semantic-verify). Pins that every
+# routed name is listed.
 
 def _help_lists_subcommands_cases() -> None:
     import contextlib
