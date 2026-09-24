@@ -237,6 +237,23 @@ def _(b: Path):
           + "$(" * 1500 + ")" * 1500 + "\n")
 
 
+# One line, thousands of spaced HTML tag closes, every one of them a false
+# positive `engine._open_tag_close_positions` has to reject for FSW-002's
+# html_pattern branch. The rejection it first shipped (b2d5ee8) called
+# `engine._closes_open_tag`, which re-sliced `line[:pos_]` and re-searched a
+# fresh regex from column zero for every rejected `>` — quadratic in the
+# number of tag closes on the line. Measured on the defect: 32000 repeats of
+# `<p >CLAUDE.md ` (a single ~480KB line) took 21.4s on its own, already
+# close to this suite's 25s CASE_TIMEOUT; doubling N roughly quadruples a
+# quadratic cost, so 64000 clears the budget by a wide, non-flaky margin on
+# the broken code while the fixed single-pass scan — linear in line length —
+# finishes in a fraction of a second regardless of N.
+@case("quadratic-html-tag-closes")
+def _(b: Path):
+    write(b, "SKILL.md", skill())
+    write(b, "notes.html", "<p >CLAUDE.md " * 64_000 + "\n")
+
+
 @case("repeated-flag-cluster")
 def _(b: Path):
     write(b, "SKILL.md", skill())

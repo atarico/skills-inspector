@@ -25,14 +25,42 @@ _MD_SUFFIXES = {".md", ".markdown", ".mdx"}
 # on whitespace/a digit/`&` and, unlike `pattern`'s MIDDLE shape, carries no
 # tag-name lookbehind of its own — so a tag close with a SPACE before `>`
 # (`<p >CLAUDE.md`, `<img src="x.png" >`) satisfies that anchor and used to
-# read as a redirect. This does the html_pattern's own tag-close check: `pos_`
-# sits inside an open tag when the line up to `pos_` ends with an unclosed
-# `<` (a `<` followed by a letter/`/`/`!` and then no further `<`/`>`).
-_HTML_OPEN_TAG_TAIL = re.compile(r"<[A-Za-z/!][^<>]*$")
+# read as a redirect. `_open_tag_close_positions` does the html_pattern's own
+# tag-close check for a whole line in one pass: position `i` "closes an open
+# tag" when the line up to `i` ends with an unclosed `<` (a `<` followed by a
+# letter/`/`/`!` and then no further `<`/`>`) — the same thing a per-call
+# `<[A-Za-z/!][^<>]*$` search against `line[:i]` decided, before this was
+# folded into one pass.
+#
+# The per-call version (`re.search` against a fresh `line[:pos_]` slice for
+# every rejected `>`) was quadratic in the number of tag closes on a line:
+# each call re-walks the prefix from column zero, so N closes cost O(N^2).
+# Measured on the defect: `'<p >CLAUDE.md ' * 32000` on one line took 21.4s;
+# N=128000 with the single-pass scan below stays under a second (see
+# tests/fuzz.py::quadratic-html-tag-closes). A `<`/`>` character can only ever
+# start or end ONE tag-tail (the char class excludes `<`/`>` from the tail
+# itself), so a single left-to-right scan over just the bracket characters —
+# not the whole line — is enough to decide every position at once.
+_HTML_BRACKET = re.compile(r"[<>]")
+_HTML_TAG_START = re.compile(r"[A-Za-z/!]")
 
 
-def _closes_open_tag(line: str, pos_: int) -> bool:
-    return bool(_HTML_OPEN_TAG_TAIL.search(line[:pos_]))
+def _open_tag_close_positions(line: str) -> dict[int, bool]:
+    """Map every `<`/`>` index in `line` to whether a `>` sitting exactly
+    there closes an open tag (see the module comment above). Built once per
+    line and looked up by position, instead of re-deriving it per candidate.
+    """
+    closes: dict[int, bool] = {}
+    open_tag = False
+    for bracket in _HTML_BRACKET.finditer(line):
+        i = bracket.start()
+        closes[i] = open_tag
+        if line[i] == "<":
+            nxt = line[i + 1] if i + 1 < len(line) else ""
+            open_tag = bool(_HTML_TAG_START.match(nxt))
+        else:  # '>' always closes whatever was open
+            open_tag = False
+    return closes
 
 
 def scan(unit: Unit) -> tuple[list[Finding], dict]:
@@ -318,6 +346,10 @@ def _scan_text(unit: Unit, relpath: str, text: str,
         in_shell_context = ((not is_md and is_code)
                              or (is_md and shell_fence is not None
                                  and idx < len(shell_fence) and shell_fence[idx]))
+        # Computed once per line, not once per rule: every html_pattern rule
+        # below asks the same question about the same line, and the answer
+        # doesn't depend on which rule is asking.
+        close_positions = _open_tag_close_positions(line) if is_html else None
         for rule in R.RULES:
             if rule.markdown_only and not is_md:
                 continue
@@ -330,18 +362,19 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                               else rule.pattern)
             if active_pattern is rule.html_pattern:
                 # The STRICT anchor's own false positive (see
-                # `_closes_open_tag` above): skip a matched `>`/`>>` that
-                # closes an open tag and keep looking on the same line, so a
-                # genuine redirect later on that line is still found. Re-search
-                # from just past the REJECTED ANCHOR CHARACTER, not past the
-                # whole match — the target alternation looks up to 80 chars
-                # ahead, so a rejected match anchored early on the line can
-                # span all the way to a legitimate control filename near the
-                # end, and restarting after that whole span would skip right
-                # over a real redirect sitting inside it. A write-forms match
-                # (`tee -a`, `write_text`, …) carries its own tokens and is
-                # never a tag close, so only a bare `>`/`>>` capture is
-                # checked here.
+                # `_open_tag_close_positions` above): skip a matched `>`/`>>`
+                # that closes an open tag and keep looking on the same line,
+                # so a genuine redirect later on that line is still found.
+                # Re-search from just past the REJECTED ANCHOR CHARACTER, not
+                # past the whole match — the target alternation looks up to
+                # 80 chars ahead, so a rejected match anchored early on the
+                # line can span all the way to a legitimate control filename
+                # near the end, and restarting after that whole span would
+                # skip right over a real redirect sitting inside it. A
+                # write-forms match (`tee -a`, `write_text`, …) carries its
+                # own tokens and is never a tag close, so only a bare
+                # `>`/`>>` capture is checked here — against the precomputed
+                # `close_positions`, not a fresh rescan of the line prefix.
                 match = None
                 search_from = 0
                 while search_from <= len(line):
@@ -349,7 +382,7 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                     if candidate is None:
                         break
                     if (candidate.group(1) in (">", ">>")
-                            and _closes_open_tag(line, candidate.start(1))):
+                            and close_positions.get(candidate.start(1), False)):
                         search_from = candidate.start(1) + 1
                         continue
                     match = candidate
