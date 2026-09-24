@@ -6082,6 +6082,30 @@ def _directive_cases() -> None:
 _directive_cases()
 
 
+# ------------------------------------------------------------------- --help
+# The subcommands are routed on argv[0] BEFORE argparse sees the arguments, so
+# the top-level parser never learned they exist and `--help` hid four working
+# commands the README documents. Pins that every routed name is listed.
+
+def _help_lists_subcommands_cases() -> None:
+    import contextlib
+    import io
+    from scanner import __main__ as cli
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.suppress(SystemExit):
+        cli.main(["--help"])
+    text = out.getvalue()
+    for sub in ("diff", "baseline", "check", "semantic-prep", "semantic-verify"):
+        check("help", f"--help lists `{sub}`",
+              f"scanner {sub} " in text, True,
+              "the command works and the README documents it; a help screen "
+              "that omits it is the one place a user looks and finds nothing")
+
+
+_help_lists_subcommands_cases()
+
+
 # ---------------------------------------------------------------------- reporting
 
 def main() -> int:
