@@ -264,7 +264,7 @@ _FSW002_WRITE_FORMS = (
 #   by whitespace, same as a real ` > file` redirect. `engine._scan_text`
 #   closes this gap on the html_pattern branch only, not the regex here:
 #   it walks every anchor match left to right and drops one whose position
-#   still sits inside an unclosed `<tag ...` (`engine._closes_open_tag`),
+#   still sits inside an unclosed `<tag ...` (`engine._open_tag_close_positions`),
 #   re-searching past just the rejected character so a genuine redirect
 #   later on the same line is still found — verified in both directions,
 #   including two `>` on one line. A real redirect with no space before
