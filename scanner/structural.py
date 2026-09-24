@@ -682,10 +682,13 @@ def inspect(relpath: str, text: str) -> list[StructuralFinding]:
     return out
 
 
-def _claude_settings(text: str, relpath: str) -> list[StructuralFinding]:
-    data = _load_json(text)
-    if not isinstance(data, dict):
-        return []
+def _hook_and_mcp_findings(data: dict, relpath: str, text: str) -> list[StructuralFinding]:
+    """`hooks` and `mcpServers` on one JSON object — plugin.json's top level,
+    settings.json's top level, or (for a marketplace.json) one `plugins[]`
+    entry one level down. Factored out so a marketplace entry's inline grants
+    get exactly the same analysis as the manifest's own top level, instead of
+    a second parser that could drift from this one.
+    """
     out: list[StructuralFinding] = []
 
     hooks = data.get("hooks")
@@ -722,6 +725,32 @@ def _claude_settings(text: str, relpath: str) -> list[StructuralFinding]:
                 relpath, 1, _fmt(names if not is_pointer else names[0]),
                 specificity=80 if is_pointer else 90))
         out += _mcp_server_findings(data["mcpServers"], relpath, text)
+
+    return out
+
+
+def _claude_settings(text: str, relpath: str) -> list[StructuralFinding]:
+    data = _load_json(text)
+    if not isinstance(data, dict):
+        return []
+    out: list[StructuralFinding] = []
+
+    out += _hook_and_mcp_findings(data, relpath, text)
+
+    # A marketplace.json plugin entry can declare hooks/mcpServers inline,
+    # one level below the manifest's own top level (Claude Code accepts this
+    # with "strict": false). Those are control-plane registrations exactly
+    # like plugin.json's, but the check above never sees them because it only
+    # reads the parsed document's own top-level keys. Run the same analysis
+    # on every plugins[] entry that is an object, attributed to the
+    # marketplace.json file. Malformed shapes (plugins not a list, an entry
+    # that is not an object) are skipped, never raised.
+    if PurePosixPath(relpath).name == "marketplace.json":
+        plugins = data.get("plugins")
+        if isinstance(plugins, list):
+            for entry in plugins:
+                if isinstance(entry, dict):
+                    out += _hook_and_mcp_findings(entry, relpath, text)
 
     raw = text
     if _PERMISSION_RED_FLAGS.search(raw):
