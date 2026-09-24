@@ -254,11 +254,19 @@ _FSW002_WRITE_FORMS = (
 # below for the full history):
 #
 # - STRICT (the original 0df3477 anchor): a `>`/`>>` counts only at line
-#   start or after whitespace/a digit/`&`. Every real shell redirect shape
-#   satisfies this, and nothing an HTML tag's own close can — a tag always
-#   closes right after its name, an attribute value, or a `/`. Used for a
-#   genuine `.html`/`.htm`/`.xhtml` DOCUMENT (`position.is_html_suffix`),
-#   where nothing is prose: any `>` that fails this anchor is markup.
+#   start or after whitespace/a digit/`&`. Used for a genuine
+#   `.html`/`.htm`/`.xhtml` DOCUMENT (`position.is_html_suffix`), where
+#   nothing is prose: a bare or attribute-quoted tag close (`<p>`,
+#   `<p class="x">`) is preceded by a letter or a quote, never by this
+#   anchor's set, so both stay markup — verified against both shapes.
+#   Two gaps of its own, also verified: (1) a tag close with a SPACE
+#   before `>` (`<p >CLAUDE.md`, `<img src="x" >`) is preceded by
+#   whitespace and DOES satisfy the anchor, so it can still misfire as
+#   a redirect in a `.html` file; (2) a real redirect with no space
+#   before `>` (`cat<p>CLAUDE.md`, `echo x<in>>~/.claude/settings.json`)
+#   is preceded by a letter, not whitespace/a digit/`&`, so it fails the
+#   anchor and stays silent — the same no-space shapes SHELL below still
+#   catches in code files.
 # - MIDDLE (`pattern`'s own shape): STRICT, OR a `>`/`>>` preceded by a
 #   word/quote/bracket character that is NOT the close of a bare HTML opening
 #   tag (`(?<!<[A-Za-z]{1,8})`, chained because `re` has no variable-width
@@ -767,18 +775,31 @@ RULES: list[Rule] = [
          # only at line start or after whitespace/a digit/`&` — since there is
          # no redirect beside it to protect there.
          #
-         # KNOWN GAPS, not chased here:
-         # - Markdown prose OUTSIDE a shell-labeled fence, or ANY non-`.html`
-         #   file: the same input-redirect shapes (`<p>CLAUDE.md`,
-         #   `cat<p>CLAUDE.md`) still read as an HTML tag and stay silent,
-         #   because a real `<p>` tag can legitimately appear there too and
-         #   this scanner has no way to tell the two apart without semantics
-         #   (false-NEGATIVE direction).
-         # - Markdown prose or any non-`.html` file, RAW HTML with an
-         #   attribute (`<p class="x">AGENTS.md` sitting in a `.md` file's
-         #   body): `pattern`'s exclusion does not reach it — see above — so it
-         #   can still fire (false-POSITIVE direction, the mirror of the bug
-         #   this fix closes, just outside a real `.html` document).
+         # KNOWN GAPS, not chased here. Both apply exactly where `pattern`
+         # (MIDDLE) is the line's active pattern: `engine._scan_text` already
+         # picks SHELL for a code-suffix file (`position.is_code_suffix`:
+         # `.sh`/`.bash`/`.zsh`/`.fish`/`.ps1`/`.bat`/`.cmd`/`.py`/`.js`/
+         # `.mjs`/`.cjs`/`.ts`/`.rb`/`.pl`/`.php`/`.lua`/`.r`) or a
+         # shell-labeled fence, and STRICT for `.html`/`.htm`/`.xhtml`
+         # (`position.is_html_suffix`, with its own narrower gaps — see the
+         # STRICT bullet above), so MIDDLE is left running only on markdown
+         # prose OUTSIDE a shell-labeled fence and any other file suffix
+         # (`.json`, `.txt`, `.yaml`, unrecognized). Verified with
+         # `engine.scan`: both gaps below reproduce in `.txt`/`.json`
+         # fixtures and in markdown prose; the identical content in a `.py`
+         # or `.sh` fixture does not share them (SHELL applies there
+         # instead, and SHELL has no exclusion to misread in either
+         # direction):
+         # - The input-redirect shapes (`<p>CLAUDE.md`, `cat<p>CLAUDE.md`)
+         #   still read as an HTML tag and stay silent, because a real `<p>`
+         #   tag can legitimately appear there too and this scanner has no way
+         #   to tell the two apart without semantics (false-NEGATIVE
+         #   direction).
+         # - RAW HTML with an attribute (`<p class="x">AGENTS.md` sitting in
+         #   a `.md` file's body, or in `.txt`/`.json`): `pattern`'s
+         #   exclusion does not reach it — see above — so it can still fire
+         #   (false-POSITIVE direction, the mirror of the bug this fix
+         #   closes, just outside a real `.html` document).
          _r(rf"({_FSW002_REDIRECT_MIDDLE}|{_FSW002_WRITE_FORMS})"
             rf"{_FSW002_TARGETS}"),
          specificity=93,

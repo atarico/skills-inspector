@@ -1908,17 +1908,50 @@ def _fsw002_html_context_cases() -> None:
               "FSW-002" in all_ids, True,
               "the strict anchor still catches a real shell redirect, HTML or not")
 
-        combined_shell = base / "combined-shell"
-        _write(combined_shell, {"SKILL.md": SKILL,
-                                "setup.sh":
-                                    'printf a "$P">>~/.claude/settings.json\n'
-                                    'echo x>AGENTS.md\n'
-                                    'cat<p>CLAUDE.md\n'})
-        _, all_ids = _scan_tree(combined_shell)
+        real_redirect_htm = base / "real-redirect-htm"
+        _write(real_redirect_htm, {"SKILL.md": SKILL,
+                                   "notes.htm": " echo x > AGENTS.md\n"})
+        _, all_ids = _scan_tree(real_redirect_htm)
         check("fsw002-html-context",
-              "the printf/echo/cat<p> redirect trio all still fire in a .sh file",
+              "a genuine space-separated redirect inside a .htm file still fires",
+              "FSW-002" in all_ids, True,
+              "is_html_suffix recognizes .htm, not just .html")
+
+        real_redirect_xhtml = base / "real-redirect-xhtml"
+        _write(real_redirect_xhtml, {"SKILL.md": SKILL,
+                                     "notes.xhtml": " echo x > AGENTS.md\n"})
+        _, all_ids = _scan_tree(real_redirect_xhtml)
+        check("fsw002-html-context",
+              "a genuine space-separated redirect inside a .xhtml file still fires",
+              "FSW-002" in all_ids, True,
+              "is_html_suffix recognizes .xhtml, not just .html")
+
+        shell_printf = base / "shell-printf"
+        _write(shell_printf, {"SKILL.md": SKILL,
+                              "setup.sh": 'printf a "$P">>~/.claude/settings.json\n'})
+        _, all_ids = _scan_tree(shell_printf)
+        check("fsw002-html-context",
+              "a printf append-redirect with no space still fires in a .sh file",
               "FSW-002" in all_ids, True,
               "shell_pattern is untouched by the HTML-file split")
+
+        shell_echo = base / "shell-echo"
+        _write(shell_echo, {"SKILL.md": SKILL,
+                            "setup.sh": 'echo x>AGENTS.md\n'})
+        _, all_ids = _scan_tree(shell_echo)
+        check("fsw002-html-context",
+              "an echo output-redirect with no space still fires in a .sh file",
+              "FSW-002" in all_ids, True,
+              "shell_pattern is untouched by the HTML-file split")
+
+        shell_cat_redirect = base / "shell-cat-redirect"
+        _write(shell_cat_redirect, {"SKILL.md": SKILL,
+                                    "setup.sh": 'cat<p>CLAUDE.md\n'})
+        _, all_ids = _scan_tree(shell_cat_redirect)
+        check("fsw002-html-context",
+              "the cat<p> input-redirect evasion still fires in a .sh file",
+              "FSW-002" in all_ids, True,
+              "shell_pattern's HTML-tag exclusion is dropped entirely, unlike MIDDLE")
 
         md_prose = base / "md-prose"
         _write(md_prose, {"SKILL.md": SKILL +
