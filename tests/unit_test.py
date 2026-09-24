@@ -797,6 +797,16 @@ RULE_PATTERN_CASES = [
      "2> AGENTS.md", True),
     ("FSW-002", "the combined stdout+stderr redirect still fires",
      "&> AGENTS.md", True),
+    # A no-space redirect is real shell too; the HTML-tag fix above must not
+    # cost the rule this shape.
+    ("FSW-002", "a no-space single redirect still fires",
+     "echo x>AGENTS.md", True),
+    ("FSW-002", "a no-space redirect after another command still fires",
+     "cat p>CLAUDE.md", True),
+    ("FSW-002", "a no-space doubled redirect to a nested path still fires",
+     'printf a "$P">>~/.claude/settings.json', True),
+    ("FSW-002", "a no-space doubled redirect with a bare filename still fires",
+     "echo x>>AGENTS.md", True),
 
     # FSW-004's `rm` branch is a disjunction, not the single discriminant
     # RULES.md used to name. There is a case per alternative of

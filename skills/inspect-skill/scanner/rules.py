@@ -637,15 +637,13 @@ RULES: list[Rule] = [
          # rule already fired on the `>` of a markdown arrow `->` in a fixture
          # note (odd/tasks/declaration-files-and-fsw002.md, D4).
          #
-         # The fix requires the `>` / `>>` to be preceded by start-of-line,
-         # whitespace, a file-descriptor digit, or `&` — the shapes a shell
-         # redirect actually takes (`> f`, `>> f`, `2> f`, `&> f`), which an
-         # HTML tag's closing `>` never is: it is always preceded by an
-         # attribute value, a tag name, or a self-closing `/`, none of which
-         # are in that set. Rejected: deleting the bare `>` alternative
-         # entirely and requiring `>>` — a redirect with no space before a
-         # single `>` (`echo x>f`) is real shell, and the doubled form is not
-         # the only one that matters.
+         # That over-corrected, silencing the real no-space redirect
+         # (`echo x>AGENTS.md`) the comment above still claims is covered. The
+         # anchored alternative stays; a second one below excludes an HTML
+         # OPEN tag's close instead of every bare `>`, via `(?<!<[A-Za-z]{N})`
+         # chained for N=1..8 (`re` has no variable-width lookbehind). A tag
+         # name over 8 letters is a known gap; a CLOSING tag needs no
+         # exclusion — its `>` sits after the content it names.
          #
          # This narrows only the `>` / `>>` branch. The other alternatives
          # (`tee`, `write_text`, `writeFile`, `open(...` w") already carry
@@ -656,7 +654,10 @@ RULES: list[Rule] = [
          # then `>`) — it is prose inside a `.md` file, which the position
          # taxonomy already reads as documentary rather than active shell.
          # Noted, not chased here (D4).
-         _r(r"((?:^|(?<=[\s\d&]))(?:>>|>)|tee\s+-a?|write_text|writeFile"
+         _r(r"((?:^|(?<=[\s\d&]))(?:>>|>)|(?<!<[A-Za-z])(?<!<[A-Za-z]{2})"
+            r"(?<!<[A-Za-z]{3})(?<!<[A-Za-z]{4})(?<!<[A-Za-z]{5})(?<!<[A-Za-z]{6})"
+            r"(?<!<[A-Za-z]{7})(?<!<[A-Za-z]{8})(?<=[\w\"'`)}\]])(?:>>|>)"
+            r"|tee\s+-a?|write_text|writeFile"
             r"|open\s*\([^)]{0,60}[\"']w)"
             r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
             r"|settings\.local\.json|settings\.json"
