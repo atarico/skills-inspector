@@ -266,6 +266,14 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     is_md = Path(relpath).suffix.lower() in _MD_SUFFIXES
     # Only the instruction-surface promotion reads this, and only for markdown.
     quoted = pos.quoted_carry(text, positions) if is_md else []
+    # A line is genuine shell/code, never markup, when its file suffix is one
+    # of the shell/code kinds `pos.is_code_suffix` recognizes, or — inside
+    # markdown — when it sits in a fence explicitly labeled bash/sh/shell/zsh/
+    # console. See `Rule.shell_pattern` (rules.py) and FSW-002's comment: an
+    # HTML-tag exclusion some rules carry is meaningless in that context and
+    # a live evasion if left in place.
+    is_code = pos.is_code_suffix(relpath)
+    shell_fence = pos.shell_fence_lines(text) if is_md else None
 
     base_position = pos.file_base_position(relpath, invoked)
     hidden = ev.invisible_counts(text)
@@ -287,12 +295,18 @@ def _scan_text(unit: Unit, relpath: str, text: str,
         if not line.strip():
             continue
         position, kind = positions[idx] if idx < len(positions) else (pos.ACTIVE, pos.PROSE)
+        in_shell_context = ((not is_md and is_code)
+                             or (is_md and shell_fence is not None
+                                 and idx < len(shell_fence) and shell_fence[idx]))
         for rule in R.RULES:
             if rule.markdown_only and not is_md:
                 continue
             if rule.code_only and is_md:
                 continue
-            match = rule.pattern.search(line)
+            active_pattern = (rule.shell_pattern
+                              if rule.shell_pattern is not None and in_shell_context
+                              else rule.pattern)
+            match = active_pattern.search(line)
             if not match:
                 continue
             if line_matches is not None:

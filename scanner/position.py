@@ -125,6 +125,19 @@ _CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".conf", 
 _DOC_SUFFIXES = {".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc"}
 
 
+def is_code_suffix(relpath: str) -> bool:
+    """Is this file's content executable shell/code, never markup?
+
+    FSW-002 (rules.py) excludes an HTML opening tag's own `>` from its
+    input-redirect alternative, because in prose or `.html` that `>` is
+    genuinely a tag close, not a redirect. That exclusion is meaningless — and
+    a live evasion — in a file `_TEXT_CODE_SUFFIXES` already treats as ACTIVE
+    code: `.html` is deliberately absent from that set, so it is unaffected
+    here and keeps the HTML exclusion it needs.
+    """
+    return PurePosixPath(relpath).suffix.lower() in _TEXT_CODE_SUFFIXES
+
+
 # Execution sinks. A string literal is inert data UNLESS it flows into one of
 # these — the same logic as an imperative sentence above a markdown fence.
 # Blanket-demoting string literals would make `os.system("curl x | sh")` invisible,
@@ -605,6 +618,47 @@ def classify_lines(relpath: str, text: str,
         return classified
     floor = _ORDER.index(DOCUMENTARY)
     return [(_ORDER[max(_ORDER.index(p), floor)], k) for p, k in classified]
+
+
+# Fence languages an attacker cannot cheaply buy a demotion from: labeling a
+# fence with one of these tells FSW-002 to drop its HTML-tag exclusion for the
+# lines inside it (see `is_code_suffix`'s docstring for the file-suffix half of
+# the same rule). That only ever WIDENS detection — a real shell input redirect
+# that the exclusion used to misread as a tag close now fires — so declaring
+# `bash` buys nothing an attacker would want.
+_SHELL_FENCE_LANGS = {"bash", "sh", "shell", "zsh", "console"}
+
+
+def shell_fence_lines(text: str) -> list[bool]:
+    """Per-line (0-indexed): is this line inside a fence labeled bash/sh/shell/
+    zsh/console?
+
+    Independent of `_classify_markdown`'s fence tracking, which answers a
+    different question (is this fence's CONTENT live enough to demote a
+    finding's confidence) and does not expose the declared language to its
+    caller. This only tracks open/close and the language tag.
+    """
+    out: list[bool] = []
+    in_fence = False
+    fence_marker = ""
+    fence_is_shell = False
+    for raw in text.splitlines():
+        fence_match = _FENCE.match(raw)
+        if in_fence:
+            if fence_match and raw.strip().startswith(fence_marker):
+                in_fence = False
+                out.append(False)
+                continue
+            out.append(fence_is_shell)
+            continue
+        if fence_match:
+            in_fence = True
+            fence_marker = fence_match.group(1)[:3]
+            fence_is_shell = fence_match.group(2).strip().lower() in _SHELL_FENCE_LANGS
+            out.append(False)
+            continue
+        out.append(False)
+    return out
 
 
 # Triple-quoted / heredoc bodies are prose, not statements. A security tool that

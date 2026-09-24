@@ -1792,6 +1792,71 @@ def _evasion_cases() -> None:
 _evasion_cases()
 
 
+# ------------------------------------------------ FSW-002 input-redirect evasion
+# FSW-002's HTML-tag exclusion (see the comment on the rule in rules.py) reads a
+# CLOSING html tag's own `>` as harmless markup. That is correct in prose, but a
+# file whose content IS shell has no HTML in it at all: `<p>`, `<a>`, `<in>` are
+# real input-redirect operators there (`cat<p>CLAUDE.md` redirects stdin from a
+# file literally named `p` and stdout to CLAUDE.md), and the exclusion silenced
+# them just as it silences a real `<p>` tag in a rendered doc. Pinned in both
+# directions: the shapes must fire where shell is genuinely being read (a `.sh`
+# file, a ```bash fence) and must stay quiet where HTML can still plausibly
+# appear (markdown prose outside a fence, a `.html` file).
+
+def _fsw002_shell_context_cases() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+
+        shell_detect_lines = {
+            "cat<p>CLAUDE.md": "stdin-from-file-`p` redirect into CLAUDE.md",
+            "cat<a>AGENTS.md": "stdin-from-file-`a` redirect into AGENTS.md",
+            "<p>CLAUDE.md": "a bare input redirect truncating CLAUDE.md",
+            "echo x<in>>~/.claude/settings.json":
+                "stdin-from-`in`, then an append redirect into settings.json",
+        }
+
+        for line, label in shell_detect_lines.items():
+            sh = base / f"sh-{abs(hash(line))}"
+            _write(sh, {"SKILL.md": SKILL, "setup.sh": line + "\n"})
+            _, all_ids = _scan_tree(sh)
+            check("fsw002-shell-context",
+                  f"{label} still fires in a .sh file",
+                  "FSW-002" in all_ids, True,
+                  "an HTML tag is meaningless in a file whose content is shell")
+
+            fenced = base / f"fence-{abs(hash(line))}"
+            _write(fenced, {"SKILL.md": SKILL + "```bash\n" + line + "\n```\n"})
+            _, all_ids = _scan_tree(fenced)
+            check("fsw002-shell-context",
+                  f"{label} still fires inside a ```bash fence",
+                  "FSW-002" in all_ids, True,
+                  "labeling a fence bash buys detection, never demotion")
+
+        # The false-positive twins: the same tag shapes, where HTML is the
+        # genuine content and must stay excluded exactly as before.
+        prose = base / "prose"
+        _write(prose, {"SKILL.md": SKILL +
+                       "<p>Edit <code>AGENTS.md</code> directly.</p>\n"})
+        _, all_ids = _scan_tree(prose)
+        check("fsw002-shell-context",
+              "a paragraph tag's '>' stays quiet in markdown prose",
+              "FSW-002" in all_ids, False,
+              "outside a shell-labeled fence, markdown can still hold real HTML")
+
+        html_doc = base / "html-doc"
+        _write(html_doc, {"SKILL.md": SKILL,
+                          "notes.html":
+                              "<li>AGENTS.md に追記してください</li>\n"})
+        _, all_ids = _scan_tree(html_doc)
+        check("fsw002-shell-context",
+              "a list-item tag's '>' stays quiet in a .html file",
+              "FSW-002" in all_ids, False,
+              "an .html file is markup, not a shell/code suffix")
+
+
+_fsw002_shell_context_cases()
+
+
 # ---------------------------------------------------- declaration-file capability profile
 # Promise (D2/D3, odd/tasks/declaration-files-and-fsw002.md): a finding located
 # in a `.d.ts` file is still REPORTED — nothing is deleted from `findings[]` —

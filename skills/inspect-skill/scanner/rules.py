@@ -76,6 +76,17 @@ class Rule:
     # on the line qualifies. One extra argument anywhere breaks it back to
     # this rule's own `severity`.
     tempered: "Tempered | None" = None
+    # A wider variant of `pattern`, used ONLY on a line `engine._scan_text`
+    # judges to be genuine shell/code (a shell/code file suffix, or inside a
+    # markdown fence labeled bash/sh/shell/zsh/console — see
+    # `position.is_code_suffix` / `position.shell_fence_lines`). Exists for a
+    # pattern whose base form excludes a shape that is meaningful ONLY in
+    # markup (an HTML tag), so the exclusion is itself the evasion wherever
+    # markup cannot occur. Widening detection this way costs an attacker
+    # nothing to defeat — see FSW-002 below — so it is never used to NARROW
+    # `pattern`, only to drop an exclusion that a non-markup context makes
+    # meaningless.
+    shell_pattern: re.Pattern | None = None
 
 
 @dataclass(frozen=True)
@@ -654,6 +665,31 @@ RULES: list[Rule] = [
          # then `>`) — it is prose inside a `.md` file, which the position
          # taxonomy already reads as documentary rather than active shell.
          # Noted, not chased here (D4).
+         #
+         # The HTML exclusion above bought back the false positive, but it also
+         # buys back an EVASION: `<p>`, `<a>`, `<in>` are real shell — `cat<p>
+         # CLAUDE.md` redirects stdin from a file literally named `p` and
+         # stdout to CLAUDE.md; `echo x<in>>~/.claude/settings.json` redirects
+         # stdin from `in` and appends to settings.json — and the exclusion
+         # read every one of those as an HTML tag's close and went quiet,
+         # exactly where main (before this branch) still fired.
+         #
+         # The exclusion is only ever meaningful where HTML can plausibly
+         # appear: prose and markup. `shell_pattern` below is the same pattern
+         # with the `(?<!<[A-Za-z]{1,8})` exclusion dropped, and
+         # `engine._scan_text` swaps to it only on a line it judges to be
+         # genuine shell/code — a shell/code file suffix (`position.
+         # is_code_suffix`) or inside a markdown fence explicitly labeled
+         # bash/sh/shell/zsh/console (`position.shell_fence_lines`). Declaring
+         # a fence `bash` cannot buy a demotion this way, only detection: the
+         # exclusion is dropped, never added, so the audited unit has nothing
+         # cheap to gain by labeling its fences.
+         #
+         # KNOWN GAP, not chased here: the same shapes in markdown prose OUTSIDE
+         # a shell-labeled fence (`<p>CLAUDE.md` sitting in body text, no
+         # fence at all) still read as an HTML tag and stay silent, because
+         # prose is exactly where a real `<p>` tag can legitimately appear and
+         # this scanner has no way to tell the two apart without semantics.
          _r(r"((?:^|(?<=[\s\d&]))(?:>>|>)|(?<!<[A-Za-z])(?<!<[A-Za-z]{2})"
             r"(?<!<[A-Za-z]{3})(?<!<[A-Za-z]{4})(?<!<[A-Za-z]{5})(?<!<[A-Za-z]{6})"
             r"(?<!<[A-Za-z]{7})(?<!<[A-Za-z]{8})(?<=[\w\"'`)}\]])(?:>>|>)"
@@ -663,7 +699,14 @@ RULES: list[Rule] = [
             r"|settings\.local\.json|settings\.json"
             r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
             r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))"),
-         specificity=93),
+         specificity=93,
+         shell_pattern=_r(r"((?:^|(?<=[\s\d&\w\"'`)}\]]))(?:>>|>)"
+            r"|tee\s+-a?|write_text|writeFile"
+            r"|open\s*\([^)]{0,60}[\"']w)"
+            r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
+            r"|settings\.local\.json|settings\.json"
+            r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
+            r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))")),
 
     Rule("AGT-015", "HIGH", "high", CONTROL_PLANE,
          "Writes instructions for a different assistant",
