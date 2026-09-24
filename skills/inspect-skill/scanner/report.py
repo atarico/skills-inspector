@@ -117,19 +117,8 @@ _INCONCLUSIVE_SCOPE = (
 
 _INCONCLUSIVE_SCOPE_SEARCH = ("depth_limit", "unreadable_ancestor", "stopped_at_unit_marker")
 
-# RULES.md section 0.1: a marketplace.json whose plugin sources could not be
-# trusted enough to narrow the audit. `unit.marketplace_narrowing` carries WHY
-# (unit.py::_narrow_marketplace); this is the human half of "the report says
-# why" — the JSON half is the same string, read straight off the unit.
-_UNTRUSTED_MARKETPLACE_SOURCE = (
-    "This unit is a claude marketplace whose plugin sources could not be "
-    "trusted to narrow the audit to one declared plugin ({reason}). The audit "
-    "covers the whole marketplace directory instead — an untrustworthy "
-    "manifest must never be able to shrink its own audit.")
 
-
-def coverage_limits(findings=(), *, scope_search: str | None = None,
-                     marketplace_narrowing: str = "") -> list[str]:
+def coverage_limits(findings=(), *, scope_search: str | None = None) -> list[str]:
     """Limits depend on which passes actually ran, so the report cannot claim a
     coverage it does not have — or deny one it does.
 
@@ -137,15 +126,12 @@ def coverage_limits(findings=(), *, scope_search: str | None = None,
     (unit.py::resolve). It is optional and keyword-only, and its absence is not
     a claim either way — callers that have a `Unit` pass its `scope_search`;
     `COVERAGE_LIMITS` below, which has no unit to read, simply omits the
-    conditional line rather than guessing. `marketplace_narrowing` is the same
-    kind of optional, unit-only signal for the fail-wide reason above.
+    conditional line rather than guessing.
     """
     semantic_ran = any(f.id.startswith("SEM-") for f in findings)
     limits = [_WITH_SEMANTIC if semantic_ran else _NO_SEMANTIC, *_BASE_LIMITS]
     if scope_search in _INCONCLUSIVE_SCOPE_SEARCH:
         limits.append(_INCONCLUSIVE_SCOPE)
-    if marketplace_narrowing:
-        limits.append(_UNTRUSTED_MARKETPLACE_SOURCE.format(reason=marketplace_narrowing))
     return limits
 
 
@@ -281,8 +267,7 @@ def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
         "headline": headline_summary(findings),
         "findings": [f.as_dict() for f in findings],
         "not_analyzed": [{"file": ev.sanitize_path(p), "reason": r} for p, r in unit.skipped],
-        "coverage_limits": coverage_limits(findings, scope_search=unit.scope_search,
-                                           marketplace_narrowing=unit.marketplace_narrowing),
+        "coverage_limits": coverage_limits(findings, scope_search=unit.scope_search),
         "deferred_rules": R.DEFERRED,
     }
     subtree = _target_subtree(unit, findings)
@@ -407,8 +392,7 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
         w("")
 
     w("COVERAGE LIMITS")
-    for limit_text in coverage_limits(findings, scope_search=unit.scope_search,
-                                      marketplace_narrowing=unit.marketplace_narrowing):
+    for limit_text in coverage_limits(findings, scope_search=unit.scope_search):
         w(f"  - {limit_text}")
 
     return "\n".join(out)
