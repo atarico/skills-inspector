@@ -1,6 +1,33 @@
 # Proposal: what the installation unit is
 
-Status: proposed, not implemented. Date: 2026-09-24.
+Status: accepted 2026-09-24, implemented. Date: 2026-09-24.
+
+Implementation notes, against the proposal above:
+
+- (a) implemented as proposed: `unit.py::_narrow_marketplace` reads
+  `plugins[].source` and narrows to the one declared source the target sits
+  inside. The target being the marketplace root itself keeps today's
+  single-unit behavior, per-plugin separate units were not built (out of
+  scope for this change; see the open question below).
+- Fail-wide covers every case listed: malformed/unreadable manifest, a
+  `plugins` field that is not a list, an absolute or `..`-escaping `source`, a
+  URL or git/github object form, and a symlinked `source` that resolves
+  outside the marketplace directory. Any one untrustworthy entry taints the
+  whole manifest, even for a target that would have matched a different valid
+  entry — the simplest reading of "never narrow" that a fail-wide guarantee
+  can make.
+- (b) implemented as proposed: an excluded sibling is recorded under NOT
+  ANALYZED with the reason "outside every declared plugin source", one entry
+  per excluded directory or file (never per file inside it).
+- `target_subtree` implemented per the maintainer's decision below: shown in
+  BOTH the JSON and the text report, on every widened scan (not only a
+  narrowed marketplace one).
+- Per-plugin separate units for a marketplace-root scan were NOT built: the
+  existing `Unit`/report model represents exactly one unit per scan, and
+  splitting a marketplace root into N separate reports is a bigger, separate
+  change than this proposal's fail-wide + narrowing scope. RULES.md section
+  0.1 documents this truthfully instead of leaving the old, inaccurate claim
+  in place.
 
 ## The question
 
@@ -109,8 +136,8 @@ still covers everything that installs.
   directory, unchanged from today.
 - `target_subtree` counts add up to the unit totals.
 
-## Open decision for the maintainer
+## Decided
 
-Should `target_subtree` appear in the text report on every widened scan, or only
-in the JSON? Text on every scan is more honest to a human reader, and the JSON
-alone is enough for tooling.
+The maintainer chose text on every widened scan, in both the human report and
+the JSON — implemented as `TARGET` in `scanner/report.py::to_text` and
+`target_subtree` in `to_json`, both built from `scanner/report.py::_target_subtree`.
