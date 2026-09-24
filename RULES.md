@@ -20,7 +20,7 @@ The scanner resolves the unit in this order:
 | Marker | Unit |
 |---|---|
 | `.claude-plugin/plugin.json` | the whole plugin directory |
-| `.claude-plugin/marketplace.json` | the ONE declared plugin `source` the target sits inside — see 0.1 below |
+| `.claude-plugin/marketplace.json` | the whole marketplace directory — every plugin it lists, audited TOGETHER, never separately (see 0.1) |
 | `opencode.json` / `.opencode/` | the whole project directory |
 | `SKILL.md` with no plugin manifest above it | the skill directory |
 | bare directory | the directory, recursively |
@@ -29,102 +29,52 @@ If a unit marker is found *above* the path the user pointed at, the scanner wide
 the scope and says so in the report. Auditing a skill inside a plugin without
 reading the plugin manifest produces a false clean.
 
-### 0.1 A marketplace narrows to one declared plugin, never wider than trust allows
+### 0.1 A marketplace is one unit — narrowing was tried and withdrawn
 
 A marketplace can list many independent plugins, and auditing the whole
-marketplace directory for a question about one of them pulls in every sibling's
-files — research notes, other plugins' scripts, whatever else the repository
-ships. `natural-japanese` (defect 6) measured this concretely: scanning
-`skills/natural-japanese` widened to the entire 102-file repository, because
-`unit.py` climbed to `.claude-plugin/marketplace.json` and stopped there without
-ever reading `plugins[].source`.
+marketplace directory for a question about one of them pulls in every
+sibling's files — research notes, other plugins' scripts, whatever else the
+repository ships. `natural-japanese` (defect 6) measured this concretely:
+scanning `skills/natural-japanese` widened to the entire 102-file repository.
 
-When the climb stops at a `marketplace.json`, `unit.py::_narrow_marketplace`
-reads its `plugins[].source` and, when the target sits inside exactly one
-declared source, narrows the unit to that directory instead of the whole
-marketplace. The target being the marketplace root itself is unchanged: with
-nothing narrower to match, the whole directory stays the unit, exactly as
-before this section existed.
+Three commits (`0020a49`, `1988d8e`, `6d12cd3`) tried to fix that by narrowing
+the unit to the one declared `plugins[].source` the target sat inside, with a
+fail-wide guarantee for an untrustworthy manifest, then a carve-out to keep
+`.claude-plugin` in the unit, then a real-filesystem check to widen back when
+a plugin's own file referenced a path outside its declared source. All three
+were withdrawn (`docs/2026-09-24-installation-unit.md`) after a third
+adversarial round found that the widen-back check itself could not be
+trusted: it depended on recognizing a REFERENCE, and reachability.py's
+reference patterns — reused deliberately rather than duplicated — do not, and
+cannot, recognize every shape prose or a shell command can take. Two
+equivalent ways of invoking the exact same payload (`bash x.sh` and
+`. x.sh`) widened back correctly; two others (`cd dir && bash x.sh`, and
+plain prose naming the path without an imperative verb in front of it) did
+not, and left the payload with ZERO findings while the pre-narrowing scanner
+had always found it. Excluding content and compensating for the exclusion
+with heuristic reference detection is a race the attacker wins by
+construction: they control the text the heuristic reads, and a parser tuned
+to close one evasion is a parser someone can read and route around.
 
-**FAIL WIDE, never narrow, whenever the manifest cannot be trusted.** A
-missing, malformed, or unreadable `marketplace.json`; a `plugins` field that is
-not a list; or any plugin entry whose `source` is not a plain relative local
-path — absolute, `..`-escaping, a URL, a git/github object form, or a symlink
-whose resolved realpath escapes the marketplace directory — makes the ENTIRE
-manifest untrusted, even for a target that would have matched a different,
-valid entry. In every one of those cases the unit stays the marketplace
-directory, unchanged, and `coverage_limits` says why. A manifest must never be
-able to shrink its own audit.
+So a marketplace is one unit, full stop, exactly as it was before defect 6
+was ever measured: every plugin it lists is walked and scanned together, and
+nothing is ever excluded on the strength of a manifest's own claims about
+which files belong to which plugin.
 
-A sibling the narrowed unit excludes is never silently dropped: it is listed
-under NOT ANALYZED with the reason "outside every declared plugin source",
-recorded once per excluded directory or file — the same one-entry-per-exclusion
-shape `SKIP_DIRS` pruning already uses, not one entry per file inside it.
-Narrowing also never loses the chosen plugin's OWN control plane: a hook
-config or MCP registration sitting beside the target inside the same declared
-source is still read, because narrowing changes the unit's ROOT, not the
-walk that happens once it is fixed.
-
-**The marketplace manifest directory (`.claude-plugin/`) always stays inside
-the unit, narrowed or not.** Claude Code lets a marketplace PLUGIN ENTRY
-declare that plugin's hooks, MCP servers, and commands inline
-(`"strict": false`) — `marketplace.json` is not a bystander file, it is
-control plane for every plugin it lists. A first version of this narrowing
-treated `.claude-plugin` as just another sibling of the chosen plugin source
-and excluded it exactly like any other, which reintroduced the false clean
-this whole section widens to prevent: an inline hook the manifest declared
-for the audited plugin went completely unscanned. `_outside_siblings` now
-carves `.claude-plugin` out of the exclusion list, and `collect()` reads it
-back into the unit as extra files whose relpath carries a leading `../` (the
-unit's root moved narrower than it; the manifest did not move with it) — the
-same shape every other outside-root NOT ANALYZED path already used, just
-included instead of excluded.
-
-**Narrowing widens back the moment anything inside the narrowed unit reaches
-outside it.** Excluding a sibling directory is not the only way a narrowed
-audit can miss a real payload: the payload can sit in that excluded sibling
-while something INSIDE the narrowed unit tells the reader, or the harness, to
-go get it — a skill's prose invoking `bash ../../../../corpus/gen.sh`, or a
-hook command built from `${CLAUDE_PLUGIN_ROOT}/../../corpus/gen.sh`. Neither
-reference is inside the plugin's own declared source, and corpus/'s own
-content is excluded exactly as designed — so the payload was never unscanned
-because of a gap in the exclusion logic, it was unscanned because narrowing
-shrank what got walked at all, and the plugin's own file told the reader
-where the rest of it lives.
-
-`unit.py::_escapes_narrowed_root` checks every text file already collected
-into a narrowed unit for a reference — reusing `reachability.py`'s own
-reference patterns, never a second parser — whose target resolves, on the
-REAL filesystem, to a path that both (a) exists and (b) sits outside the
-narrowed root. `${CLAUDE_PLUGIN_ROOT}` resolves against the plugin root
-itself; every other reference shape resolves against the referencing file's
-own directory, matching `reachability.py::_candidates`. The moment any
-reference escapes, narrowing is ABANDONED entirely — the unit rebuilds at the
-marketplace directory, exactly as it would have before this section existed,
-and `marketplace_narrowing` records why. Pulling in only the specific
-referenced file was deliberately rejected: an attacker's choice of reference
-shape and depth is unbounded, so a whitelist of "the files narrowing decided
-to also include" can always be evaded by one more hop, while widening back to
-the marketplace directory cannot miss a transitive reference — there is no
-narrower boundary left for one to cross.
-
-A reference whose target does not exist ANYWHERE is not treated as an escape:
-narrowing has not hidden anything real by leaving it out, and the ordinary
-dangling-reference finding (`BND-002`) already reports it from inside the
-narrowed scan. Only a reference that reaches a REAL file outside the narrowed
-root is what a plugin could use to have its own audit look past a payload
-sitting just outside it.
-
-When the unit ends up wider than the path the user named — narrowed to a
-plugin source larger than the target, or widened by any other marker in the
-table above — the report adds a `target_subtree` attribution: finding count,
-headline count, and undeclared-CRITICAL count for findings inside the named
-path, and the same three counts for the rest of the unit. This exists so a
-per-skill comparison (skills.sh and similar tools) has numbers to read without
-this scanner narrowing what it actually audited. The top-level headline stays
-computed over the whole unit; `target_subtree` is an additive second view onto
-the same findings, computed by calling `headline()` / `headline_summary()`
-directly rather than re-deriving the predicate.
+**What defect 6 actually needed was comparability, not narrowing.** The real
+complaint was never that the scanner reads too much — reading `corpus/` is
+correct, because that is what installs — it was that the numbers could not
+be compared against a per-skill tool like skills.sh, which audits a narrower
+slice. `target_subtree` answers that directly, without excluding anything:
+when the unit is wider than the path the user named — a marketplace, or any
+other marker in the table above found above the target — the report adds a
+`target_subtree` attribution: finding count, headline count, and
+undeclared-CRITICAL count for findings inside the named path, and the same
+three counts for the rest of the unit. The top-level headline stays computed
+over the WHOLE unit; `target_subtree` is an additive second view onto the
+same findings, built by calling `headline()` / `headline_summary()` directly
+rather than re-deriving the predicate. A skills.sh comparison reads the
+`target_subtree` numbers, and the audit still covers everything that installs.
 
 ### Auditing an already-installed unit
 
