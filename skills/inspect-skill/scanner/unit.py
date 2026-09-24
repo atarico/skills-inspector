@@ -321,6 +321,14 @@ def _outside_siblings(marketplace_root: Path, plugin_root: Path) -> list[tuple[s
     directory or file, never one per file inside it, and never walked into.
     Paths are reported relative to `plugin_root` (the new unit root), like
     every other NOT ANALYZED entry, so a "../" prefix is what says "outside".
+
+    `marketplace_root/.claude-plugin` is NEVER one of these entries. Claude
+    Code lets a marketplace entry declare a plugin's hooks/mcpServers/commands
+    inline (`"strict": false`), so that directory is control plane for every
+    plugin the manifest lists, not a sibling's private tree — excluding it
+    would be exactly the false clean RULES.md section 0 widens to prevent, now
+    reintroduced by narrowing. `collect()` walks it back into the unit
+    separately; this function's only job here is to never mark it excluded.
     """
     if plugin_root == marketplace_root:
         return []
@@ -333,9 +341,12 @@ def _outside_siblings(marketplace_root: Path, plugin_root: Path) -> list[tuple[s
         except OSError:
             break
         for entry in entries:
-            if entry.name != part:
-                rel = os.path.relpath(str(entry), str(plugin_root))
-                out.append((rel, "outside every declared plugin source"))
+            if entry.name == part:
+                continue
+            if current == marketplace_root and entry.name == ".claude-plugin":
+                continue
+            rel = os.path.relpath(str(entry), str(plugin_root))
+            out.append((rel, "outside every declared plugin source"))
         current = current / part
     return out
 
@@ -392,38 +403,30 @@ def _narrow_marketplace(marketplace_root: Path, target: Path) -> tuple[Path, str
     return plugin_root, "", _outside_siblings(marketplace_root, plugin_root)
 
 
-def collect(target: Path) -> Unit:
-    root, kind, widened, scope_search, scope_levels = resolve(target)
-    target_resolved = target.resolve()
-    marketplace_narrowing = ""
-    outside: list[tuple[str, str]] = []
-    if kind == "claude marketplace":
-        narrowed_root, marketplace_narrowing, outside = _narrow_marketplace(
-            root, target_resolved)
-        if narrowed_root != root:
-            root = narrowed_root
-            start = target_resolved if target_resolved.is_dir() else target_resolved.parent
-            widened = root != start
+def _walk_into(walk_root: Path, root: Path, unit: Unit, count: int) -> int:
+    """Walk `walk_root`, recording every file into `unit` with its path
+    reported relative to `root`.
 
-    unit = Unit(root=root, kind=kind, requested=target_resolved, widened=widened,
-                scope_search=scope_search, scope_levels=scope_levels, name=root.name,
-                marketplace_narrowing=marketplace_narrowing)
-    for rel, reason in outside:
-        unit.skipped.append((rel, reason))
-
-    count = 0
-    for dirpath, dirnames, filenames in os.walk(root):
+    `walk_root` and `root` differ exactly once: `collect()` re-includes a
+    narrowed marketplace unit's `.claude-plugin` directory, which sits ABOVE
+    `root`, by calling this a second time with `walk_root` pointed at it and
+    `root` left at the narrowed directory — the relpaths that come out carry a
+    leading `../`, same as every other NOT-under-root path this scanner
+    already reports (RULES.md section 0.1). `count` and `MAX_FILES` are shared
+    across both calls so a bloated manifest cannot buy a bigger budget.
+    """
+    for dirpath, dirnames, filenames in os.walk(walk_root):
         # Every OTHER exclusion path below appends to unit.skipped (file limit,
         # symlink escape, unreadable, binary, size) — this pruning step used to
         # be the one silent exception. One entry per pruned DIRECTORY, recorded
         # before the prune, never one per file it happens to contain.
         for pruned in sorted(d for d in dirnames if d in SKIP_DIRS):
-            rel = str((Path(dirpath) / pruned).relative_to(root))
+            rel = os.path.relpath(Path(dirpath) / pruned, root)
             unit.skipped.append((rel, _skip_dir_reason(pruned)))
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for filename in sorted(filenames):
             full = Path(dirpath) / filename
-            rel = str(full.relative_to(root))
+            rel = os.path.relpath(full, root)
             count += 1
             if count > MAX_FILES:
                 unit.skipped.append((rel, "file limit reached"))
@@ -478,6 +481,40 @@ def collect(target: Path) -> Unit:
 
             unit.files.append(FileEntry(rel, stat.st_size, False, "", executable,
                                         text, "", truncated))
+    return count
+
+
+def collect(target: Path) -> Unit:
+    root, kind, widened, scope_search, scope_levels = resolve(target)
+    target_resolved = target.resolve()
+    marketplace_narrowing = ""
+    outside: list[tuple[str, str]] = []
+    manifest_dir: Path | None = None
+    if kind == "claude marketplace":
+        marketplace_root = root
+        narrowed_root, marketplace_narrowing, outside = _narrow_marketplace(
+            marketplace_root, target_resolved)
+        if narrowed_root != root:
+            root = narrowed_root
+            start = target_resolved if target_resolved.is_dir() else target_resolved.parent
+            widened = root != start
+            # RULES.md section 0.1: the marketplace's OWN manifest directory is
+            # control plane for every plugin it lists (a marketplace entry can
+            # declare hooks/mcpServers/commands inline, "strict": false) — it
+            # stays inside the unit even though narrowing moved root below it.
+            candidate = marketplace_root / ".claude-plugin"
+            if candidate.is_dir():
+                manifest_dir = candidate
+
+    unit = Unit(root=root, kind=kind, requested=target_resolved, widened=widened,
+                scope_search=scope_search, scope_levels=scope_levels, name=root.name,
+                marketplace_narrowing=marketplace_narrowing)
+    for rel, reason in outside:
+        unit.skipped.append((rel, reason))
+
+    count = _walk_into(root, root, unit, 0)
+    if manifest_dir is not None:
+        count = _walk_into(manifest_dir, root, unit, count)
 
     _read_manifest(unit)
     unit.files.sort(key=scan_priority)
