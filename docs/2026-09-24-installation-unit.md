@@ -47,6 +47,38 @@ grants a marketplace entry declares inline (nested one level down, inside
 shell, outbound host) still catch the raw text regardless of nesting. Pinned
 as a known-miss fixture, `fixtures/known-miss/marketplace-inline-hook-structural`.
 
+**Second post-implementation fix.** Parent verification reproduced a SECOND
+CRITICAL evasion, confirmed present against pre-narrowing 653e66a too (so it
+is a defect-6 escape hatch, not something the first fix introduced): a
+sibling excluded by narrowing — `corpus/gen.sh`, at the marketplace root, no
+declared plugin owns it — held a payload, and a file INSIDE the narrowed
+plugin referenced it by a relative path that resolves straight to it
+(`bash ../../../../corpus/gen.sh` in a `SKILL.md` body, or a hook command
+built from `${CLAUDE_PLUGIN_ROOT}/../../corpus/gen.sh`). The narrowed scan
+excluded `corpus/` correctly and listed it under NOT ANALYZED, but never
+re-examined whether the narrowed unit's OWN content pointed back at it —
+exclusion alone is not enough when the excluded content is reachable, not
+just adjacent.
+
+Fixed by widening back, not by chasing references: `unit.py::_escapes_narrowed_root`
+reuses `reachability.py`'s existing reference patterns (never a second
+parser) to check every text file already collected into the narrowed unit
+for a reference whose target exists, on the real filesystem, outside the
+narrowed root. Any single escaping reference abandons narrowing entirely —
+the unit rebuilds at the marketplace directory, `marketplace_narrowing`
+records why — rather than pulling the individually-referenced file in, which
+an attacker could always route one more relative-path hop around. A
+reference to a path that does not exist anywhere is deliberately NOT treated
+as an escape (see RULES.md section 0.1): there is nothing real for narrowing
+to have hidden, and `BND-002` already reports the dangling reference from
+inside the narrowed scan. Both directions (escape widens back and the
+payload is then scanned; a plugin referencing only its own files stays
+narrowed, sibling and corpus/ noise still excluded) are pinned in
+`tests/unit_test.py::_narrowing_escape_cases` — not representable through
+`tests/make_fixtures.py`'s convention, same reason as the first fix: the
+scenario needs a target NESTED inside a narrowed source, and that harness
+always scans a fixture's own top-level directory.
+
 ## The question
 
 Scanning `coji/natural-japanese/skills/natural-japanese` widens to the whole
