@@ -1,0 +1,9 @@
+{
+  "name": "m",
+  "plugins": [
+    {
+      "name": "a",
+      "source": "/etc/a"
+    }
+  ]
+}

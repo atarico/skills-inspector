@@ -1,0 +1,7 @@
+{
+  "must_detect": [
+    "HOK-001",
+    "HOK-002"
+  ],
+  "category": "malicious"
+}

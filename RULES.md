@@ -20,7 +20,7 @@ The scanner resolves the unit in this order:
 | Marker | Unit |
 |---|---|
 | `.claude-plugin/plugin.json` | the whole plugin directory |
-| `.claude-plugin/marketplace.json` | every plugin it lists, audited separately |
+| `.claude-plugin/marketplace.json` | the ONE declared plugin `source` the target sits inside — see 0.1 below |
 | `opencode.json` / `.opencode/` | the whole project directory |
 | `SKILL.md` with no plugin manifest above it | the skill directory |
 | bare directory | the directory, recursively |
@@ -28,6 +28,53 @@ The scanner resolves the unit in this order:
 If a unit marker is found *above* the path the user pointed at, the scanner widens
 the scope and says so in the report. Auditing a skill inside a plugin without
 reading the plugin manifest produces a false clean.
+
+### 0.1 A marketplace narrows to one declared plugin, never wider than trust allows
+
+A marketplace can list many independent plugins, and auditing the whole
+marketplace directory for a question about one of them pulls in every sibling's
+files — research notes, other plugins' scripts, whatever else the repository
+ships. `natural-japanese` (defect 6) measured this concretely: scanning
+`skills/natural-japanese` widened to the entire 102-file repository, because
+`unit.py` climbed to `.claude-plugin/marketplace.json` and stopped there without
+ever reading `plugins[].source`.
+
+When the climb stops at a `marketplace.json`, `unit.py::_narrow_marketplace`
+reads its `plugins[].source` and, when the target sits inside exactly one
+declared source, narrows the unit to that directory instead of the whole
+marketplace. The target being the marketplace root itself is unchanged: with
+nothing narrower to match, the whole directory stays the unit, exactly as
+before this section existed.
+
+**FAIL WIDE, never narrow, whenever the manifest cannot be trusted.** A
+missing, malformed, or unreadable `marketplace.json`; a `plugins` field that is
+not a list; or any plugin entry whose `source` is not a plain relative local
+path — absolute, `..`-escaping, a URL, a git/github object form, or a symlink
+whose resolved realpath escapes the marketplace directory — makes the ENTIRE
+manifest untrusted, even for a target that would have matched a different,
+valid entry. In every one of those cases the unit stays the marketplace
+directory, unchanged, and `coverage_limits` says why. A manifest must never be
+able to shrink its own audit.
+
+A sibling the narrowed unit excludes is never silently dropped: it is listed
+under NOT ANALYZED with the reason "outside every declared plugin source",
+recorded once per excluded directory or file — the same one-entry-per-exclusion
+shape `SKIP_DIRS` pruning already uses, not one entry per file inside it.
+Narrowing also never loses the chosen plugin's OWN control plane: a hook
+config or MCP registration sitting beside the target inside the same declared
+source is still read, because narrowing changes the unit's ROOT, not the
+walk that happens once it is fixed.
+
+When the unit ends up wider than the path the user named — narrowed to a
+plugin source larger than the target, or widened by any other marker in the
+table above — the report adds a `target_subtree` attribution: finding count,
+headline count, and undeclared-CRITICAL count for findings inside the named
+path, and the same three counts for the rest of the unit. This exists so a
+per-skill comparison (skills.sh and similar tools) has numbers to read without
+this scanner narrowing what it actually audited. The top-level headline stays
+computed over the whole unit; `target_subtree` is an additive second view onto
+the same findings, computed by calling `headline()` / `headline_summary()`
+directly rather than re-deriving the predicate.
 
 ### Auditing an already-installed unit
 
