@@ -138,6 +138,26 @@ def is_code_suffix(relpath: str) -> bool:
     return PurePosixPath(relpath).suffix.lower() in _TEXT_CODE_SUFFIXES
 
 
+_HTML_SUFFIXES = {".html", ".htm", ".xhtml"}
+
+
+def is_html_suffix(relpath: str) -> bool:
+    """Is this file rendered markup, where EVERY `>` is a tag close and never
+    a shell redirect — never prose that might merely be quoting HTML?
+
+    FSW-002 (rules.py) keeps a wider tag-name-only exclusion (`pattern`) for
+    markdown prose and any other file, because prose can genuinely contain
+    both real HTML and a real redirect side by side, so the exclusion has to
+    stay narrow enough to still catch the redirect (an attribute-quoted tag
+    close, `<p class="x">`, is NOT excluded there — see the FSW-002 comment).
+    A real `.html`/`.htm`/`.xhtml` document has no such ambiguity: nothing in
+    it is a shell command, so `Rule.html_pattern` can use the strictest
+    anchor (a `>` only counts at line start or after whitespace/a digit/`&`)
+    without losing any real detection.
+    """
+    return PurePosixPath(relpath).suffix.lower() in _HTML_SUFFIXES
+
+
 # Execution sinks. A string literal is inert data UNLESS it flows into one of
 # these — the same logic as an imperative sentence above a markdown fence.
 # Blanket-demoting string literals would make `os.system("curl x | sh")` invisible,
