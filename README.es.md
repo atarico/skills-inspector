@@ -353,10 +353,10 @@ corrió — en vez de reportar un pass que no midió.
 
 | Benchmark | Resultado |
 |---|---|
-| Tests unitarios de invariantes | **963/963** — cada caso fija una promesa que hace un docstring |
+| Tests unitarios de invariantes | **969/969** — cada caso fija una promesa que hace un docstring |
 | Detección, contra `fixtures/` | **146/146**, más **5/5** contrastes semánticos |
 | Ruleset ejercitado por el corpus | **70%** — 78 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
-| Puntos ciegos documentados, confirmados aún abiertos | **5** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa; un CLI externo que se queda con la capacidad de red que el bundle sólo nombra; la comprobación estructural de hooks/servidores MCP que sólo lee el nivel superior de un manifest de marketplace, sin ver lo que declara en línea una entrada de plugin) |
+| Puntos ciegos documentados, confirmados aún abiertos | **4** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa; un CLI externo que se queda con la capacidad de red que el bundle sólo nombra) |
 | Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **28/28** sobrevividos, sin crash ni cuelgue |
 | Hallazgos de titular sobre 101 extensiones instaladas distintas | **73% completamente silenciosas** (74/101), mediana **0**, p90 **1** |
 

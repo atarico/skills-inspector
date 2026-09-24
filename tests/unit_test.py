@@ -1229,6 +1229,78 @@ check("structural/mcp", "opencode mcp entries get body analysis too",
       "opencode nests env under `environment` and command as a list")
 
 
+# ---------------------------- structural: inline hooks/mcpServers in a marketplace entry
+# Promise (RULES.md H, HOK-001/HOK-003): a marketplace.json PLUGIN ENTRY can
+# declare hooks/mcpServers inline, one level below the manifest's own top
+# level (typically with "strict": false). Those are control-plane
+# registrations exactly like plugin.json's, and used to be a structural blind
+# spot pinned by fixtures/known-miss/marketplace-inline-hook-structural — the
+# line-based EXE-003/NET-001 rules caught a loud `curl | sh` payload there,
+# but a quiet command (`node ./x.js`) or an inline mcpServers block produced
+# no HOK finding at all.
+
+def _marketplace_body(*, plugins) -> str:
+    import json
+    return json.dumps({"name": "m", "plugins": plugins}, indent=2)
+
+
+_MARKETPLACE_QUIET_HOOK = _marketplace_body(plugins=[{
+    "name": "a", "source": "./plugins/a", "strict": False,
+    "hooks": {"SessionStart": [{"hooks": [
+        {"type": "command", "command": "node ./x.js"}]}]},
+}])
+check("structural/marketplace", "inline SessionStart hook fires HOK-001",
+      "HOK-001" in _mcp_ids(_MARKETPLACE_QUIET_HOOK,
+                            relpath=".claude-plugin/marketplace.json"), True,
+      "a quiet inline hook command must still register as control-plane "
+      "automation — the same HOK-001 plugin.json's top-level hooks produce")
+
+_MARKETPLACE_MCP = _marketplace_body(plugins=[{
+    "name": "a", "source": "./plugins/a", "strict": False,
+    "mcpServers": {"x": {"command": "node", "args": ["server.js"]}},
+}])
+check("structural/marketplace", "inline mcpServers fires HOK-003",
+      "HOK-003" in _mcp_ids(_MARKETPLACE_MCP,
+                            relpath=".claude-plugin/marketplace.json"), True,
+      "an inline MCP server registration one level down must be seen, not "
+      "just a bare 'command' string the line pass happens to catch")
+
+_MARKETPLACE_QUIET_TWIN = _marketplace_body(plugins=[
+    {"name": "a", "source": "./plugins/a"},
+    {"name": "b", "source": "./plugins/b", "strict": False},
+])
+check("structural/marketplace", "name/source-only entries stay quiet",
+      set(_mcp_ids(_MARKETPLACE_QUIET_TWIN,
+                   relpath=".claude-plugin/marketplace.json"))
+      & {"HOK-001", "HOK-003"}, set(),
+      "the false-positive twin: nothing to register must not manufacture "
+      "a finding")
+
+# Malformed shapes must not crash the structural pass (fuzz suite), and must
+# not suppress whatever else the file would have produced.
+_MARKETPLACE_PLUGINS_NOT_LIST = '{"name": "m", "plugins": "not-a-list"}'
+check("structural/marketplace", "plugins as a non-list does not crash",
+      "BND-006" in _mcp_ids(_MARKETPLACE_PLUGINS_NOT_LIST,
+                            relpath=".claude-plugin/marketplace.json"), False,
+      "a malformed plugins field must not read as a caught exception either")
+
+import json as _json_mod
+_MARKETPLACE_ENTRY_NOT_OBJECT = _json_mod.dumps(
+    {"name": "m", "plugins": ["just-a-string", 42, None]})
+check("structural/marketplace", "a plugin entry that is not an object does not crash",
+      "BND-006" in _mcp_ids(_MARKETPLACE_ENTRY_NOT_OBJECT,
+                            relpath=".claude-plugin/marketplace.json"), False,
+      "each list element is checked with isinstance before being treated as a dict")
+
+_MARKETPLACE_HOOKS_NOT_DICT = _json_mod.dumps(
+    {"name": "m", "plugins": [{"name": "a", "hooks": ["not", "a", "dict"]}]})
+check("structural/marketplace", "a plugin entry's hooks as a non-dict does not crash",
+      "BND-006" in _mcp_ids(_MARKETPLACE_HOOKS_NOT_DICT,
+                            relpath=".claude-plugin/marketplace.json"), False,
+      "the existing isinstance(hooks, dict) guard already covers this shape "
+      "one level down too")
+
+
 # ------------------------------------------ structural: enableAllProjectMcpServers
 
 check("structural/settings", "enableAllProjectMcpServers is a permission red flag",
