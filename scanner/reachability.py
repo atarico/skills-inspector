@@ -265,6 +265,22 @@ def _invocation_refs(text: str, relpath: str, known: set[str],
         if idx < len(positions) and positions[idx][0] != position.ACTIVE:
             continue
         for match in _REF_PATTERNS[3].finditer(line):
+            # "The Python literal is excluded" above is true for the MULTI-LINE
+            # case — a triple-quoted docstring is DOCUMENTARY per line, so the
+            # `position.ACTIVE` check above already removes it. It was never
+            # true for a single-line literal: `position.classify_lines` tracks
+            # triple-quote state only, so `SKILL = "...Run \`bash x.sh\`..."`
+            # sitting in ordinary (non-sample, non-auto-exec) source reads as
+            # ACTIVE code, and this loop had no guard of its own for "this
+            # match sits inside quotes, so it is text ABOUT an invocation, not
+            # one". Latent on every plain `.py`/`.js` file already — nothing
+            # here ever depended on directory or auto-exec status to sit inside
+            # a quoted string. `in_string_literal` is the same test `_scan_text`
+            # and `literal_demotion` already apply to a RULE match on this exact
+            # question; an invocation reference deserves no less scrutiny than a
+            # rule match does before it is allowed to fabricate a graph edge.
+            if position.in_string_literal(line, match.start()):
+                continue
             target = _candidates(match.group(1), relpath, known, index)
             if target and target != relpath:
                 out.add(target)

@@ -442,6 +442,57 @@ def in_sample_dir(relpath: str) -> bool:
     return any(part.lower() in _ILLUSTRATIVE_DIRS for part in parts)
 
 
+# Filenames a developer toolchain discovers and RUNS on its own, with nothing in
+# the bundle telling it to. `pytest` walks every directory under its rootdir
+# looking for `conftest.py` — which it imports, executing module-level code, to
+# collect fixtures — and for `test_*.py` / `*_test.py`. `jest`, `vitest`,
+# `mocha` and `node --test` do the same for `*.test.<ext>` / `*.spec.<ext>`.
+#
+# This is the published attack that passed Snyk Agent Scan, Cisco's AI Agent
+# Security Scanner and VirusTotal Code Insight: a payload placed in a file named
+# this way needs no entry-point reference at all, because the thing that runs it
+# is the developer's own toolchain, invoked AFTER the bundle is already on disk.
+# `graph.invoked` cannot see that edge — it exists to answer "does something in
+# THIS bundle wire this file up", and the honest answer here is no. The floor
+# this predicate defeats is `in_sample_dir`'s, at exactly the chokepoints that
+# already ask whether `graph.invoked` does the same job for a directory-based
+# false positive (`file_base_position`, `_apply_sample_floor`, `classify_lines`).
+#
+# Restricted to the JS/TS suffixes `_TEXT_CODE_SUFFIXES` already treats as code
+# for the `.test.` / `.spec.` shape (`odd/tasks/sample-floor-auto-execution.md`,
+# D1): a `.spec.md` or a `.test.py` is not a convention any toolchain in this
+# corpus actually discovers, and inventing one would be exactly the kind of
+# suffix-alone demotion the same decision record rejects in the other direction.
+#
+# Deliberately NOT gated on a test runner being present in the scanned bundle
+# (D2). The attack executes because the AUDITOR's own repository runs `pytest`
+# or `npm test` after the extension is copied in; requiring a runner inside the
+# bundle would make "ship the payload without a runner" a one-file evasion of
+# the fix.
+_AUTO_EXEC_PY = re.compile(r"^(conftest\.py|test_.*\.py|.*_test\.py)$")
+_AUTO_EXEC_JS_SUFFIXES = {".js", ".mjs", ".cjs", ".ts"}
+
+
+def auto_executed(relpath: str) -> bool:
+    """Does a developer toolchain auto-discover and RUN this file, unprompted?
+
+    A pure function of the FILENAME, never the directory. `in_sample_dir` asks
+    where a file sits; this asks what runs it regardless of where it sits — the
+    two questions come apart exactly on `tests/conftest.py`, which is both. A
+    directory convention cannot make this distinction (`fixtures/payload.json`
+    is shown, not run; `conftest.py` two directories over is run, not shown),
+    which is D1's argument for keying on the name instead of widening (or
+    dropping) the sample-directory convention itself.
+    """
+    name = PurePosixPath(relpath).name
+    if _AUTO_EXEC_PY.match(name):
+        return True
+    suffixes = PurePosixPath(name).suffixes
+    return (len(suffixes) >= 2
+            and suffixes[-2] in (".test", ".spec")
+            and suffixes[-1] in _AUTO_EXEC_JS_SUFFIXES)
+
+
 def file_base_position(relpath: str, invoked: bool = False) -> str:
     """Base position implied by where the file sits and what it is.
 
@@ -455,9 +506,16 @@ def file_base_position(relpath: str, invoked: bool = False) -> str:
     convention loses — parking a live payload in `examples/` and invoking it from
     SKILL.md was a two-level demotion an attacker got for the price of a
     directory name.
+
+    `auto_executed` is the second way a file outruns the directory it sits in,
+    and it defeats the convention for the identical reason `invoked` does: the
+    premise of "this is shown, not run" is false for it. Unlike `invoked`, it
+    needs no reachability graph at all — a name is enough to know a toolchain
+    will run it, independent of whether anything in the bundle ever mentions it.
     """
     p = PurePosixPath(relpath)
-    if not invoked and any(part.lower() in _ILLUSTRATIVE_DIRS for part in p.parts[:-1]):
+    if (not invoked and not auto_executed(relpath)
+            and any(part.lower() in _ILLUSTRATIVE_DIRS for part in p.parts[:-1])):
         return DOCUMENTARY
     suffix = p.suffix.lower()
     if suffix in _TEXT_CODE_SUFFIXES or suffix in _CONFIG_SUFFIXES:
@@ -492,7 +550,16 @@ def classify_lines(relpath: str, text: str,
     # `file_base_position` returns documentary for every markdown file, and
     # using that as a floor would flatten imperative body prose — the exact
     # thing a skill's instructions are made of — into documentary everywhere.
-    if invoked or not in_sample_dir(relpath):
+    #
+    # `auto_executed` sits beside `invoked` here for the same reason it sits
+    # beside it in `file_base_position`: whatever defeats the sample-directory
+    # convention for the file's BASE position must defeat this floor too, or a
+    # markdown-adjacent auto-exec convention would get the exemption from one
+    # and not the other. No suffix in the current convention set (D1) actually
+    # reaches this branch — `.spec.md` matches no real toolchain's discovery —
+    # but the alternative is a floor that silently disagrees with its own base
+    # position the day the convention set grows.
+    if invoked or auto_executed(relpath) or not in_sample_dir(relpath):
         return classified
     floor = _ORDER.index(DOCUMENTARY)
     return [(_ORDER[max(_ORDER.index(p), floor)], k) for p, k in classified]

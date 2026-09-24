@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scanner import engine  # noqa: E402
+from scanner import position as pos  # noqa: E402
 from scanner.unit import collect  # noqa: E402
 from scanner.engine import headline  # noqa: E402
 
@@ -57,9 +58,37 @@ def main() -> int:
             must = set(expect.get("must_detect", []))
             missing = must - ids
             not_headlined = must - head_ids
+            # `must_detect` alone cannot pin "this leads the report": missing it
+            # only ever prints WEAK, never fails the run, because most fixtures
+            # here are correctly demoted and WEAK is the expected outcome for
+            # them. Two opt-in keys give a fixture a way to make headline
+            # membership itself the assertion, hard-failing instead of warning:
+            #
+            # `must_headline` — a rule id that MUST reach the headline. Without
+            # this, "the sample floor no longer suppresses an auto-executed
+            # payload" had no fixture that could actually fail — every existing
+            # malicious unit already expects to be caught, not to lead.
+            #
+            # `must_not_headline` — the reverse: a rule id that must stay
+            # floored. This is the false-positive twin `AGENTS.md` requires
+            # alongside every demotion-heuristic change; without it, a
+            # `must_headline` fixture could pass by widening the predicate far
+            # enough to headline everything in the unit, twin included.
+            must_headline = set(expect.get("must_headline", []))
+            must_not_headline = set(expect.get("must_not_headline", []))
+            unheadlined_required = must_headline - head_ids
+            leaked_to_headline = must_not_headline & head_ids
             if missing:
                 print(f"{RED}MISS{RESET}  {label:<28} expected {sorted(must)}, "
                       f"missing {sorted(missing)}")
+                failed += 1
+            elif unheadlined_required:
+                print(f"{RED}MISS{RESET}  {label:<28} must lead the headline, "
+                      f"did not: {sorted(unheadlined_required)}")
+                failed += 1
+            elif leaked_to_headline:
+                print(f"{RED}LEAK{RESET}  {label:<28} the false-positive twin "
+                      f"reached the headline: {sorted(leaked_to_headline)}")
                 failed += 1
             elif not_headlined:
                 print(f"{YELLOW}WEAK{RESET}  {label:<28} detected but not in headline: "
@@ -122,6 +151,17 @@ def main() -> int:
     tree = collect(PROJECT)
     tree_findings, _ = engine.scan(tree)
     fx = [f for f in tree_findings if f.location.startswith("fixtures/")]
+    # `testfile-autoexec/` is the one deliberate exception. Its `tests/
+    # conftest.py` exists to prove that `position.auto_executed` defeats the
+    # sample-dir floor regardless of how many "fixtures"/"tests" directories
+    # sit above it in the path — that is the whole point of the fixture, and
+    # of the fix it exercises. Folding it into "nothing under fixtures/ ever
+    # leads" would make this self-check reintroduce, by omission, the exact
+    # blind spot `auto_executed` was written to close: a `conftest.py` a real
+    # `pytest` run from this repo's root WOULD execute is not illustrative by
+    # location just because a human happened to store it under `fixtures/`.
+    auto_exec_fx = [f for f in fx if pos.auto_executed(f.location)]
+    fx = [f for f in fx if not pos.auto_executed(f.location)]
     fx_head = [f for f in headline(fx)]
     fx_active = [f for f in fx if f.position == "active"]
     ok = not fx_head and not fx_active
@@ -129,6 +169,8 @@ def main() -> int:
     print(f"\nsection-3 self-check ({mark}): attack files under a real unit's fixtures/ ->")
     print(f"  {len(fx_head)} headline, {len(fx_active)} active-position of {len(fx)} "
           f"fixture matches (both must be 0 — they are illustrative by location)")
+    print(f"  {len(auto_exec_fx)} auto-executed-named fixture match(es) excluded from "
+          f"that count by design (see comment above)")
 
     return 1 if (failed or not ok) else 0
 

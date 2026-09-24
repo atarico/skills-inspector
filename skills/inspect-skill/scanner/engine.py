@@ -69,7 +69,17 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
         # An entry point that tells the model to RUN this file outranks the
         # directory it happens to sit in. Without this the sample-directory
         # convention alone demoted a live, invoked payload two levels.
-        invoked = entry.relpath in graph.invoked
+        #
+        # `pos.auto_executed` joins it here, not beside it at every downstream
+        # site: `invoked` is exactly "does something outrank the sample-dir
+        # convention for this file", and every function below that takes
+        # `invoked` as a parameter (`file_base_position`, `classify_lines`, the
+        # instruction-surface check in `_instruction_is_live`) already asks that
+        # one question. Folding auto-execution in here means the whole
+        # propagation chain gets it for free, and there is exactly one place —
+        # not four — where a future third way to outrank the convention gets
+        # added.
+        invoked = entry.relpath in graph.invoked or pos.auto_executed(entry.relpath)
 
         line_matches: dict[int, list] = {}
         raw += _scan_text(unit, entry.relpath, entry.text, line_matches, invoked)
@@ -136,9 +146,24 @@ def _apply_sample_floor(raw: list[Finding], graph) -> None:
     `graph.invoked` is narrower than `status == ACTIVE` on purpose: a mention
     ("see examples/basic.sh for usage") makes a file reachable but does not make
     it live, so ordinary example directories keep their floor.
+
+    A second exception, and it closes the evasion that beat Snyk Agent Scan,
+    Cisco's AI Agent Security Scanner and VirusTotal Code Insight: a payload in
+    `tests/conftest.py`, referenced by NOTHING in the bundle — `graph.invoked`
+    stays empty for it, correctly, because nothing in the bundle wires it up —
+    survived here at `low` and never led. The harness that runs it is `pytest`,
+    invoked in the AUDITOR's own repository after the extension is already on
+    disk; no entry-point reference was ever going to exist for `graph.invoked`
+    to find. `pos.auto_executed` names that convention directly, from the
+    filename alone, so this chokepoint no longer has to wait for a reachability
+    edge that a well-behaved test file will never produce. The ordinary-named
+    twin in the same directory (`tests/helpers.py`) keeps its floor exactly as
+    before: nothing about ITS name promises a toolchain will run it unprompted.
     """
     for finding in raw:
-        if pos.in_sample_dir(finding.location) and finding.location not in graph.invoked:
+        if (pos.in_sample_dir(finding.location)
+                and finding.location not in graph.invoked
+                and not pos.auto_executed(finding.location)):
             finding.confidence = "low"
 
 

@@ -226,6 +226,52 @@ Measured against 76 installed extensions this adds **zero** headline findings an
 leaves the self-scan unchanged, while the three fixtures above lead the report.
 The same promotion without the quoted-span guard adds 13.
 
+### 3.2 A directory convention loses to toolchain auto-execution
+
+The `illustrative` row above demotes anything under `tests/`, `fixtures/`,
+`examples/`, `spec/`. Its premise is "this file is shown, not run". That premise
+is true of `fixtures/payload.json` and false of `tests/conftest.py`, which pytest
+imports before it collects a single test.
+
+A published attack rode in on exactly that gap: a payload in a test file the
+agent never invokes, which the developer's own test command auto-discovers and
+executes once the unit has been copied into their project. Every scanner that
+looked only at the agent execution surface missed it, because a test file is not
+part of that surface. This scanner walks every file, so it produced the finding
+— and then floored it to `low` on the directory name, which kept it out of the
+headline. Detection that does not lead is not detection.
+
+So the directory convention loses to a second signal, on the same terms `invoked`
+already defeats it (§5): the premise "shown, not run" is false for the file.
+`position.auto_executed` is a pure function of the FILENAME, never the directory:
+
+| Covered | Because |
+|---|---|
+| `conftest.py` | pytest imports it before collection |
+| `test_*.py`, `*_test.py` | pytest's two default discovery patterns |
+| `*.test.*`, `*.spec.*` on JS/TS suffixes | jest, vitest and mocha collect them by glob |
+
+Unlike `invoked`, this requires no evidence inside the audited unit, and that is
+deliberate. The runner belongs to the repository the unit is copied INTO, never
+to the unit itself. Requiring a test runner in the bundle would restore the hole
+in full, because the attack never ships one.
+
+**What this does not cover, stated plainly.** Auto-execution is a convention
+surface with no closed enumeration, and only the shapes above are implemented. A
+payload in a sample directory still keeps its floor when it arrives as:
+
+- a build or task entry point — `setup.py`, `noxfile.py`, `tasks.py`, a `Makefile`
+  target;
+- a file some runner was CONFIGURED to collect outside the default patterns, via
+  `python_files` or `testMatch`;
+- `__init__.py` in a test package, which pytest imports under rootdir collection;
+- an editor, hook or CI surface that runs on its own schedule rather than on a
+  test command.
+
+Keeping the floor for everything else is what makes the rule usable rather than a
+second source of noise. It is also the next place to look for this shape of
+evasion, and the reason this section exists instead of a silent heuristic.
+
 ---
 
 ## 4. Taint model
