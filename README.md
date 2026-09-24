@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#quick-start)
 [![Detection](https://img.shields.io/badge/detection-146%2F146-brightgreen.svg)](#measured-not-asserted)
-[![Fuzz](https://img.shields.io/badge/malformed%20input-28%2F28-brightgreen.svg)](#measured-not-asserted)
+[![Fuzz](https://img.shields.io/badge/malformed%20input-29%2F29-brightgreen.svg)](#measured-not-asserted)
 
 </div>
 
@@ -341,12 +341,12 @@ directory of extensions you already trust, CI does not have one, and it exits
 
 | Benchmark | Result |
 |---|---|
-| Invariant unit tests | **963/963** — every case pins a promise a docstring makes |
+| Invariant unit tests | **973/973** — every case pins a promise a docstring makes |
 | Detection, against `fixtures/` | **146/146**, plus **5/5** semantic cross-checks |
 | Ruleset exercised by the corpus | **70%** — 78 of 111 implemented rules have a fixture; one family (`SEM`) has none |
-| Documented blind spots, confirmed still open | **5** (prose exfiltration; HOK-004's two documented locations, neither implemented; an external CLI holding the network capability the bundle only names; the structural hook/MCP-server check reading only a marketplace manifest's top level, missing grants a plugin entry declares inline) |
-| Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **28/28** survived, no crash or hang |
-| Headline findings across 101 distinct installed extensions | **73% completely silent** (74/101), median **0**, p90 **1** |
+| Documented blind spots, confirmed still open | **4** (prose exfiltration; HOK-004's two documented locations, neither implemented; an external CLI holding the network capability the bundle only names) |
+| Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **29/29** survived, no crash or hang |
+| Headline findings across 127 distinct installed extensions | **73% completely silent** (93/127), median **0**, p90 **1** |
 
 ### That 73% is not a false-positive rate, and it should not be 100%
 
@@ -355,7 +355,7 @@ driving it to zero as the goal. Both readings are wrong, and acting on them
 would gut the tool.
 
 A headline finding means *"a capability that needs your decision"* — not
-*"a bug"*. Of the 27 units that produce one, the single most common finding is
+*"a bug"*. Of the 34 units that produce one, the single most common finding is
 `HOK-003`: the extension registers an MCP server. The Discord bridge really does
 register an MCP server. That is a true statement about a real capability, and
 suppressing it because the plugin is popular would mean deciding on the user's
