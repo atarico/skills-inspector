@@ -248,7 +248,25 @@ RULES: list[Rule] = [
          "Bypasses HTTP egress filtering.",
          "Effectively never.",
          "What is being placed in the subdomain?",
-         _r(r"\b(dig|nslookup|host)\b[^\n]{0,80}(\$\{?[A-Za-z_]|\$\(|`)"
+         # `host` is also the conventional name of a shell variable, and `_r`
+         # compiles case-insensitively (needed elsewhere in this table), so the
+         # bare word list used to match `HOST="$(detect_host)"` and
+         # `err "Unknown host: $HOST"` as if they were the BIND lookup tool.
+         # Anchoring to command position alone does not fix the first one:
+         # `HOST=` sits at line start, which reads as command position too.
+         # The discriminator is the assignment, not the position, so this
+         # needs both: the token must open a command (line start, or right
+         # after a shell separator — `|`, `;`, `&&`, `||`, `$(`, a backtick —
+         # with only horizontal whitespace between) AND it must not be the
+         # left-hand side of `=`. The whitelist of allowed predecessors also
+         # takes care of "preceded by `$` or `{`" for free: a bare `$HOST` or
+         # `${HOST}` reference is never immediately after one of those
+         # separators, so it never reaches the token position to begin with.
+         # Python's `re` refuses a variable-width lookbehind (mixing a
+         # zero-width `^` with two-character `&&`/`||`), so the separator set
+         # is consumed as an ordinary prefix instead of asserted behind one.
+         _r(r"(?:^|[|;`]|&&|\|\||\$\()[ \t]*(dig|nslookup|host)\b(?!\s*=)"
+            r"[^\n]{0,80}(\$\{?[A-Za-z_]|\$\(|`)"
             r"|\b(dig|nslookup)\b[^\n]{0,40}\+short[^\n]{0,60}\$"),
          specificity=88),
 
@@ -813,7 +831,18 @@ RULES: list[Rule] = [
          "Removes the human checkpoint on dangerous actions.",
          "UX shortcuts for genuinely safe operations.",
          "Which action skips confirmation?",
-         _r(r"(do\s+not|don'?t|never)\s+ask\s+(for\s+)?(permission|confirmation|the\s+user)"
+         # The first alternative's object list used to end in the bare pronoun
+         # `the\s+user`, so "never ask the user" alone satisfied it —
+         # whatever the sentence actually asked the user to do. That matched
+         # "Never ask the user to paste an access token into chat." (secret
+         # hygiene, the OPPOSITE of a bypass) and "Never ask the user to
+         # choose scope again." (a UX instruction), reporting both as a
+         # confirmation bypass. The object of "ask" here is permission itself
+         # — permission, confirmation, approval — and "the user" may only
+         # appear as the indirect object standing IN FRONT of one of those,
+         # the way "ask the user for permission" reads. It can no longer
+         # stand in as the object on its own.
+         _r(r"(do\s+not|don'?t|never)\s+ask\s+(the\s+user\s+)?(for\s+)?(permission|confirmation|approval)"
             r"|auto-?approve|skip\s+(the\s+)?confirmation|without\s+(asking|confirmation|prompting)"
             r"|assume\s+(yes|approval)|proceed\s+without\s+(asking|confirming)"),
          specificity=80),
