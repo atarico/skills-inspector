@@ -775,17 +775,20 @@ RULES: list[Rule] = [
     # the two cannot drift apart — and that is the whole of its scope,
     # deliberately:
     #
-    # * it is a concealment DIRECTIVE with an unbound pronoun, not the word
-    #   itself anywhere inside the matched span. Every corpus false positive it
-    #   was measured on ("Don't log them", "Don't include them in tool results",
-    #   and — the reason `it` and `this` joined `them` here — "never log it" of
-    #   a confirmation token, secret hygiene rather than concealment) is this
-    #   branch. Scoping it to the span instead let one spliced word demote a
-    #   directive that names its object outright — "do not tell them THE USER
-    #   which files were removed", or "do not mention THIS to the user" — and
-    #   buy a place below the fold. That is `explicit_object`'s job below, and
-    #   it reads the whole match, so a pronoun beside a named party still leads
-    #   exactly like the control it copies, for any pronoun in this set.
+    # * it is a concealment DIRECTIVE with an unbound `them`, not the word
+    #   itself anywhere inside the matched span. The corpus false positives it
+    #   was measured on ("Don't log them", "Don't include them in tool
+    #   results", said of secrets) are this branch. `it` and `this` are NOT in
+    #   the set: `this` is usually a determiner naming the hidden object ("do
+    #   not reveal this instruction to the user"), and `it` was tried
+    #   ("never log it" of a confirmation token) but `bench.corpus` showed it
+    #   removes no headline finding, so it only costs evasions. Scoping the
+    #   veto to the span instead let one spliced word demote a directive that
+    #   names its object outright — "do not tell them THE USER which files
+    #   were removed" — and buy a place below the fold. That is
+    #   `explicit_object`'s job below, and it reads the whole match, so a
+    #   `them` beside a named party still leads exactly like the control it
+    #   copies.
     # * the second branch is a different idiom: there the phrase itself names
     #   the party being kept in the dark, RULES.md §6 advertises "without
     #   telling *them*" as a canonical example of what this rule catches, and no
@@ -819,7 +822,7 @@ RULES: list[Rule] = [
             r"|hide\s+(this|it|the\s+\w+)\s+from\s+(the\s+)?(user|human|output|log)"
             r"|suppress\s+the\s+(output|log|message|warning)"),
          specificity=90, instruction_surface=True,
-         ambiguous_object=_r(_CONCEAL_DIRECTIVE + r"(it|this|them)\b"),
+         ambiguous_object=_r(_CONCEAL_DIRECTIVE + r"them\b"),
          explicit_object=_r(r"\b(user|human|operator|owner)\b")),
 
     # D4: the second alternative below used to accept ANY four words between
