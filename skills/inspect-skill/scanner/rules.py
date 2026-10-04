@@ -771,7 +771,7 @@ RULES: list[Rule] = [
     # weaker evidence about WHO, never about the phrase being concealment.
     #
     # The veto below is the SAME shape as this branch with the object alternation
-    # narrowed to the unbound pronouns `it`, `this` and `them` — one string, so
+    # narrowed to the unbound pronoun `them` — one string, so
     # the two cannot drift apart — and that is the whole of its scope,
     # deliberately:
     #
@@ -801,8 +801,8 @@ RULES: list[Rule] = [
     # cancel the pronoun veto regardless — the object was never ambiguous, the
     # OBJECT ITSELF was wrong. Concealment names WHAT is hidden ("do not tell
     # the user about/that ..."); an infinitive after "the user" names an
-    # ACTION to avoid recommending instead, the same UX shape AGT-003 was
-    # fixed for this session. The guard declines only that shape: "the user
+    # ACTION to avoid recommending instead, the same UX shape AGT-003's
+    # solicitation exclusion handles. The guard declines only that shape: "the user
     # to" followed by a recommendation verb (use, run, try, install, ...). It
     # used to decline any `to\s+\w`, which also declined purpose clauses and
     # "to whom" — "Do not inform the user to avoid alarming them." is the
