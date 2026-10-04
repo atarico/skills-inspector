@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import PurePosixPath
 
 from . import evidence as ev
 from . import rules as R
@@ -205,8 +206,47 @@ RULE_SUMMARY = {
 }
 
 
+# RULES.md section 0.1, "making the numbers comparable without narrowing the
+# audit": when the unit is wider than the path the user named — any widened
+# scan, not only a narrowed marketplace one — attribute findings to "inside
+# the named path" vs "the rest of the unit", so a comparison against a
+# per-skill tool (skills.sh) has numbers to read without shrinking what this
+# scanner actually audited. The headline itself stays computed over the WHOLE
+# unit; this is a second, additive view onto the same findings list, and both
+# counters below are built by calling `headline()` / `headline_summary()`
+# rather than re-deriving the predicate — see headline_summary's own docstring
+# for the drift that duplicating it caused before it was collapsed to one place.
+def _target_subtree(unit: Unit, findings: list[Finding]) -> dict | None:
+    if not unit.widened:
+        return None
+    try:
+        rel_target = unit.requested.relative_to(unit.root)
+    except ValueError:
+        # unit.requested is always inside unit.root by construction (resolve()
+        # only ever climbs to an ANCESTOR); this is defensive, not reachable.
+        return None
+    target_is_dir = unit.requested.is_dir()
+
+    def _inside(loc: str) -> bool:
+        loc_path = PurePosixPath(loc)
+        if target_is_dir:
+            return loc_path == rel_target or loc_path.is_relative_to(rel_target)
+        return loc_path == rel_target
+
+    inside = [f for f in findings if _inside(f.location)]
+    rest = [f for f in findings if not _inside(f.location)]
+
+    def _counts(subset: list[Finding]) -> dict:
+        summary = headline_summary(subset)
+        return {"finding_count": len(subset), "headline_count": summary["count"],
+                "undeclared_critical": summary["undeclared_critical"]}
+
+    return {"path": ev.sanitize_path(str(rel_target)),
+            "inside": _counts(inside), "rest": _counts(rest)}
+
+
 def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
-    return json.dumps({
+    payload = {
         # The machine contract for this shape. Bump only on a breaking
         # key-name or key-type change to the keys below — never on a rule
         # addition, a new finding, or a wording change. An integrator pins
@@ -229,7 +269,11 @@ def to_json(unit: Unit, findings: list[Finding], profile: dict) -> str:
         "not_analyzed": [{"file": ev.sanitize_path(p), "reason": r} for p, r in unit.skipped],
         "coverage_limits": coverage_limits(findings, scope_search=unit.scope_search),
         "deferred_rules": R.DEFERRED,
-    }, indent=2, ensure_ascii=False)
+    }
+    subtree = _target_subtree(unit, findings)
+    if subtree is not None:
+        payload["target_subtree"] = subtree
+    return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
 def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool = False) -> str:
@@ -242,6 +286,16 @@ def to_text(unit: Unit, findings: list[Finding], profile: dict, *, verbose: bool
     elif unit.scope_search in _INCONCLUSIVE_SCOPE_SEARCH:
         w(f"          scope search {unit.scope_search} after {unit.scope_levels} "
           f"level(s) — could not confirm there is no enclosing unit above this target")
+    subtree = _target_subtree(unit, findings)
+    if subtree is not None:
+        w(f"TARGET    {subtree['path']} — "
+          f"{subtree['inside']['finding_count']} finding(s) "
+          f"({subtree['inside']['headline_count']} headline, "
+          f"{subtree['inside']['undeclared_critical']} undeclared CRITICAL) inside; "
+          f"{subtree['rest']['finding_count']} finding(s) "
+          f"({subtree['rest']['headline_count']} headline, "
+          f"{subtree['rest']['undeclared_critical']} undeclared CRITICAL) "
+          f"in the rest of the unit")
     desc = ev.sanitize(unit.description) or "(no description found)"
     w(f"DECLARED  \"{desc[:300]}\"")
     if unit.declared_tools:

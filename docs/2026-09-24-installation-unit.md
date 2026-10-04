@@ -1,6 +1,65 @@
 # Proposal: what the installation unit is
 
-Status: proposed, not implemented. Date: 2026-09-24.
+Status: accepted 2026-09-24; narrowing implemented then withdrawn;
+attribution implemented. Date: 2026-09-24.
+
+## What shipped, in the end
+
+Part (a) of this proposal — narrowing a marketplace unit to the one declared
+plugin `source` the target sits inside — was implemented across three
+commits (`0020a49`, `1988d8e`, `6d12cd3`), each closing an evasion the
+previous one opened, and was then WITHDRAWN after a third adversarial round
+showed the whole approach could not be made safe. Part (b)'s alternative —
+attribution instead of narrowing, via `target_subtree` — is what shipped, and
+is the durable answer to the comparability problem this proposal set out to
+solve. The final commit, `revert(unit): keep a marketplace as one unit; per-target
+numbers come from target_subtree`, restored `scanner/unit.py` to its exact
+pre-`0020a49` state and kept `target_subtree` (JSON + text, on every widened
+scan — the maintainer's decision below still stands).
+
+### The three evasions narrowing could not close
+
+1. **Inline marketplace hook.** Claude Code lets a marketplace PLUGIN ENTRY
+   declare that plugin's hooks/mcpServers/commands inline
+   (`"strict": false`). The first narrowing version treated `.claude-plugin`
+   as an ordinary excluded sibling, so an inline hook declared for the
+   audited plugin went completely unscanned — the exact false clean §0
+   widens to prevent, reintroduced by narrowing itself. Fixed by always
+   keeping `.claude-plugin` inside the unit.
+2. **Relative-path script escape.** A sibling directory narrowing correctly
+   excludes (`corpus/`, owned by no declared plugin) can hold a payload that
+   a file INSIDE the narrowed unit invokes by relative path
+   (`bash ../../../../corpus/gen.sh`) or via
+   `${CLAUDE_PLUGIN_ROOT}/../../corpus/gen.sh`. Exclusion alone missed this:
+   the payload was reachable, not merely adjacent. Fixed by widening back the
+   moment any reference inside the narrowed unit resolved, on the real
+   filesystem, to something outside it.
+3. **Reference shapes the parser cannot see.** The widen-back check itself
+   depended on recognizing a reference, reusing `reachability.py`'s existing
+   patterns rather than writing a second parser — and those patterns, by
+   design, cannot recognize every shape prose or a shell command can take.
+   Reproduced end to end at `6d12cd3`: `bash ../../../../corpus/gen.sh` and
+   `. ../../../../corpus/gen.sh` widened back correctly; `cd ../../../../corpus
+   && bash gen.sh` and the bare prose "execute the script at
+   ../../../../corpus/gen.sh with bash" did not, leaving the exact same
+   payload with ZERO findings. Excluding content and compensating with
+   heuristic reference detection is a race the attacker wins by
+   construction — they control the text the heuristic reads.
+
+### Why narrowing was withdrawn rather than patched a fourth time
+
+Each fix closed one demonstrated evasion and the next adversarial round found
+a new one in the same shape: something outside the narrowed unit that the
+narrowed unit itself could still reach, in a way the reference-detection
+machinery did not anticipate. There is no bound on that shape — it is
+whatever text a plugin author (or attacker) writes — so patching the
+reference parser again would only move the goalposts, not close the class.
+`target_subtree` was already delivering the actual thing defect 6 needed
+(comparable, per-target numbers) WITHOUT excluding anything from the audit,
+so there is nothing narrowing gains once the comparability problem is solved
+a different way. RULES.md section 0.1 now says this plainly: a marketplace
+is one unit, every plugin it lists audited together, and per-target numbers
+come from `target_subtree`.
 
 ## The question
 
@@ -49,9 +108,9 @@ So for this repository the wide unit is not a scanner artifact. It is what the
 manifest says gets installed. The disagreement with skills.sh is real: skills.sh
 audits a subset of what installs.
 
-## Proposal
+## Proposal (historical — part (a) below was implemented, then withdrawn; see "What shipped, in the end" above)
 
-### (a) The unit is the declared install boundary, per plugin
+### (a) The unit is the declared install boundary, per plugin — WITHDRAWN, see above
 
 1. Implement the marketplace row RULES.md already promises. When the climb stops
    at a `marketplace.json`, read its `plugins[].source`. If the user's target
@@ -109,8 +168,8 @@ still covers everything that installs.
   directory, unchanged from today.
 - `target_subtree` counts add up to the unit totals.
 
-## Open decision for the maintainer
+## Decided
 
-Should `target_subtree` appear in the text report on every widened scan, or only
-in the JSON? Text on every scan is more honest to a human reader, and the JSON
-alone is enough for tooling.
+The maintainer chose text on every widened scan, in both the human report and
+the JSON — implemented as `TARGET` in `scanner/report.py::to_text` and
+`target_subtree` in `to_json`, both built from `scanner/report.py::_target_subtree`.
