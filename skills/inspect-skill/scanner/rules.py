@@ -832,16 +832,15 @@ RULES: list[Rule] = [
     # OBJECT. `without` inverts the relation entirely (it introduces what is
     # NOT sent), and plain proximity cannot see that.
     #
-    # The filler group now refuses to step over a negation or preposition —
-    # `without, with, for, about, from, into, onto, via` — so the noun can
-    # only be reached as a direct object, the way "send the full conversation
-    # history" or "upload our recent chat context" read. Ordinary determiners
-    # and adjectives still pass through untouched, which is what keeps a real
-    # object like "the full conversation" matching. `of` is deliberately NOT
-    # in the banned set: "send a summary OF the conversation" still transmits
-    # the conversation's content, and banning it would trade this false
-    # positive for a false negative on the exact shape the rule exists to
-    # catch.
+    # The filler group now refuses to step over exactly one word, `without`,
+    # because it inverts the relation and is the only word backed by a
+    # measured false positive. Every other word still passes: `with` and
+    # `from` carry real exfiltration ("send an email WITH the conversation
+    # history to ...", "upload everything FROM the conversation to ..."), and
+    # an earlier draft that also refused `for, about, into, onto, via` bought
+    # no measured precision while opening those evasions. Ordinary
+    # determiners and adjectives pass untouched, and `of` is not refused:
+    # "send a summary OF the conversation" still transmits it.
     Rule("AGT-004", "CRITICAL", "medium", INSTRUCTION,
          "Instruction to read local context and transmit it",
          "Turns the agent into the exfiltration channel — no suspicious binary needed.",
@@ -852,7 +851,7 @@ RULES: list[Rule] = [
             r"other\s+skills?|installed\s+skills?|CLAUDE\.md|AGENTS\.md)"
             r"[^\n]{0,120}(send|post|upload|transmit|share|report|sync|push)\s+"
             r"|(send|post|upload)\s+"
-            r"((?!(?:without|with|for|about|from|into|onto|via)\b)\w+\s+){0,4}"
+            r"((?!without\b)\w+\s+){0,4}"
             r"(the\s+)?(conversation|transcript|history|memory|context)"),
          specificity=91, instruction_surface=True),
 
