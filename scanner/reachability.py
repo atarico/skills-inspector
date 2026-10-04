@@ -19,6 +19,10 @@ from pathlib import PurePosixPath
 
 from . import position
 
+# Mirrors `engine._MD_SUFFIXES`; engine imports this module, so it cannot be
+# imported from there.
+_MD_SUFFIXES = {".md", ".markdown", ".mdx"}
+
 ENTRY = "entry"
 ACTIVE = "active"
 CONDITIONAL = "conditional"
@@ -260,6 +264,7 @@ def _invocation_refs(text: str, relpath: str, known: set[str],
     an accident.
     """
     out: set[str] = set()
+    is_md = PurePosixPath(relpath).suffix.lower() in _MD_SUFFIXES
     positions = position.classify_lines(relpath, text)
     for idx, line in enumerate(text.splitlines()):
         if idx < len(positions) and positions[idx][0] != position.ACTIVE:
@@ -267,19 +272,21 @@ def _invocation_refs(text: str, relpath: str, known: set[str],
         for match in _REF_PATTERNS[3].finditer(line):
             # "The Python literal is excluded" above is true for the MULTI-LINE
             # case — a triple-quoted docstring is DOCUMENTARY per line, so the
-            # `position.ACTIVE` check above already removes it. It was never
-            # true for a single-line literal: `position.classify_lines` tracks
-            # triple-quote state only, so `SKILL = "...Run \`bash x.sh\`..."`
-            # sitting in ordinary (non-sample, non-auto-exec) source reads as
-            # ACTIVE code, and this loop had no guard of its own for "this
-            # match sits inside quotes, so it is text ABOUT an invocation, not
-            # one". Latent on every plain `.py`/`.js` file already — nothing
-            # here ever depended on directory or auto-exec status to sit inside
-            # a quoted string. `in_string_literal` is the same test `_scan_text`
-            # and `literal_demotion` already apply to a RULE match on this exact
-            # question; an invocation reference deserves no less scrutiny than a
-            # rule match does before it is allowed to fabricate a graph edge.
-            if position.in_string_literal(line, match.start()):
+            # `position.ACTIVE` check above already removes it. A single-line
+            # literal reads as ACTIVE (`classify_lines` tracks triple-quote
+            # state only), so `CASES = ["bash x.sh"]` would fabricate an edge
+            # from a test-case string. The guard below drops such a match,
+            # with two deliberate exceptions:
+            #   * an exec sink wrapping the literal keeps the edge —
+            #     `os.system("bash x.sh")` is a command being run, not text
+            #     about one. Same helper `literal_demotion` uses for the same
+            #     question (`position.exec_sink_outside_literal`).
+            #   * markdown is not guarded, as in `_scan_text`: a prose
+            #     apostrophe (`Don't skip: bash x.sh`) opens a "literal" no
+            #     reader sees, and must not drop an instruction's edge.
+            if (not is_md
+                    and position.in_string_literal(line, match.start())
+                    and not position.exec_sink_outside_literal(line)):
                 continue
             target = _candidates(match.group(1), relpath, known, index)
             if target and target != relpath:

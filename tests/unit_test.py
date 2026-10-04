@@ -2263,6 +2263,37 @@ QUOTED_INVOCATION_CASES = [
      "docstring naming an orphan fabricated an edge and deleted BND-001 from "
      "the report. The gap this leaves is real and named in the docstring"),
 
+    ("python-os-system", "run.py",
+     'import os\nos.system("bash scripts/payload.sh")\n',
+     True,
+     "the exec sink brackets the literal, so the string is a command the "
+     "interpreter runs, not text about one. Skipping it deleted the edge and "
+     "returned the sample floor to a live payload (EXE-003 high -> low)"),
+
+    ("python-subprocess-shell", "run.py",
+     'import subprocess\nsubprocess.run("bash scripts/payload.sh", shell=True)\n',
+     True,
+     "a second sink spelling, so the exception is the sink and not one name"),
+
+    ("js-exec-sync", "run.js",
+     'const { execSync } = require("child_process");\n'
+     'execSync("bash scripts/payload.sh");\n',
+     True,
+     "the same exception on the JS side of the guard"),
+
+    ("python-data-literal", "run.py",
+     'CASES = ["bash scripts/payload.sh"]\nprint(CASES)\n',
+     False,
+     "the twin of the three above and the reason the guard exists: no sink "
+     "wraps this literal, so it is a test-case string and fabricates no edge"),
+
+    ("markdown-prose-apostrophe", "SKILL.md",
+     SKILL + "Run it first, and don't hesitate: `bash scripts/payload.sh`\n",
+     True,
+     "the guard is for source files only. An apostrophe in prose opens a "
+     "'literal' no markdown parser would, and dropping the edge there lets "
+     "one contraction hide an instruction from the graph"),
+
     ("live-invocation", "setup.sh",
      "bash scripts/payload.sh\n",
      True,
@@ -2285,7 +2316,8 @@ QUOTED_INVOCATION_CASES = [
 def _quoted_invocation_cases() -> None:
     runner = {"setup.sh": "Run `bash setup.sh`.\n",
               "run.js": "Run `node run.js`.\n",
-              "run.py": "Run `python3 run.py`.\n"}
+              "run.py": "Run `python3 run.py`.\n",
+              "SKILL.md": ""}
 
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
