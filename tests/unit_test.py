@@ -2282,19 +2282,20 @@ QUOTED_INVOCATION_CASES = [
      'import os\nos.system("bash scripts/payload.sh")\n',
      True,
      "the exec sink brackets the literal, so the string is a command the "
-     "interpreter runs, not text about one. Skipping it deleted the edge and "
-     "returned the sample floor to a live payload (EXE-003 high -> low)"),
+     "interpreter runs, not text about one. A single-line literal guard once "
+     "skipped it, deleted the edge and returned the sample floor to a live "
+     "payload (EXE-003 high -> low); this pins that no guard comes back"),
 
     ("python-subprocess-shell", "run.py",
      'import subprocess\nsubprocess.run("bash scripts/payload.sh", shell=True)\n',
      True,
-     "a second sink spelling, so the exception is the sink and not one name"),
+     "a second sink spelling: the edge must not depend on one sink name"),
 
     ("js-exec-sync", "run.js",
      'const { execSync } = require("child_process");\n'
      'execSync("bash scripts/payload.sh");\n',
      True,
-     "the same exception on the JS side of the guard"),
+     "the same shape on the JS side: a quoted command passed to a sink"),
 
     ("python-data-literal", "run.py",
      'CASES = ["bash scripts/payload.sh"]\nprint(CASES)\n',
@@ -2320,9 +2321,9 @@ QUOTED_INVOCATION_CASES = [
     ("markdown-prose-apostrophe", "SKILL.md",
      SKILL + "Run it first, and don't hesitate: `bash scripts/payload.sh`\n",
      True,
-     "the guard is for source files only. An apostrophe in prose opens a "
-     "'literal' no markdown parser would, and dropping the edge there lets "
-     "one contraction hide an instruction from the graph"),
+     "an apostrophe in prose opens a 'literal' no markdown parser would; a "
+     "quote-based guard dropping the edge there would let one contraction "
+     "hide an instruction from the graph"),
 
     ("live-invocation", "setup.sh",
      "bash scripts/payload.sh\n",
