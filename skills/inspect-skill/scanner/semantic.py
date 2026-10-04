@@ -180,8 +180,8 @@ def prepare(unit) -> Request:
             continue
         # `auto_executed` sits beside `in_sample_dir` here for consistency with
         # every other sample-floor chokepoint, though it is a no-op today: the
-        # convention set (D1) only recognises `.py` names and JS/TS `.test.`/
-        # `.spec.` suffixes, none of which are in `_INSTRUCTION_SUFFIXES` above.
+        # convention set only recognises `.py` names, JS/TS `.test.`/
+        # `.spec.` suffixes and `__tests__/` scripts, none of which are in `_INSTRUCTION_SUFFIXES` above.
         # Leaving the check out because it currently changes nothing would be
         # the same reasoning that let a missed call site outlive a floor fix
         # elsewhere in this file; the day an auto-exec markdown convention is

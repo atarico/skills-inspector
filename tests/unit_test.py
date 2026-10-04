@@ -189,8 +189,8 @@ for name, relpath, want in SAMPLE_DIR_CASES:
 # every script under `__tests__/`. `in_sample_dir` cannot
 # tell "shown" from "run" because the directory looks the same either way; the
 # filename is the one signal that does, which is the whole argument for keying
-# on it instead of an allowlist of agent-surface paths (rejected in
-# odd/tasks/sample-floor-auto-execution.md, D1).
+# on it instead of an allowlist of agent-surface paths, which would miss a
+# payload in any file a runner discovers and the allowlist never named.
 #
 # Both directions in one table, `AGENTS.md`'s rule for a demotion heuristic:
 # every True case is a shape a real toolchain discovers unprompted; every False

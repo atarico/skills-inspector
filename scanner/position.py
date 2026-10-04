@@ -464,14 +464,15 @@ def in_sample_dir(relpath: str) -> bool:
 # false positive (`file_base_position`, `_apply_sample_floor`, `classify_lines`).
 #
 # Restricted to the JS/TS suffixes `_TEXT_CODE_SUFFIXES` already treats as code
-# for the `.test.` / `.spec.` shape (`odd/tasks/sample-floor-auto-execution.md`,
-# D1): a `.spec.md` or a `.test.py` is not a convention any toolchain in this
-# corpus actually discovers, and inventing one would be exactly the kind of
-# suffix-alone demotion the same decision record rejects in the other direction.
+# for the `.test.` / `.spec.` shape: a `.spec.md` or a `.test.py` is not a
+# convention any toolchain in this corpus actually discovers, and inventing one
+# would be the kind of suffix-alone demotion the other direction rejects. The
+# decision is keyed on the FILENAME, not a directory, because auto-discovery is
+# a filename convention.
 #
-# Deliberately NOT gated on a test runner being present in the scanned bundle
-# (D2). The attack executes because the AUDITOR's own repository runs `pytest`
-# or `npm test` after the extension is copied in; requiring a runner inside the
+# Deliberately NOT gated on a test runner being present in the scanned bundle.
+# The attack executes because the AUDITOR's own repository runs `pytest` or
+# `npm test` after the extension is copied in; requiring a runner inside the
 # bundle would make "ship the payload without a runner" a one-file evasion of
 # the fix.
 _AUTO_EXEC_PY = re.compile(r"^(conftest\.py|test_.*\.py|.*_test\.py)$")
@@ -489,7 +490,7 @@ def auto_executed(relpath: str) -> bool:
     two questions come apart exactly on `tests/conftest.py`, which is both. A
     directory convention cannot make this distinction (`fixtures/payload.json`
     is shown, not run; `conftest.py` two directories over is run, not shown),
-    which is D1's argument for keying on the name instead of widening (or
+    which is the argument for keying on the name instead of widening (or
     dropping) the sample-directory convention itself.
     """
     name = PurePosixPath(relpath).name
@@ -566,7 +567,7 @@ def classify_lines(relpath: str, text: str,
     # beside it in `file_base_position`: whatever defeats the sample-directory
     # convention for the file's BASE position must defeat this floor too, or a
     # markdown-adjacent auto-exec convention would get the exemption from one
-    # and not the other. No suffix in the current convention set (D1) actually
+    # and not the other. No suffix in the current convention set actually
     # reaches this branch — `.spec.md` matches no real toolchain's discovery —
     # but the alternative is a floor that silently disagrees with its own base
     # position the day the convention set grows.

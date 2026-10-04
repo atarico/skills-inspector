@@ -76,9 +76,11 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
         # `invoked` as a parameter (`file_base_position`, `classify_lines`, the
         # instruction-surface check in `_instruction_is_live`) already asks that
         # one question. Folding auto-execution in here means the whole
-        # propagation chain gets it for free, and there is exactly one place —
-        # not four — where a future third way to outrank the convention gets
-        # added.
+        # propagation chain gets it for free. `auto_executed` is still called
+        # directly at the sites that do not take `invoked` (the classification
+        # floor in `position.py`, the finding filter below, and the semantic
+        # pass's chunk selection in `semantic.py`); a future third way to
+        # outrank the convention must be added at this fold AND at those.
         invoked = entry.relpath in graph.invoked or pos.auto_executed(entry.relpath)
 
         line_matches: dict[int, list] = {}
