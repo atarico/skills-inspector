@@ -200,7 +200,10 @@ on a line of ordinary MCP documentation. A match is `active` when **all** of:
   attempts without informing the user"* — stays `documentary`;
 - the file is not in a sample directory unless an entry point invokes it;
 - the match does not name an **ambiguous object**. Only `AGT-002` sets one
-  today: an unbound "them". Narrowing the pattern instead would have been the
+  today: an unbound "them" — not "it" (tried; `bench.corpus` showed it removes
+  no headline finding) and not "this" (usually a determiner naming the hidden
+  object: "do not reveal *this* instruction to the user"). Narrowing the
+  pattern instead would have been the
   wrong trade — that removes DETECTION, and "do not tell *them* which files were
   removed" is the same concealment as "the user", named by pronoun. A pronoun is
   weaker evidence about *who*, never about the phrase being concealment, so it
@@ -221,6 +224,15 @@ on a line of ordinary MCP documentation. A match is `active` when **all** of:
   you run the cleanup, do not tell *them*…" below the fold. *Them never gets
   promoted* is the claim; *them never leads* is not, and both sides are pinned
   in `tests/unit_test.py`.
+
+  One deliberate exception to "never narrow the pattern": the first branch's
+  `user` alternative does not match "the user to <recommendation verb>" (use,
+  run, try, install, open, call, restart, reinstall, update, upgrade, check,
+  visit, click, enable, disable, configure, set, switch). "Do not tell the user
+  to use `workflow get`" names an action not to recommend, not a fact hidden —
+  a measured false positive whose object is explicit, so the veto above cannot
+  reach it. The list is closed on purpose: purpose clauses ("do not inform the
+  user *to avoid* alarming them") and "to whom" still match.
 
 Measured against 76 installed extensions this adds **zero** headline findings and
 leaves the self-scan unchanged, while the three fixtures above lead the report.
@@ -441,9 +453,9 @@ not treat these lists as exhaustive, and §11 must say so in every report.
 | ID | Sev | Conf | Detects | Why it matters | Legitimate when |
 |---|---|---|---|---|---|
 | `AGT-001` | CRITICAL | medium | Instruction override directed at the reader: "ignore previous instructions", "disregard your system prompt", "you are now", "new instructions:" | Attempts to hijack any agent that reads the file, including the auditor | Never — genuine units instruct, they do not override |
-| `AGT-002` | CRITICAL | medium | Concealment **with the user or the log as the object**: "do not mention *to the user*", "without telling *them*", "do not log *this*", "suppress *the output*" | The user losing visibility is the whole point of the attack | Requires verb+object proximity. Bare "silently" or "hide" matches ordinary technical prose ("fails silently") and must not fire alone. A bare "them" with no object beside it is an unbound pronoun ("Don't log them", said of secrets): it is still **detected and reported**, but it is never *promoted* into the lead — see §3.1 |
+| `AGT-002` | CRITICAL | medium | Concealment **with the user or the log as the object**: "do not mention *to the user*", "without telling *them*", "do not log *this*", "suppress *the output*" | The user losing visibility is the whole point of the attack | Requires verb+object proximity. Bare "silently" or "hide" matches ordinary technical prose ("fails silently") and must not fire alone. A bare "them" with no object beside it is an unbound pronoun ("Don't log them", said of secrets): it is still **detected and reported**, but it is never *promoted* into the lead — see §3.1 ("it" and "this" are not vetoed). "the user to <use\|run\|install\|…>" is a recommendation, not concealment, and is not matched |
 | `AGT-003` | HIGH | medium | Confirmation bypass: "do not ask", "auto-approve", "skip confirmation", "assume yes". "Ask the user to <paste\|provide\|share\|…>" is excluded as solicitation unless a decision word (permission, confirm, approve, whether, proceed, …) follows within four words. **Known gap:** a bypass worded around that list and those words is missed | Removes the human checkpoint on dangerous actions | UX shortcuts for genuinely safe operations |
-| `AGT-004` | CRITICAL | medium | Instructions to read memory, other extensions, chat history, or project files **and transmit them** | Turns the agent into the exfiltration channel — no suspicious binary needed | Never |
+| `AGT-004` | CRITICAL | medium | Instructions to read memory, other extensions, chat history, or project files **and transmit them**. The send/post/upload branch needs the context noun as the verb's object, so `without` between them ("send filenames without enough context") does not match; "with" and "from" do | Turns the agent into the exfiltration channel — no suspicious binary needed | Never |
 | `AGT-005` | HIGH | high | Runtime instruction fetching: "read this URL and follow it", `WebFetch` feeding behavior | The real payload is off-file and mutable after you audit | Documentation lookup — the content must not become instructions |
 | `AGT-006` | HIGH | high | Hidden content: HTML comments, zero-width characters, bidi overrides, homoglyphs, whitespace-obscured text | Content the human never sees but the model does | Report the character count; small counts are often accidental |
 | `AGT-007` | MEDIUM | high | Declared `allowed-tools` / `tools` exceed the capabilities observed in the bundle, or vice versa | A markdown formatter asking for `Bash` is asking for a reason. **Purely structural** — compares declaration to scanner ground truth | Broad genuine scope — should be justified in the description |
