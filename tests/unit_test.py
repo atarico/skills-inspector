@@ -600,15 +600,18 @@ RULE_PATTERN_CASES = [
     ("NET-004", "an ordinary lookup with nothing interpolated is not",
      "dig api.example +short", False),
     # Defect: `_r` compiles case-insensitively, so the bare word list also
-    # matched the conventional shell variable HOST. Command position alone
-    # does not discriminate `HOST="$(detect_host)"` from a real invocation —
-    # the assignment sits at line start too — so the rule also has to reject
-    # the token when it is the left-hand side of `=`.
+    # matched the conventional shell variable HOST. The rule has no
+    # command-position requirement (a whitelist of predecessors dropped real
+    # exfil after `do`, `then`, `sudo`, a lone `&` and quoted calls). What
+    # excludes the false positives is the token itself: `host` followed by
+    # `=` (an assignment), and `host` preceded by `$` or `{` (a variable
+    # reference).
     ("NET-004", "GAP-killed: an assignment to a variable named HOST is not a lookup",
      'HOST="$(detect_host)"', False),
-    # The word also shows up in prose ("host" as a noun), which command
-    # position already excludes since it never opens a command and never
-    # follows a shell separator.
+    # `host:` is excluded because a BIND `host` invocation never writes a
+    # colon after the command name, so the label in "Unknown host: $HOST" is
+    # not a call. Other prose ("the host $HOST") still matches by design: a
+    # false positive is cheaper than an evasion.
     ("NET-004", "GAP-killed: the word in a log message is not a lookup either",
      'err "Unknown host: $HOST"', False),
     # Detection twins: the exfil shapes a command-position whitelist dropped.
