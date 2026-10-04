@@ -799,8 +799,12 @@ RULES: list[Rule] = [
     # OBJECT ITSELF was wrong. Concealment names WHAT is hidden ("do not tell
     # the user about/that ..."); an infinitive after "the user" names an
     # ACTION to avoid recommending instead, the same UX shape AGT-003 was
-    # fixed for this session. `(?!\s+to\s+\w)` declines only that shape, and
-    # only on `user`: `human` stays ungated because nothing in the corpus or
+    # fixed for this session. The guard declines only that shape: "the user
+    # to" followed by a recommendation verb (use, run, try, install, ...). It
+    # used to decline any `to\s+\w`, which also declined purpose clauses and
+    # "to whom" — "Do not inform the user to avoid alarming them." is the
+    # concealment the rule exists for, so the verb list is closed and a verb
+    # outside it stays a match. Only on `user`: `human` stays ungated because nothing in the corpus or
     # the brief measured a false positive on it, and narrowing an unmeasured
     # branch is exactly the kind of drive-by tightening this file's own tests
     # exist to catch.
@@ -810,7 +814,7 @@ RULES: list[Rule] = [
          "Requires verb+object proximity. Bare 'silently' is ordinary technical prose.",
          "Who is being kept in the dark, and about what?",
          _r(_CONCEAL_DIRECTIVE +
-            r"(?:(the\s+)?user(?!\s+to\s+\w)|(the\s+)?(human|them|operator|owner|it|this))"
+            r"(?:(the\s+)?user(?!\s+to\s+(?:use|run|try|install|open|call|restart|reinstall|update|upgrade|check|visit|click|enable|disable|configure|set|switch)\b)|(the\s+)?(human|them|operator|owner|it|this))"
             r"|without\s+(telling|informing|notifying|alerting)\s+(the\s+)?(user|them|anyone)"
             r"|hide\s+(this|it|the\s+\w+)\s+from\s+(the\s+)?(user|human|output|log)"
             r"|suppress\s+the\s+(output|log|message|warning)"),
