@@ -248,25 +248,20 @@ RULES: list[Rule] = [
          "Bypasses HTTP egress filtering.",
          "Effectively never.",
          "What is being placed in the subdomain?",
-         # `host` is also the conventional name of a shell variable, and `_r`
-         # compiles case-insensitively (needed elsewhere in this table), so the
-         # bare word list used to match `HOST="$(detect_host)"` and
-         # `err "Unknown host: $HOST"` as if they were the BIND lookup tool.
-         # Anchoring to command position alone does not fix the first one:
-         # `HOST=` sits at line start, which reads as command position too.
-         # The discriminator is the assignment, not the position, so this
-         # needs both: the token must open a command (line start, or right
-         # after a shell separator — `|`, `;`, `&&`, `||`, `$(`, a backtick —
-         # with only horizontal whitespace between) AND it must not be the
-         # left-hand side of `=`. The whitelist of allowed predecessors also
-         # takes care of "preceded by `$` or `{`" for free: a bare `$HOST` or
-         # `${HOST}` reference is never immediately after one of those
-         # separators, so it never reaches the token position to begin with.
-         # Python's `re` refuses a variable-width lookbehind (mixing a
-         # zero-width `^` with two-character `&&`/`||`), so the separator set
-         # is consumed as an ordinary prefix instead of asserted behind one.
-         _r(r"(?:^|[|;`]|&&|\|\||\$\()[ \t]*(dig|nslookup|host)\b(?!\s*=)"
-            r"[^\n]{0,80}(\$\{?[A-Za-z_]|\$\(|`)"
+         # `host` is also the conventional name of a shell variable and an
+         # ordinary English noun, and `_r` compiles case-insensitively, so the
+         # bare word list matched `HOST="$(detect_host)"` and
+         # `err "Unknown host: $HOST"`. Only `host` needs guarding; `dig` and
+         # `nslookup` keep the plain word boundary. `host` is excluded when it
+         # is the left-hand side of `=`, when a colon follows it (a BIND
+         # `host` invocation never writes a colon after the command name), or
+         # when it is a variable reference (`$host`, `${host}`). There is
+         # deliberately NO command-position requirement: a whitelist of
+         # predecessors dropped real exfil after `do`, `then`, `sudo`, a lone
+         # `&` and quoted calls. Other prose ("the host $HOST") still matches
+         # by design; a false positive is cheaper than an evasion.
+         _r(r"\b(dig|nslookup)\b[^\n]{0,80}(\$\{?[A-Za-z_]|\$\(|`)"
+            r"|(?<![${])\bhost\b(?!\s*[=:])[^\n]{0,80}(\$\{?[A-Za-z_]|\$\(|`)"
             r"|\b(dig|nslookup)\b[^\n]{0,40}\+short[^\n]{0,60}\$"),
          specificity=88),
 
