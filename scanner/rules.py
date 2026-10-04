@@ -248,7 +248,20 @@ RULES: list[Rule] = [
          "Bypasses HTTP egress filtering.",
          "Effectively never.",
          "What is being placed in the subdomain?",
-         _r(r"\b(dig|nslookup|host)\b[^\n]{0,80}(\$\{?[A-Za-z_]|\$\(|`)"
+         # `host` is also the conventional name of a shell variable and an
+         # ordinary English noun, and `_r` compiles case-insensitively, so the
+         # bare word list matched `HOST="$(detect_host)"` and
+         # `err "Unknown host: $HOST"`. Only `host` needs guarding; `dig` and
+         # `nslookup` keep the plain word boundary. `host` is excluded when it
+         # is the left-hand side of `=`, when a colon follows it (a BIND
+         # `host` invocation never writes a colon after the command name), or
+         # when it is a variable reference (`$host`, `${host}`). There is
+         # deliberately NO command-position requirement: a whitelist of
+         # predecessors dropped real exfil after `do`, `then`, `sudo`, a lone
+         # `&` and quoted calls. Other prose ("the host $HOST") still matches
+         # by design; a false positive is cheaper than an evasion.
+         _r(r"\b(dig|nslookup)\b[^\n]{0,80}(\$\{?[A-Za-z_]|\$\(|`)"
+            r"|(?<![${])\bhost\b(?!\s*[=:])[^\n]{0,80}(\$\{?[A-Za-z_]|\$\(|`)"
             r"|\b(dig|nslookup)\b[^\n]{0,40}\+short[^\n]{0,60}\$"),
          specificity=88),
 
@@ -813,7 +826,23 @@ RULES: list[Rule] = [
          "Removes the human checkpoint on dangerous actions.",
          "UX shortcuts for genuinely safe operations.",
          "Which action skips confirmation?",
-         _r(r"(do\s+not|don'?t|never)\s+ask\s+(for\s+)?(permission|confirmation|the\s+user)"
+         # The first alternative's object list used to end in the bare pronoun
+         # `the\s+user`, so "never ask the user" alone satisfied it, whatever
+         # the sentence asked the user to do. That matched "Never ask the user
+         # to paste an access token into chat." (secret hygiene, the OPPOSITE
+         # of a bypass). Narrowing the objects to permission|confirmation|
+         # approval fixed that but dropped real bypasses ("never ask the user
+         # before deleting files", "...whether to proceed", "...for consent").
+         # So the breadth stays and only solicitation is excluded: "ask the
+         # user" immediately followed by `to <paste|provide|share|enter|send|
+         # choose|type|give|supply>`. "ask the user to confirm" stays a match,
+         # and so does a solicitation followed within four words by a decision
+         # word ("to provide confirmation", "to choose whether to proceed",
+         # "to type yes to approve"): what is solicited there IS the decision.
+         _r(r"(do\s+not|don'?t|never)\s+ask\s+(for\s+)?(permission|confirmation|approval"
+            r"|the\s+user(?!\s+to\s+(paste|provide|share|enter|send|choose|type|give|supply)\b"
+            r"(?!(\s+\w+){0,3}\s+(permission|confirmation|approval|consent|confirm|approve"
+            r"|whether|proceed)\b)))"
             r"|auto-?approve|skip\s+(the\s+)?confirmation|without\s+(asking|confirmation|prompting)"
             r"|assume\s+(yes|approval)|proceed\s+without\s+(asking|confirming)"),
          specificity=80),
