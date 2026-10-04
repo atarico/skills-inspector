@@ -249,7 +249,8 @@ already defeats it (§5): the premise "shown, not run" is false for the file.
 |---|---|
 | `conftest.py` | pytest imports it before collection |
 | `test_*.py`, `*_test.py` | pytest's two default discovery patterns |
-| `*.test.*`, `*.spec.*` on JS/TS suffixes | jest, vitest and mocha collect them by glob |
+| `*.test.*`, `*.spec.*` on `.js .mjs .cjs .ts .jsx .tsx .mts .cts` | jest and vitest collect them by glob |
+| any such script under a `__tests__/` directory | jest's default `testMatch` collects it |
 
 Unlike `invoked`, this requires no evidence inside the audited unit, and that is
 deliberate. The runner belongs to the repository the unit is copied INTO, never
@@ -262,6 +263,8 @@ payload in a sample directory still keeps its floor when it arrives as:
 
 - a build or task entry point — `setup.py`, `noxfile.py`, `tasks.py`, a `Makefile`
   target;
+- mocha's default collection (the `./test/` directory, whatever the file is
+  named) and `node --test`, which does not collect `.spec.` names;
 - a file some runner was CONFIGURED to collect outside the default patterns, via
   `python_files` or `testMatch`;
 - `__init__.py` in a test package, which pytest imports under rootdir collection;

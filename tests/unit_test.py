@@ -184,9 +184,9 @@ for name, relpath, want in SAMPLE_DIR_CASES:
 # ------------------------------------------------------------------ auto_executed
 # Promise (auto_executed docstring): a developer toolchain runs these filenames
 # on its own, with nothing in the bundle telling it to — `pytest` walks every
-# directory for `conftest.py` and `test_*.py`/`*_test.py`; `jest`/`vitest`/
-# `mocha`/`node --test` do the same for `*.test.<ext>`/`*.spec.<ext>` on the
-# JS/TS suffixes this scanner already treats as code. `in_sample_dir` cannot
+# directory for `conftest.py` and `test_*.py`/`*_test.py`; `jest`/`vitest`
+# collect `*.test.<ext>`/`*.spec.<ext>` on the JS/TS suffixes, and jest also
+# every script under `__tests__/`. `in_sample_dir` cannot
 # tell "shown" from "run" because the directory looks the same either way; the
 # filename is the one signal that does, which is the whole argument for keying
 # on it instead of an allowlist of agent-surface paths (rejected in
@@ -211,6 +211,13 @@ AUTO_EXECUTED_CASES = [
     ("dot-test dot-ts", "component.test.ts", True),
     ("dot-spec dot-mjs", "component.spec.mjs", True),
     ("dot-spec dot-cjs", "component.spec.cjs", True),
+    ("dot-test dot-tsx", "tests/a.test.tsx", True),
+    ("dot-spec dot-mts", "a.spec.mts", True),
+    ("dot-test dot-jsx", "ui/a.test.jsx", True),
+    ("dot-spec dot-cts", "a.spec.cts", True),
+    # -- detection: jest's default __tests__/ directory, any script file -----
+    ("__tests__ js", "__tests__/a.js", True),
+    ("__tests__ nested tsx", "pkg/__tests__/deep/b.tsx", True),
     # -- false-positive twin: same directory, ordinary filename -------------
     ("ordinary helper beside conftest.py", "tests/helpers.py", False),
     ("ordinary helper beside a JS test", "tests/setup.js", False),
@@ -222,6 +229,11 @@ AUTO_EXECUTED_CASES = [
     ("dot-test on .py is not a real convention", "component.test.py", False),
     ("no extension at all", "conftest", False),
     ("ordinary markdown", "README.md", False),
+    ("tsx without the test/spec shape", "latest.tsx", False),
+    ("__tests__ data file is not a script", "__tests__/data.json", False),
+    ("__tests__ markdown is not a script", "__tests__/README.md", False),
+    ("'test' substring in a tsx name", "src/contest.tsx", False),
+    ("tests/ is not __tests__/", "tests/helper.tsx", False),
 ]
 
 for name, relpath, want in AUTO_EXECUTED_CASES:

@@ -448,8 +448,10 @@ def in_sample_dir(relpath: str) -> bool:
 # Filenames a developer toolchain discovers and RUNS on its own, with nothing in
 # the bundle telling it to. `pytest` walks every directory under its rootdir
 # looking for `conftest.py` — which it imports, executing module-level code, to
-# collect fixtures — and for `test_*.py` / `*_test.py`. `jest`, `vitest`,
-# `mocha` and `node --test` do the same for `*.test.<ext>` / `*.spec.<ext>`.
+# collect fixtures — and for `test_*.py` / `*_test.py`. `jest` and `vitest`
+# collect `*.test.<ext>` / `*.spec.<ext>` by glob, and jest also collects every
+# script under `__tests__/`. mocha (default `./test/`) and `node --test` (which
+# does not collect `.spec.`) are NOT covered.
 #
 # This is the published attack that passed Snyk Agent Scan, Cisco's AI Agent
 # Security Scanner and VirusTotal Code Insight: a payload placed in a file named
@@ -473,7 +475,10 @@ def in_sample_dir(relpath: str) -> bool:
 # bundle would make "ship the payload without a runner" a one-file evasion of
 # the fix.
 _AUTO_EXEC_PY = re.compile(r"^(conftest\.py|test_.*\.py|.*_test\.py)$")
-_AUTO_EXEC_JS_SUFFIXES = {".js", ".mjs", ".cjs", ".ts"}
+_AUTO_EXEC_JS_SUFFIXES = {".js", ".mjs", ".cjs", ".ts",
+                          ".jsx", ".tsx", ".mts", ".cts"}
+# jest's default `testMatch` also collects every script file under `__tests__/`.
+_AUTO_EXEC_JS_DIR = "__tests__"
 
 
 def auto_executed(relpath: str) -> bool:
@@ -490,10 +495,13 @@ def auto_executed(relpath: str) -> bool:
     name = PurePosixPath(relpath).name
     if _AUTO_EXEC_PY.match(name):
         return True
+    path = PurePosixPath(relpath)
     suffixes = PurePosixPath(name).suffixes
-    return (len(suffixes) >= 2
-            and suffixes[-2] in (".test", ".spec")
-            and suffixes[-1] in _AUTO_EXEC_JS_SUFFIXES)
+    if suffixes and suffixes[-1] in _AUTO_EXEC_JS_SUFFIXES:
+        if _AUTO_EXEC_JS_DIR in path.parts[:-1]:
+            return True
+        return len(suffixes) >= 2 and suffixes[-2] in (".test", ".spec")
+    return False
 
 
 def file_base_position(relpath: str, invoked: bool = False) -> str:
