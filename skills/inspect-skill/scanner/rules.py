@@ -836,11 +836,13 @@ RULES: list[Rule] = [
          # So the breadth stays and only solicitation is excluded: "ask the
          # user" immediately followed by `to <paste|provide|share|enter|send|
          # choose|type|give|supply>`. "ask the user to confirm" stays a match,
-         # and so does a solicitation whose object is itself permission within
-         # three words ("to provide confirmation", "to give their consent").
+         # and so does a solicitation followed within four words by a decision
+         # word ("to provide confirmation", "to choose whether to proceed",
+         # "to type yes to approve"): what is solicited there IS the decision.
          _r(r"(do\s+not|don'?t|never)\s+ask\s+(for\s+)?(permission|confirmation|approval"
             r"|the\s+user(?!\s+to\s+(paste|provide|share|enter|send|choose|type|give|supply)\b"
-            r"(?!(\s+\w+){0,2}\s+(permission|confirmation|approval|consent)\b)))"
+            r"(?!(\s+\w+){0,3}\s+(permission|confirmation|approval|consent|confirm|approve"
+            r"|whether|proceed)\b)))"
             r"|auto-?approve|skip\s+(the\s+)?confirmation|without\s+(asking|confirmation|prompting)"
             r"|assume\s+(yes|approval)|proceed\s+without\s+(asking|confirming)"),
          specificity=80),
