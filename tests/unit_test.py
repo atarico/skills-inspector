@@ -2026,10 +2026,13 @@ def _harness_entry_cases() -> None:
         # End to end, through the rule that made this matter. Before the fix an
         # ordinary plugin command carrying a CRITICAL led the report at CRITICAL
         # on the strength of `status: dormant` alone.
+        # `deploy-step.sh`, not `go.sh`: a quoted invocation of a path a
+        # fixture also holds would resolve by suffix to that fixture and lift
+        # its sample floor in the repo self-scan (no literal guard; see QUOTED_INVOCATION_CASES).
         root = base / "plugin-command-no-finding"
         _write(root, {".claude-plugin/plugin.json": PLUGIN_MANIFEST,
-                      "commands/deploy.md": SKILL + "Run `bash scripts/go.sh`.\n",
-                      "scripts/go.sh": PAYLOAD})
+                      "commands/deploy.md": SKILL + "Run `bash scripts/deploy-step.sh`.\n",
+                      "scripts/deploy-step.sh": PAYLOAD})
         findings = _scan_findings(root)
         check("reachability", "a plugin command produces no BND-001",
               [f.id for f in findings if f.id == "BND-001"], [],
@@ -2037,7 +2040,7 @@ def _harness_entry_cases() -> None:
               "each one now inherits the severity of whatever the file holds")
         check("reachability", "a script the command wires up is not dormant",
               [f.status for f in findings
-               if f.location == "scripts/go.sh" and f.id == "CHN-001"], ["active"],
+               if f.location == "scripts/deploy-step.sh" and f.id == "CHN-001"], ["active"],
               "the entry point was the missing link: with it dormant, "
               "everything below it was dormant too")
 
@@ -2295,9 +2298,24 @@ QUOTED_INVOCATION_CASES = [
 
     ("python-data-literal", "run.py",
      'CASES = ["bash scripts/payload.sh"]\nprint(CASES)\n',
-     False,
-     "the twin of the three above and the reason the guard exists: no sink "
-     "wraps this literal, so it is a test-case string and fabricates no edge"),
+     True,
+     "pins the ACCEPTED false-positive direction: there is deliberately no "
+     "literal guard. A guard that dropped quoted invocations unless a sink sat "
+     "on the same line bought one self-scan finding and opened evasions (the "
+     "two cases below). A path inside a pure data literal may lift the sample "
+     "floor; that errs toward reporting"),
+
+    ("shell-bash-c-quoted", "setup.sh",
+     'bash -c "bash scripts/payload.sh"\n',
+     True,
+     "the invocation sits inside quotes with no Python-style sink; dropping "
+     "the edge returned the sample floor to a live payload (CRITICAL high -> low)"),
+
+    ("python-variable-then-sink", "run.py",
+     'import os\nCMD = "bash scripts/payload.sh"\nos.system(CMD)\n',
+     True,
+     "the invocation is stored in a variable and run on a LATER line, so no "
+     "sink shares the literal's line; a same-line guard dropped the edge"),
 
     ("markdown-prose-apostrophe", "SKILL.md",
      SKILL + "Run it first, and don't hesitate: `bash scripts/payload.sh`\n",

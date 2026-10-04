@@ -19,10 +19,6 @@ from pathlib import PurePosixPath
 
 from . import position
 
-# Mirrors `engine._MD_SUFFIXES`; engine imports this module, so it cannot be
-# imported from there.
-_MD_SUFFIXES = {".md", ".markdown", ".mdx"}
-
 ENTRY = "entry"
 ACTIVE = "active"
 CONDITIONAL = "conditional"
@@ -264,30 +260,18 @@ def _invocation_refs(text: str, relpath: str, known: set[str],
     an accident.
     """
     out: set[str] = set()
-    is_md = PurePosixPath(relpath).suffix.lower() in _MD_SUFFIXES
     positions = position.classify_lines(relpath, text)
     for idx, line in enumerate(text.splitlines()):
         if idx < len(positions) and positions[idx][0] != position.ACTIVE:
             continue
         for match in _REF_PATTERNS[3].finditer(line):
-            # "The Python literal is excluded" above is true for the MULTI-LINE
-            # case — a triple-quoted docstring is DOCUMENTARY per line, so the
-            # `position.ACTIVE` check above already removes it. A single-line
-            # literal reads as ACTIVE (`classify_lines` tracks triple-quote
-            # state only), so `CASES = ["bash x.sh"]` would fabricate an edge
-            # from a test-case string. The guard below drops such a match,
-            # with two deliberate exceptions:
-            #   * an exec sink wrapping the literal keeps the edge —
-            #     `os.system("bash x.sh")` is a command being run, not text
-            #     about one. Same helper `literal_demotion` uses for the same
-            #     question (`position.exec_sink_outside_literal`).
-            #   * markdown is not guarded, as in `_scan_text`: a prose
-            #     apostrophe (`Don't skip: bash x.sh`) opens a "literal" no
-            #     reader sees, and must not drop an instruction's edge.
-            if (not is_md
-                    and position.in_string_literal(line, match.start())
-                    and not position.exec_sink_outside_literal(line)):
-                continue
+            # Deliberately no literal guard here. One that dropped quoted
+            # invocations unless a sink sat on the same line was measured to
+            # buy a single self-scan finding and to open evasions
+            # (`bash -c "bash x.sh"`, an invocation stored in a variable and
+            # run on a later line). The accepted cost: a path inside a pure
+            # data literal can lift the sample floor, which errs toward
+            # reporting.
             target = _candidates(match.group(1), relpath, known, index)
             if target and target != relpath:
                 out.add(target)

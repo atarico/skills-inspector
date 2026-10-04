@@ -303,9 +303,6 @@ def _exec_sink_outside_literal(line: str) -> bool:
                for m in _EXEC_SINK.finditer(line))
 
 
-exec_sink_outside_literal = _exec_sink_outside_literal
-
-
 def in_inline_code(line: str, index: int) -> bool:
     """Is `index` inside a `backtick` span? Content shown in inline code is being
     quoted, not emitted — a token in backticks is documentation, like a fence."""
