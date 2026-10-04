@@ -259,14 +259,19 @@ _FSW002_WRITE_FORMS = (
 #   nothing is prose: a bare or attribute-quoted tag close (`<p>`,
 #   `<p class="x">`) is preceded by a letter or a quote, never by this
 #   anchor's set, so both stay markup — verified against both shapes.
-#   Two gaps of its own, also verified: (1) a tag close with a SPACE
-#   before `>` (`<p >CLAUDE.md`, `<img src="x" >`) is preceded by
-#   whitespace and DOES satisfy the anchor, so it can still misfire as
-#   a redirect in a `.html` file; (2) a real redirect with no space
-#   before `>` (`cat<p>CLAUDE.md`, `echo x<in>>~/.claude/settings.json`)
-#   is preceded by a letter, not whitespace/a digit/`&`, so it fails the
+#   The anchor's char class alone still admits a tag close with a SPACE
+#   before `>` (`<p >CLAUDE.md`, `<img src="x.png" >AGENTS.md`) — preceded
+#   by whitespace, same as a real ` > file` redirect. `engine._scan_text`
+#   closes this gap on the html_pattern branch only, not the regex here:
+#   it walks every anchor match left to right and drops one whose position
+#   still sits inside an unclosed `<tag ...` (`engine._open_tag_close_positions`),
+#   re-searching past just the rejected character so a genuine redirect
+#   later on the same line is still found — verified in both directions,
+#   including two `>` on one line. A real redirect with no space before
+#   `>` (`cat<p>CLAUDE.md`, `echo x<in>>~/.claude/settings.json`) is
+#   preceded by a letter, not whitespace/a digit/`&`, so it fails the
 #   anchor and stays silent — the same no-space shapes SHELL below still
-#   catches in code files.
+#   catches in code files. That one remains a documented gap.
 # - MIDDLE (`pattern`'s own shape): STRICT, OR a `>`/`>>` preceded by a
 #   word/quote/bracket character that is NOT the close of a bare HTML opening
 #   tag (`(?<!<[A-Za-z]{1,8})`, chained because `re` has no variable-width
