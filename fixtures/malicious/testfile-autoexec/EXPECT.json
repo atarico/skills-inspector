@@ -1,0 +1,7 @@
+{
+  "must_detect": ["EXE-003", "NET-001"],
+  "must_headline": ["EXE-003"],
+  "must_not_headline": ["NET-001"],
+  "note": "the published evasion that beat Snyk, Cisco and VirusTotal: a payload in tests/conftest.py, named by nothing in this manifest, that pytest auto-discovers and runs on its own. tests/helpers.py is the false-positive twin in the same directory, same shape of payload, ordinary filename: it stays floored because nothing auto-discovers it by name.",
+  "category": "malicious"
+}

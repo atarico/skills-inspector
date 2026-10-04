@@ -265,6 +265,13 @@ def _invocation_refs(text: str, relpath: str, known: set[str],
         if idx < len(positions) and positions[idx][0] != position.ACTIVE:
             continue
         for match in _REF_PATTERNS[3].finditer(line):
+            # Deliberately no literal guard here. One that dropped quoted
+            # invocations unless a sink sat on the same line was measured to
+            # buy a single self-scan finding and to open evasions
+            # (`bash -c "bash x.sh"`, an invocation stored in a variable and
+            # run on a later line). The accepted cost: a path inside a pure
+            # data literal can lift the sample floor, which errs toward
+            # reporting.
             target = _candidates(match.group(1), relpath, known, index)
             if target and target != relpath:
                 out.add(target)
