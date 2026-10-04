@@ -1,8 +1,8 @@
 {
   "_": "Recorded scanner output, one entry per fixture. `findings` is every rule id the scan produces including ids collapsed into related_rules; `headline` is the primary id of every finding that leads the report; `status` is those same ids paired with the reachability status they were reported under (`id:active`, `id:dormant`, `id:conditional`). Exact match on all three: a missing entry is a rule that stopped firing, an extra one is a rule that started over-firing. Regenerate with: python -m tests.coverage --update",
   "totals": {
-    "fixtures": 149,
-    "known_miss": 3
+    "fixtures": 150,
+    "known_miss": 5
   },
   "fixtures": {
     "benign/agent-config-manager": {
@@ -439,6 +439,11 @@
       "status": []
     },
     "known-miss/claude-subagent-dir": {
+      "findings": [],
+      "headline": [],
+      "status": []
+    },
+    "known-miss/external-cli-network": {
       "findings": [],
       "headline": [],
       "status": []
