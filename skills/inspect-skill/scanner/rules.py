@@ -92,7 +92,9 @@ def _r(pattern: str, flags: int = re.IGNORECASE) -> re.Pattern:
     return re.compile(pattern, flags)
 
 
-# odd/tasks/install-line-severity.md. FSW-004's `rm -rf` of a literal
+# Severity tempering (RULES.md §2.1): a rule may name a narrower, provably
+# benign shape of its own pattern that earns a lower severity, and the
+# line earns it only when every segment of it is benign. FSW-004's `rm -rf` of a literal
 # package-manager cache path: the RUN line every base-image Dockerfile ships
 # to keep the layer small. The flag group only spells the two-cluster and
 # single-cluster canonical orders (`-rf`/`-fr`/`-r -f`/`-f -r`) — narrower than

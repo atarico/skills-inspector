@@ -1000,7 +1000,7 @@ for rule_id, name, line, want in RULE_PATTERN_CASES:
 
 
 # ------------------------------------------------------------- severity tempering
-# odd/tasks/install-line-severity.md. RULES.md §2.1: severity is set by the
+# RULES.md §2.1: severity is set by the
 # rule, never by context — but a rule may name a narrower, PROVABLY benign
 # shape of its OWN pattern that earns a lower severity while the match stays
 # reported. Two invariants pinned here, both directions each:
@@ -1008,8 +1008,9 @@ for rule_id, name, line, want in RULE_PATTERN_CASES:
 # 1. The benign shape must fullmatch the WHOLE command segment the match sits
 #    in (bounded by `;`, `&&`, `||`, `|`), not just the rule's own match span
 #    — an extra operand, a substitution, or a chained command must break it.
-# 2. A line tempers only if EVERY segment where the rule fires on that line
-#    tempers. One HIGH sibling on the line keeps the whole line HIGH.
+# 2. A line tempers only if EVERY non-empty segment of it is a benign
+#    package-manager shape, including segments the rule does not fire on. One
+#    other command on the line keeps the whole line at the rule's severity.
 #
 # `want` is the tempered (severity, reason) tuple, or None when the line must
 # stay at the rule's own base severity untouched.
@@ -1072,8 +1073,8 @@ def _temper_fsw004_cases() -> None:
         result = engine._tempered_severity(rule, line)
         got = result[0] if result else None
         check(f"tempered/{rule_id}", name, got, want,
-              "install-line-severity: tempering needs a fullmatch of the whole "
-              "segment, and every segment where the rule fires on the line")
+              "tempering needs every segment of the line to fullmatch a benign "
+              "package-manager shape, and the firing ones the rule's own")
 
     # The rule's own severity is untouched — tempering only ever LOWERS what a
     # Finding carries, never the Rule's declared base (RULES.md §2.1).
@@ -1150,8 +1151,8 @@ def _temper_prv001_cases() -> None:
         result = engine._tempered_severity(rule, line)
         got = result[0] if result else None
         check(f"tempered/{rule_id}", name, got, want,
-              "install-line-severity: tempering needs a fullmatch of the whole "
-              "segment, and every segment where the rule fires on the line")
+              "tempering needs every segment of the line to fullmatch a benign "
+              "package-manager shape, and the firing ones the rule's own")
 
     check("tempered/PRV-001", "the rule's own severity field stays HIGH",
           _rule("PRV-001").severity, "HIGH",

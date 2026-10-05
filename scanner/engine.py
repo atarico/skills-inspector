@@ -347,8 +347,7 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     return out
 
 
-# A command segment boundary: the same set odd/tasks/install-line-severity.md
-# names — `;`, `&&`, `||`, `|` — each one hands a command's exit status or
+# A command segment boundary: `;`, `&&`, `||`, `|` — each one hands a command's exit status or
 # output to something else, so what precedes it is a complete, independently
 # judged command. `$(` and a backtick are NOT split points here: they open a
 # substitution INSIDE an operand rather than sequencing a new command, and a
