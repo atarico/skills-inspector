@@ -368,8 +368,10 @@ def _command_segments(line: str) -> list[str]:
 
 # A Dockerfile instruction keyword in front of a command is not part of the
 # command: `RUN rm -rf ...` and `RUN apt-get update` are the same segments as
-# without it. A trailing line-continuation backslash is likewise not a command.
-_SEGMENT_DECORATION = re.compile(r"^(?:RUN\s+)?|\s*\\$", re.IGNORECASE)
+# without it. A trailing line-continuation backslash is NOT stripped: it means
+# the command's operands go on past this line, and `_tempered_severity`
+# refuses such a line outright.
+_SEGMENT_DECORATION = re.compile(r"^(?:RUN\s+)?", re.IGNORECASE)
 
 
 def _bare_segment(segment: str) -> str:
@@ -392,6 +394,11 @@ def _tempered_severity(rule, line: str) -> tuple[str, str] | None:
     """
     tempered = rule.tempered
     if tempered is None:
+        return None
+    # A line ending in a continuation backslash is not a whole command: its
+    # next line can add operands (`/etc /root`, a local package file) that no
+    # rule fires on by itself. Judging the visible half would temper it.
+    if line.rstrip().endswith("\\"):
         return None
     fired = False
     for segment in _command_segments(line):

