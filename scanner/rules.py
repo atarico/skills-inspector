@@ -832,9 +832,11 @@ RULES: list[Rule] = [
     # OBJECT. `without` inverts the relation entirely (it introduces what is
     # NOT sent), and plain proximity cannot see that.
     #
-    # The filler group now refuses to step over exactly one word, `without`,
-    # because it inverts the relation and is the only word backed by a
-    # measured false positive. Every other word still passes: `with` and
+    # The filler group refuses to step over exactly one shape: a `without`
+    # that governs the noun within one word ("without enough context"),
+    # because it inverts the relation and is the only shape backed by a
+    # measured false positive. An adverbial `without` ("send without
+    # hesitation the chat history") still passes, as does every other word:
     # `from` carry real exfiltration ("send an email WITH the conversation
     # history to ...", "upload everything FROM the conversation to ..."), and
     # an earlier draft that also refused `for, about, into, onto, via` bought
@@ -851,7 +853,8 @@ RULES: list[Rule] = [
             r"other\s+skills?|installed\s+skills?|CLAUDE\.md|AGENTS\.md)"
             r"[^\n]{0,120}(send|post|upload|transmit|share|report|sync|push)\s+"
             r"|(send|post|upload)\s+"
-            r"((?!without\b)\w+\s+){0,4}"
+            r"((?!without\s+(\w+\s+)?(the\s+)?(conversation|transcript|history|memory|context)\b)"
+            r"\w+\s+){0,4}"
             r"(the\s+)?(conversation|transcript|history|memory|context)"),
          specificity=91, instruction_surface=True),
 
