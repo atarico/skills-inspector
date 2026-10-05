@@ -125,7 +125,14 @@ _PRV001_TEMPER_FLAG = (
 # A literal package name only — no `.`-leading relative paths, no URLs, no
 # `$(...)` substitutions: each of those contains a character this charset
 # does not have, so the token fails to fullmatch and the line stays HIGH.
-_PRV001_TEMPER_PACKAGE = r"[a-z0-9][a-z0-9+.\-]*"
+#
+# A local package file is not a package name either: `dnf install payload.rpm`
+# and `yum install payload.rpm` install a file in the working directory with no
+# `./`, so an operand ending `.rpm`, `.deb` or `.apk` is refused by lookahead.
+# The charset has no `/`, so a path operand already fails to fullmatch.
+_PRV001_TEMPER_PACKAGE = (
+    r"(?![a-z0-9+.\-]*\.(?:rpm|deb|apk)(?![a-z0-9+.\-]))"
+    r"[a-z0-9][a-z0-9+.\-]*")
 _PRV001_TEMPER_TOKEN = rf"(?:{_PRV001_TEMPER_FLAG}|{_PRV001_TEMPER_PACKAGE})"
 PRV001_TEMPERED = Tempered(
     _r(rf"sudo\s+{_PRV001_TEMPER_MANAGER}\s+{_PRV001_TEMPER_SUBCMD}"

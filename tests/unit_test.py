@@ -1052,6 +1052,20 @@ def _temper_prv001_cases() -> None:
          'sudo apt-get install -y curl; if [ "$CI" ]; then exit; fi', None),
         ("PRV-001", "a benign non-sudo install chained after still tempers",
          "sudo apt-get update && apt-get install -y curl", "MEDIUM"),
+
+        # -- local package files: dnf/yum install a local .rpm with no ./ --
+        ("PRV-001", "dnf installing a local .rpm keeps HIGH",
+         "sudo dnf install -y payload.rpm", None),
+        ("PRV-001", "yum installing a local .rpm keeps HIGH",
+         "sudo yum install -y payload.rpm", None),
+        ("PRV-001", "apt-get installing a ./ .deb keeps HIGH",
+         "sudo apt-get install -y ./pkg.deb", None),
+        ("PRV-001", "apt-get installing a bare .deb keeps HIGH",
+         "sudo apt-get install -y pkg.deb", None),
+        ("PRV-001", "an uppercase package-file suffix keeps HIGH",
+         "sudo dnf install -y PAYLOAD.RPM", None),
+        ("PRV-001", "several literal packages still temper",
+         "sudo apt-get install -y curl git", "MEDIUM"),
     ]
 
     for rule_id, name, line, want in TEMPERED_CASES:
