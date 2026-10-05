@@ -90,7 +90,7 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
                                 pos.classify_lines(entry.relpath, entry.text, invoked),
                                 line_matches)
 
-        base_position = pos.file_base_position(entry.relpath, invoked)
+        base_position = pos.file_base_position(entry.relpath, invoked, entry.text)
         for hit in structural.inspect(entry.relpath, entry.text):
             # Structural findings respect position too: a settings.json inside a
             # fixtures/ tree is a sample, not a live control-plane change.
@@ -107,7 +107,7 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
 
     raw += _reachability_findings(graph, unit,
                                   {f.location for f in raw})
-    raw += _unread_findings(graph, unread)
+    raw += _unread_findings(graph, unread, unit)
 
     # Supersession runs BEFORE the two annotation passes below, and that order is
     # the fix for a docstring that used to lie. The comment claimed the location
@@ -269,7 +269,7 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     # Only the instruction-surface promotion reads this, and only for markdown.
     quoted = pos.quoted_carry(text, positions) if is_md else []
 
-    base_position = pos.file_base_position(relpath, invoked)
+    base_position = pos.file_base_position(relpath, invoked, text)
     hidden = ev.invisible_counts(text)
     total_hidden = sum(hidden.values())
     if total_hidden > 0:
@@ -541,7 +541,7 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
                        "from whatever the file contains.",
                 legitimate_use="Vendored deps, assets, docs, tests.",
                 what_to_check="Why is this shipped if nothing loads it?",
-                position=pos.file_base_position(relpath), specificity=70))
+                position=_static_position(unit, relpath), specificity=70))
         elif status == reachability.CONDITIONAL:
             source = graph.conditional_from.get(relpath, "?")
             out.append(Finding(
@@ -555,7 +555,7 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
                        "on a trigger. The skill-native 'below the fold'.",
                 legitimate_use="Genuine progressive disclosure.",
                 what_to_check="Read this file as carefully as the entry point.",
-                position=pos.file_base_position(relpath), specificity=70))
+                position=_static_position(unit, relpath), specificity=70))
 
     for raw_ref, path, line in sorted(graph.dangling)[:20]:
         out.append(Finding(
@@ -567,12 +567,29 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
             impact="The file arrives after your audit, or is fetched at runtime.",
             legitimate_use="A broken docs link. Verify which.",
             what_to_check="Does anything create this path later?",
-            position=pos.file_base_position(path), specificity=75))
+            position=_static_position(unit, path), specificity=75))
 
     return out
 
 
-def _unread_findings(graph, unread: list[tuple[str, str]]) -> list[Finding]:
+def _file_text(unit: Unit, relpath: str) -> str | None:
+    """The text the scan read for this file, or None when it read none.
+
+    A `.d.ts` is a declaration file only by content (`pos.is_declaration_file`),
+    so a position computed without the bytes must not grant the demotion.
+    """
+    for entry in unit.files:
+        if entry.relpath == relpath:
+            return entry.text
+    return None
+
+
+def _static_position(unit: Unit, relpath: str) -> str:
+    return pos.file_base_position(relpath, False, _file_text(unit, relpath))
+
+
+def _unread_findings(graph, unread: list[tuple[str, str]],
+                     unit: Unit) -> list[Finding]:
     """BND-005 — a file the audit could not read in full, that something runs.
 
     The scanner used to drop oversized files entirely, which made padding a
@@ -603,7 +620,7 @@ def _unread_findings(graph, unread: list[tuple[str, str]]) -> list[Finding]:
             legitimate_use="Large vendored data, generated bundles, minified "
                            "assets — all common, all worth confirming.",
             what_to_check="Read this file yourself, or split it, and rescan.",
-            position=pos.file_base_position(relpath), specificity=95))
+            position=_static_position(unit, relpath), specificity=95))
     return out
 
 
@@ -700,7 +717,8 @@ def profile(findings: list[Finding], unit: Unit) -> dict:
     reported, never escalated.
 
     A finding located in a `.d.ts` file is excluded here, and only here — it
-    stays in `findings` untouched (D3, odd/tasks/declaration-files-and-fsw002.md).
+    stays in `findings` untouched (a declaration file is excluded because it
+    cannot execute anything, so it must not inflate the capability summary).
     A TypeScript declaration file cannot execute, fetch, or evaluate anything,
     so it must not make this profile claim Network / Reads secrets / Executes
     code for a unit that does none of it — unless `invoked` already left it
@@ -709,8 +727,10 @@ def profile(findings: list[Finding], unit: Unit) -> dict:
     position/confidence filter on this function D3 rejects.
     """
     caps: dict[str, list[str]] = {}
+    texts = {f.relpath: f.text for f in unit.files if f.text is not None}
     for finding in findings:
-        if pos.is_declaration_file(finding.location) and finding.position == pos.DOCUMENTARY:
+        if (pos.is_declaration_file(finding.location, texts.get(finding.location))
+                and finding.position == pos.DOCUMENTARY):
             continue
         if finding.severity == "INFO" and finding.capability in caps:
             continue
