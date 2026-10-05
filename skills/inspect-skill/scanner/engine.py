@@ -5,6 +5,7 @@ The four axes are computed independently and never multiplied together.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from . import evidence as ev
@@ -89,7 +90,7 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
                                 pos.classify_lines(entry.relpath, entry.text, invoked),
                                 line_matches)
 
-        base_position = pos.file_base_position(entry.relpath, invoked)
+        base_position = pos.file_base_position(entry.relpath, invoked, entry.text)
         for hit in structural.inspect(entry.relpath, entry.text):
             # Structural findings respect position too: a settings.json inside a
             # fixtures/ tree is a sample, not a live control-plane change.
@@ -106,7 +107,7 @@ def scan(unit: Unit) -> tuple[list[Finding], dict]:
 
     raw += _reachability_findings(graph, unit,
                                   {f.location for f in raw})
-    raw += _unread_findings(graph, unread)
+    raw += _unread_findings(graph, unread, unit)
 
     # Supersession runs BEFORE the two annotation passes below, and that order is
     # the fix for a docstring that used to lie. The comment claimed the location
@@ -268,7 +269,7 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     # Only the instruction-surface promotion reads this, and only for markdown.
     quoted = pos.quoted_carry(text, positions) if is_md else []
 
-    base_position = pos.file_base_position(relpath, invoked)
+    base_position = pos.file_base_position(relpath, invoked, text)
     hidden = ev.invisible_counts(text)
     total_hidden = sum(hidden.values())
     if total_hidden > 0:
@@ -328,16 +329,91 @@ def _scan_text(unit: Unit, relpath: str, text: str,
             if not is_md:
                 for _ in range(pos.literal_demotion(line, match.start())):
                     confidence = pos.demote(confidence, pos.ILLUSTRATIVE)
+            severity = rule.severity
+            evidence = ev.sanitize(line, centre=(match.start(), match.end()))
+            temper = _tempered_severity(rule, line)
+            if temper is not None:
+                severity, reason = temper
+                evidence = f"{evidence} — tempered: {reason}"
             out.append(Finding(
-                id=rule.id, severity=rule.severity, confidence=confidence,
+                id=rule.id, severity=severity, confidence=confidence,
                 status="active", disclosure="undeclared", capability=rule.capability,
                 location=relpath, line=idx + 1,
                 detects=rule.detects,
-                evidence=ev.sanitize(line, centre=(match.start(), match.end())),
+                evidence=evidence,
                 impact=rule.impact, legitimate_use=rule.legitimate,
                 what_to_check=rule.check, position=reported,
                 specificity=rule.specificity))
     return out
+
+
+# A command segment boundary: `;`, `&&`, `||`, `|` — each one hands a command's exit status or
+# output to something else, so what precedes it is a complete, independently
+# judged command. `$(` and a backtick are NOT split points here: they open a
+# substitution INSIDE an operand rather than sequencing a new command, and a
+# `Tempered.pattern` fullmatch already refuses them on its own — the literal
+# charsets in rules.py have no `$`, `(` or backtick in them, so an operand
+# carrying one simply fails to fullmatch instead of being cut away and
+# forgotten. Splitting on them here would have done the opposite: turning
+# `sudo apt-get install $(curl -s x)` into a harmless leading segment "sudo
+# apt-get install" (zero operands, which DOES fullmatch) plus a trailing
+# fragment the rule never fires on at all — exactly the evasion this function
+# exists to refuse.
+_SEGMENT_SPLIT = re.compile(r"&&|\|\||;|\|")
+
+
+def _command_segments(line: str) -> list[str]:
+    return _SEGMENT_SPLIT.split(line)
+
+
+# A Dockerfile instruction keyword in front of a command is not part of the
+# command: `RUN rm -rf ...` and `RUN apt-get update` are the same segments as
+# without it. A trailing line-continuation backslash is NOT stripped: it means
+# the command's operands go on past this line, and `_tempered_severity`
+# refuses such a line outright.
+_SEGMENT_DECORATION = re.compile(r"^(?:RUN\s+)?", re.IGNORECASE)
+
+
+def _bare_segment(segment: str) -> str:
+    return _SEGMENT_DECORATION.sub("", segment.strip()).strip()
+
+
+def _tempered_severity(rule, line: str) -> tuple[str, str] | None:
+    """RULES.md §2.1: same detection, narrower severity, only when the WHOLE
+    line is provably benign.
+
+    The line is split into command segments (`;`, `&&`, `||`, `|`). EVERY
+    non-empty segment must fullmatch one of the benign package-manager shapes
+    in `rules.BENIGN_SEGMENT_SHAPES` — not only the segments where this rule
+    fires — and every segment where the rule fires must fullmatch the rule's
+    own `tempered.pattern`. One other segment (a second rm, a `find -exec`, a
+    download piped to a shell, a conditional) sends the line back to the
+    rule's own severity. A Finding is one row per line and cannot say "half of
+    this line is fine", and a segment this rule does not fire on may still be
+    the dangerous one that another rule would have reported.
+    """
+    tempered = rule.tempered
+    if tempered is None:
+        return None
+    # A line ending in a continuation backslash is not a whole command: its
+    # next line can add operands (`/etc /root`, a local package file) that no
+    # rule fires on by itself. Judging the visible half would temper it.
+    if line.rstrip().endswith("\\"):
+        return None
+    fired = False
+    for segment in _command_segments(line):
+        segment = _bare_segment(segment)
+        if not segment:
+            continue
+        if rule.pattern.search(segment):
+            fired = True
+            if not tempered.pattern.fullmatch(segment):
+                return None
+        elif not any(shape.fullmatch(segment) for shape in R.BENIGN_SEGMENT_SHAPES):
+            return None
+    if not fired:
+        return None
+    return tempered.severity, tempered.reason
 
 
 def _instruction_is_live(rule, line: str, match, kind: str, position: str,
@@ -471,7 +547,7 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
                        "from whatever the file contains.",
                 legitimate_use="Vendored deps, assets, docs, tests.",
                 what_to_check="Why is this shipped if nothing loads it?",
-                position=pos.file_base_position(relpath), specificity=70))
+                position=_static_position(unit, relpath), specificity=70))
         elif status == reachability.CONDITIONAL:
             source = graph.conditional_from.get(relpath, "?")
             out.append(Finding(
@@ -485,7 +561,7 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
                        "on a trigger. The skill-native 'below the fold'.",
                 legitimate_use="Genuine progressive disclosure.",
                 what_to_check="Read this file as carefully as the entry point.",
-                position=pos.file_base_position(relpath), specificity=70))
+                position=_static_position(unit, relpath), specificity=70))
 
     for raw_ref, path, line in sorted(graph.dangling)[:20]:
         out.append(Finding(
@@ -497,12 +573,29 @@ def _reachability_findings(graph, unit: Unit, flagged: set[str]) -> list[Finding
             impact="The file arrives after your audit, or is fetched at runtime.",
             legitimate_use="A broken docs link. Verify which.",
             what_to_check="Does anything create this path later?",
-            position=pos.file_base_position(path), specificity=75))
+            position=_static_position(unit, path), specificity=75))
 
     return out
 
 
-def _unread_findings(graph, unread: list[tuple[str, str]]) -> list[Finding]:
+def _file_text(unit: Unit, relpath: str) -> str | None:
+    """The text the scan read for this file, or None when it read none.
+
+    A `.d.ts` is a declaration file only by content (`pos.is_declaration_file`),
+    so a position computed without the bytes must not grant the demotion.
+    """
+    for entry in unit.files:
+        if entry.relpath == relpath:
+            return entry.text
+    return None
+
+
+def _static_position(unit: Unit, relpath: str) -> str:
+    return pos.file_base_position(relpath, False, _file_text(unit, relpath))
+
+
+def _unread_findings(graph, unread: list[tuple[str, str]],
+                     unit: Unit) -> list[Finding]:
     """BND-005 — a file the audit could not read in full, that something runs.
 
     The scanner used to drop oversized files entirely, which made padding a
@@ -533,7 +626,7 @@ def _unread_findings(graph, unread: list[tuple[str, str]]) -> list[Finding]:
             legitimate_use="Large vendored data, generated bundles, minified "
                            "assets — all common, all worth confirming.",
             what_to_check="Read this file yourself, or split it, and rescan.",
-            position=pos.file_base_position(relpath), specificity=95))
+            position=_static_position(unit, relpath), specificity=95))
     return out
 
 
@@ -630,23 +723,20 @@ def profile(findings: list[Finding], unit: Unit) -> dict:
     reported, never escalated.
 
     A finding located in a `.d.ts` file is excluded here, and only here — it
-    stays in `findings` untouched (D3, odd/tasks/declaration-files-and-fsw002.md).
+    stays in `findings` untouched (a declaration file is excluded because it
+    cannot execute anything, so it must not inflate the capability summary).
     A TypeScript declaration file cannot execute, fetch, or evaluate anything,
     so it must not make this profile claim Network / Reads secrets / Executes
-    code for a unit that does none of it.
-
-    Targeted at the declaration-file case by re-checking the finding's own
-    `location`, not by reading `finding.position`: `pos.file_base_position`
-    already demotes that position to `documentary` for every line of the file,
-    but `documentary` is also what a `.md` file, or anything under
-    `fixtures/`/`examples/`, gets — and filtering THIS function on position or
-    confidence generally is the broad, unmeasured semantic change D3 rejects.
-    Checking the suffix again keeps the exclusion exactly as narrow as the
-    fact that motivates it.
+    code for a unit that does none of it — unless `invoked` already left it
+    `active` (see `file_base_position`). Reading `finding.position` here too,
+    not only the suffix, grants that one exception without the general
+    position/confidence filter on this function D3 rejects.
     """
     caps: dict[str, list[str]] = {}
+    texts = {f.relpath: f.text for f in unit.files if f.text is not None}
     for finding in findings:
-        if pos.is_declaration_file(finding.location):
+        if (pos.is_declaration_file(finding.location, texts.get(finding.location))
+                and finding.position == pos.DOCUMENTARY):
             continue
         if finding.severity == "INFO" and finding.capability in caps:
             continue
