@@ -825,7 +825,7 @@ RULES: list[Rule] = [
          ambiguous_object=_r(_CONCEAL_DIRECTIVE + r"them\b"),
          explicit_object=_r(r"\b(user|human|operator|owner)\b")),
 
-    # D4: the second alternative below used to accept ANY four words between
+    # The second alternative below used to accept ANY four words between
     # the transmit verb and the noun, so "Never send filenames without enough
     # context to identify the option" matched — `context` merely trailed
     # `send` inside the window, with nothing requiring it to be `send`'s
@@ -837,7 +837,7 @@ RULES: list[Rule] = [
     # because it inverts the relation and is the only shape backed by a
     # measured false positive. An adverbial `without` ("send without
     # hesitation the chat history") still passes, as does every other word:
-    # `from` carry real exfiltration ("send an email WITH the conversation
+    # `with` and `from` carry real exfiltration ("send an email WITH the conversation
     # history to ...", "upload everything FROM the conversation to ..."), and
     # an earlier draft that also refused `for, about, into, onto, via` bought
     # no measured precision while opening those evasions. Ordinary
