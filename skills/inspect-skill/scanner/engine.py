@@ -367,31 +367,45 @@ def _command_segments(line: str) -> list[str]:
     return _SEGMENT_SPLIT.split(line)
 
 
-def _tempered_severity(rule, line: str) -> tuple[str, str] | None:
-    """RULES.md §2.1 / odd/tasks/install-line-severity.md: same detection,
-    narrower severity, when the rule's own pattern fires on nothing but a
-    provably benign shape.
+# A Dockerfile instruction keyword in front of a command is not part of the
+# command: `RUN rm -rf ...` and `RUN apt-get update` are the same segments as
+# without it. A trailing line-continuation backslash is likewise not a command.
+_SEGMENT_DECORATION = re.compile(r"^(?:RUN\s+)?|\s*\\$", re.IGNORECASE)
 
-    Every command segment on the LINE where this rule fires (`rule.pattern`
-    matches somewhere inside it) must FULLMATCH `rule.tempered.pattern` — not
-    just the span the base rule matched. One segment that fires without
-    fullmatching the benign shape (a second, unsafe command chained on the
-    same line; an evasion the benign shape does not cover) sends the whole
-    line back to `rule.severity`, because a Finding is one row per line and
-    cannot report "half of this line is fine."
+
+def _bare_segment(segment: str) -> str:
+    return _SEGMENT_DECORATION.sub("", segment.strip()).strip()
+
+
+def _tempered_severity(rule, line: str) -> tuple[str, str] | None:
+    """RULES.md §2.1: same detection, narrower severity, only when the WHOLE
+    line is provably benign.
+
+    The line is split into command segments (`;`, `&&`, `||`, `|`). EVERY
+    non-empty segment must fullmatch one of the benign package-manager shapes
+    in `rules.BENIGN_SEGMENT_SHAPES` — not only the segments where this rule
+    fires — and every segment where the rule fires must fullmatch the rule's
+    own `tempered.pattern`. One other segment (a second rm, a `find -exec`, a
+    download piped to a shell, a conditional) sends the line back to the
+    rule's own severity. A Finding is one row per line and cannot say "half of
+    this line is fine", and a segment this rule does not fire on may still be
+    the dangerous one that another rule would have reported.
     """
     tempered = rule.tempered
     if tempered is None:
         return None
-    matched_any = False
+    fired = False
     for segment in _command_segments(line):
-        segment = segment.strip()
-        if not segment or not rule.pattern.search(segment):
+        segment = _bare_segment(segment)
+        if not segment:
             continue
-        matched_any = True
-        if not tempered.pattern.fullmatch(segment):
+        if rule.pattern.search(segment):
+            fired = True
+            if not tempered.pattern.fullmatch(segment):
+                return None
+        elif not any(shape.fullmatch(segment) for shape in R.BENIGN_SEGMENT_SHAPES):
             return None
-    if not matched_any:
+    if not fired:
         return None
     return tempered.severity, tempered.reason
 

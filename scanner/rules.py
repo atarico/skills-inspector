@@ -133,6 +133,18 @@ PRV001_TEMPERED = Tempered(
     "MEDIUM",
     "every flag is allowlisted and every other operand is a literal package name")
 
+# The family of benign package-manager segments. A line is tempered only when
+# EVERY segment of it matches one of these (see `engine._tempered_severity`),
+# so a chained command that neither temper names cannot ride along on the
+# discount: the segments are the two tempered shapes above plus the plain form
+# of the install/update shape, which a Dockerfile writes with no `sudo`.
+# `sudo` is optional here and nowhere else — PRV-001's own shape still needs it.
+PKG_MANAGER_SEGMENT = _r(
+    rf"(?:sudo\s+)?{_PRV001_TEMPER_MANAGER}\s+{_PRV001_TEMPER_SUBCMD}"
+    rf"(?:\s+{_PRV001_TEMPER_TOKEN})*")
+BENIGN_SEGMENT_SHAPES = (
+    FSW004_TEMPERED.pattern, PRV001_TEMPERED.pattern, PKG_MANAGER_SEGMENT)
+
 
 # A destination is only local when the host ENDS at a real boundary. A bare
 # prefix is not one — `localhost.evil.example`, `10.evil.example` and
