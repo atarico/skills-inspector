@@ -722,15 +722,16 @@ def profile(findings: list[Finding], unit: Unit) -> dict:
     """Capability profile. CHN-003 lives here and only here: co-occurrence is
     reported, never escalated.
 
-    A finding located in a `.d.ts` file is excluded here, and only here — it
-    stays in `findings` untouched (a declaration file is excluded because it
-    cannot execute anything, so it must not inflate the capability summary).
-    A TypeScript declaration file cannot execute, fetch, or evaluate anything,
-    so it must not make this profile claim Network / Reads secrets / Executes
-    code for a unit that does none of it — unless `invoked` already left it
-    `active` (see `file_base_position`). Reading `finding.position` here too,
-    not only the suffix, grants that one exception without the general
-    position/confidence filter on this function D3 rejects.
+    A finding located in a declaration file is excluded here, and only here —
+    it stays in `findings` untouched. "Declaration file" means the suffix AND
+    declaration-only content (`pos.is_declaration_file`), so a `.d.ts` holding
+    executable statements counts like any `.ts`. A real declaration file
+    cannot execute, fetch, or evaluate anything, so it must not make this
+    profile claim Network / Reads secrets / Executes code for a unit that does
+    none of it — unless `invoked` already left it `active` (see
+    `file_base_position`). Reading `finding.position` grants that one
+    exception without filtering this function on position or confidence in
+    general, which would hide every sample-directory capability too.
     """
     caps: dict[str, list[str]] = {}
     texts = {f.relpath: f.text for f in unit.files if f.text is not None}

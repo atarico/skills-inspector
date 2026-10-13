@@ -575,7 +575,10 @@ def _mask_code(text: str) -> list[str] | None:
                     j += 2 if raw[j] == "\\" else 1
                 if j >= n:
                     return None
-                buf.append('""')
+                # A template with `${` runs code where a value is expected, so
+                # it is masked to something no literal rule accepts. In a type
+                # position (`a${string}`) nothing reads the mask.
+                buf.append('"$"' if ch == "`" and "${" in raw[i:j] else '""')
                 i = j + 1
             else:
                 buf.append(ch)
@@ -591,10 +594,10 @@ _MODS = (r"(?:(?:export|declare|default|abstract|async|readonly|static|public|"
 # `namespace` / `module` / `declare global` body. `import "x"` (side effect),
 # `foo(`, `x = `, `if (`, `await` and every other executable start are absent.
 _STMT_START = re.compile(
-    rf"(?:\}}|export\s*(?:\{{|\*|=|as\s+namespace\b)|export\s+default\s+{_NAME}\s*;?$"
+    rf"(?:\}}|export\s*(?:\{{|\*|=|as\s+namespace\b)|export\s+default\s+{_NAME}\s*(?:;|\}}|$)"
     rf"|import\s+type\b|import\s*\{{[^}}]*$"
     rf"|import\s*(?:\{{|\*|{_NAME})[^;]*?\bfrom\s*\"\""
-    rf"|(?:export\s+)?import\s+(?:type\s+)?{_NAME}\s*=\s*(?:require\(\"\"\)|[\w$.]+)\s*;?$"
+    rf"|(?:export\s+)?import\s+(?:type\s+)?{_NAME}\s*=\s*(?:require\(\"\"\)|[\w$.]+)\s*(?:;|\}}|$)"
     rf"|{_MODS}(?:const\s+enum|enum|interface|type|namespace|module|global|class"
     rf"|function|const|let|var)\s+(?![=(.]))")
 # A statement or member that continues the previous line instead of starting one.
@@ -611,7 +614,46 @@ _BLOCK_KIND = (
 )
 _OBJECT_TYPE_AFTER = re.compile(r"\b(?:extends|keyof|typeof|readonly|infer|in|is|asserts|=>)$")
 _CONTINUES = ("=", "|", "&", ",", ":", "=>", "?", "(", "[", "<")
-_LITERAL_INIT = re.compile(r"=\s*(?:\"\"|-?\d[\w.]*|true|false|null)\s*$")
+_LITERAL_VALUE = re.compile(r"(?:\"\"|-?\d[\w.]*|true|false|null)")
+# A tagged template is a call with no parenthesis: Function`code``` builds a
+# function from the string and the second template invokes it. A name, `)` or
+# `]` glued to a masked string is one. The names excluded are the keywords and
+# modifiers that precede a string in declaration syntax: `from ""`,
+# `module ""`, `readonly ""`, `x is ""`, `a as ""`.
+_TAGGED = re.compile(
+    r"(?:(?<![\w$])(?!(?:from|module|import|export|declare|default|abstract|async"
+    r"|readonly|static|public|private|protected|get|set|is|extends|keyof|typeof"
+    r"|in|as|infer|asserts|unique|satisfies)\b)[\w$]+|[)\]])\s*\"\$?\"")
+# What may stand left of an `=` whose right side is not a value.
+_TYPE_ALIAS_HEAD = re.compile(rf"{_MODS}type\s+{_NAME}\s*(?:<.*>)?$")
+# `<out O`, `<const T`, `, U extends {` — a closed `{}` constraint leaves only
+# `extends` in the head, because the block's text is not kept.
+_TYPE_PARAM_HEAD = re.compile(
+    rf"[<,]\s*(?:(?:in|out|const)\s+)*{_NAME}(?:\s+extends\b[^=;()]*)?$")
+_IMPORT_ALIAS_HEAD = re.compile(rf"(?:export\s+)?import\s+(?:type\s+)?{_NAME}$")
+_QUALIFIED = re.compile(r"[\w$]+(?:\.[\w$]+)*")
+
+
+def _bad_assignment(head: str, rhs: str) -> bool:
+    """Is this `=` an initialiser that a declaration file cannot hold?
+
+    `head` is the statement text left of the `=`, `rhs` the line right of it.
+    A type alias and a type-parameter default take a type; `import X =` and
+    `export =` take a name; everything else (const, class field, enum member)
+    is a value, and ambient context only allows a literal. An empty right side
+    continues onto the next line, where nothing would check it: a violation.
+    """
+    if _TYPE_ALIAS_HEAD.match(head):
+        return False
+    if (_TYPE_PARAM_HEAD.search(head)
+            and head.replace("=>", "").count("<") > head.count(">")):
+        return False
+    value = re.split(r"[;,}]", rhs, maxsplit=1)[0].strip()
+    if _IMPORT_ALIAS_HEAD.match(head):
+        return not (_QUALIFIED.fullmatch(value) or value == 'require("")')
+    if head == "export":
+        return not _QUALIFIED.fullmatch(value)
+    return not _LITERAL_VALUE.fullmatch(value)
 # An identifier (or `>` / `]`) glued to `(` is a call or a method signature.
 # Only a member line may be one; anywhere else it is an executable call.
 _CALLISH = re.compile(r"(?<![\w$])(?!(?:new|keyof|typeof|readonly|infer|asserts"
@@ -621,15 +663,18 @@ _CALLISH = re.compile(r"(?<![\w$])(?!(?:new|keyof|typeof|readonly|infer|asserts"
 def _first_violation(text: str) -> str | None:
     """The first line that is not declaration syntax, else None.
 
-    Simple line rules over a comment-stripped, string-masked view; no parser,
-    and deliberately biased toward "violation": a miss costs a visible finding,
-    a false pass hides a payload. A statement is rejected when it starts with
-    anything but `declare` / `export` / `import ... from` / `import type` /
-    `interface` / `type` / `namespace` / `module` / `enum` (a call such as
-    `require(...)` or `execSync(...)`, an assignment, `import "x"`, `if (`,
-    `await`), when a `{` follows `)` (a function body), when a call-shaped
-    member has arguments that are not parameter declarations, and when a
-    const/let/var initialiser is not a literal.
+    Line and bracket rules over a comment-stripped, string-masked view; no
+    parser, and deliberately biased toward "violation": a miss costs a visible
+    finding, a false pass hides a payload. A statement is rejected when it
+    starts with anything but `declare` / `export` / `import ... from` /
+    `import type` / `interface` / `type` / `namespace` / `module` / `enum` (a
+    call such as `require(...)` or `execSync(...)`, an assignment,
+    `import "x"`, `if (`, `await`) — at the top of the file, after a `;`, or
+    right after a namespace's `{` — when a `{` follows `)` (a function body),
+    when a call-shaped member has arguments that are not parameter
+    declarations, when anything is a tagged template, and when an initialiser
+    anywhere (const, class field, enum member, one line or several) is not a
+    literal.
     """
     lines = _mask_code(text)
     if lines is None:
@@ -641,6 +686,8 @@ def _first_violation(text: str) -> str | None:
     for line in lines:
         if not line:
             continue
+        if _TAGGED.search(line):
+            return line
         top = stack[-1] if stack else "top"
         free = top in ("(", "[") or cont
         if (not free and top in ("top", "container") and not _STMT_START.match(line)
@@ -693,12 +740,20 @@ def _first_violation(text: str) -> str | None:
                 headers.append(before)
                 stmt = ""
                 seg = i + 1
+                rest = line[i + 1:].strip()
+                if kind == "container" and rest and not _STMT_START.match(rest):
+                    return line
             elif ch == "}":
                 if not stack or stack[-1] in ("(", "["):
                     return line
                 stack.pop()
                 stmt = headers.pop()
                 seg = i + 1
+            elif (ch == "=" and line[i - 1:i] not in ("=", "!", "<", ">")
+                    and line[i + 1:i + 2] not in ("=", ">")
+                    and not (stack and stack[-1] in ("(", "["))):
+                if _bad_assignment((stmt + " " + line[seg:i]).strip(), line[i + 1:]):
+                    return line
             elif ch == ";" and not (stack and stack[-1] in ("(", "[")):
                 stmt = ""
                 seg = i + 1
@@ -707,10 +762,6 @@ def _first_violation(text: str) -> str | None:
                         and not _STMT_START.match(rest):
                     return line
             i += 1
-        if re.match(rf"{_MODS}(?:const|let|var)\b", line):
-            m = re.search(r"(?<![=!<>])=(?![=>])", line)
-            if m and not _LITERAL_INIT.search(line[m.start():].rstrip(";").strip()):
-                return line
         stmt = (stmt + " " + line[seg:]).strip()
         in_body = bool(stack) and stack[-1] in ("members", "enum", "list")
         ends_open = line.endswith(_CONTINUES) and not (in_body and line.endswith(","))

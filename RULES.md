@@ -321,11 +321,17 @@ name ends `.d.ts` AND the content is declaration-only (`position.declaration_onl
 That is a set of simple line rules over a comment-stripped, string-masked view,
 not a parser, and it errs toward NOT demoting. A top-level statement must start
 with `declare`, `export`, `import ... from`, `import type`, `interface`, `type`,
-`namespace`, `module` or `enum`; a call (`require(...)`, `execSync(...)`), an
-assignment, a side-effect `import "x"`, `if (`, `for (`, `await`, a `{` that
-follows `)` (a function body), a call-shaped member whose arguments are not
-parameter declarations, or a const initialiser that is not a literal makes the
-file code. Unknown content (`text` is `None`) is never a declaration file.
+`namespace`, `module` or `enum` — at the top of the file, after a `;`, and right
+after a namespace's `{`. A call (`require(...)`, `execSync(...)`), a tagged
+template (``Function`code``` `` is a call with no parenthesis), an assignment,
+a side-effect `import "x"`, `if (`, `for (`, `await`, a `{` that follows `)` (a
+function body), or a call-shaped member whose arguments are not parameter
+declarations makes the file code. So does any initialiser that is not a
+literal, wherever it sits: a const, a class field, an enum member, on one line
+or split across two. A type alias, a type-parameter default, `import X =` and
+`export =` are the `=` that are not initialisers. A template literal with
+`${...}` is never a literal value; it is accepted only as a type.
+Unknown content (`text` is `None`) is never a declaration file.
 `file_base_position` applies the demotion before the sample-directory rule,
 except when `invoked`: something was told to RUN the file. `engine.profile`
 applies the same predicate to the same bytes.

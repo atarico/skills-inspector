@@ -274,8 +274,8 @@ DECL_TEXT = ('/// <reference types="node" />\n'
 for name, relpath, want in DECLARATION_FILE_CASES:
     check("file_base_position", name,
           pos.file_base_position(relpath, text=DECL_TEXT), want,
-          "D1: tsc erases a .d.ts file's content, so no content-based signal "
-          "can make it executable; a real .ts file must not be demoted")
+          "a .d.ts whose content is declaration-only is erased by tsc; "
+          "a real .ts file must not be demoted")
 
 check("file_base_position",
       "an INVOKED .d.ts loses the declaration demotion — bash, not tsc, runs it",
@@ -325,6 +325,32 @@ _DTS_NOT_DECLARATIONS = [
     ("a plain assignment", "x = 1\n"),
     ("an unterminated block comment", "/* never closed\ndeclare const x: number;\n"),
     ("a member-chain call", 'process.stdout.write("x")\n'),
+    # A tagged template is a call with no parenthesis: Function`code``` builds
+    # a function and the second template invokes it. And an initialiser inside
+    # a `{` block on the same line was never read at all.
+    ("a tagged-template static initialiser in a one-line class",
+     "export class X { static y = Function`console.log(1)```; }\n"),
+    ("a tagged-template initialiser in a one-line ambient class",
+     "export declare class X { static y = Function`a``console.log(1)`; }\n"),
+    ("a tagged-template instance field",
+     "export class X { y = Function`console.log(1)```; }\n"),
+    ("a tagged template on the line after a typed initialiser",
+     "export class X {\n  static y: any =\n    Function`console.log(1)```;\n}\n"),
+    ("a const initialiser in a one-line namespace",
+     "declare namespace N { const y = Function`console.log(1)```; }\n"),
+    ("a tagged-template enum initialiser",
+     "export enum E { A = Function`console.log(1)``` }\n"),
+    ("a bare tagged template in a one-line namespace",
+     "namespace N { Function`console.log(1)``` }\n"),
+    ("a tagged template after a namespace closes on the same line",
+     "namespace N { } Function`console.log(1)```\n"),
+    ("a computed class key that is a tagged template",
+     "export class X {\n  static [Function`x```]: number;\n}\n"),
+    ("an export-equals of a tagged template", "export = Function`console.log(1)```;\n"),
+    ("a const initialiser holding a template interpolation",
+     'export const x = `${require("child_process").execSync("id")}`;\n'),
+    ("a class field initialiser array holding an interpolation",
+     'export class X { static y = [`${require("x").execSync("id")}`]; }\n'),
 ]
 _DTS_DECLARATIONS = [
     ("a generated declaration file",
@@ -343,6 +369,30 @@ _DTS_DECLARATIONS = [
      "export declare function f(\n  a: string,\n  b: number\n): void;\n"),
     ("executable-looking text inside a doc comment",
      '/**\n * require("x").execSync("y")\n */\nexport declare const a: number;\n'),
+    # The false-positive twins of the initialiser and tagged-template cases.
+    ("readonly literal initialisers, one-line and multi-line",
+     'export declare class X { static readonly a = 1; }\n'
+     'export declare class Y {\n  static readonly b = "b";\n}\n'),
+    ("type-parameter defaults inside a class body",
+     "export declare class X { f<T = {}>(a: T): void; g<U extends object = {}>(): U; }\n"),
+    # Shapes from zod, @angular/cli and hono: variance modifiers, an object
+    # constraint, and a default inside a const's function type.
+    ("variance-annotated and object-constrained type-parameter defaults",
+     "export interface Z<out O = unknown, in I = never> {\n  o: O;\n}\n"
+     "export interface C<T extends {} = {}> extends Omit<B<{}, T>, \"\"> {\n  x: T;\n}\n"
+     "export declare const f: <E extends Env = Env>(o?: E) => void;\n"),
+    ("an enum with literal initialisers on one line",
+     'export const enum E { A = 1, B = "b", C = -2 }\n'),
+    ("template literal types with interpolation",
+     "export type On = `on${Capitalize<string>}`;\n"
+     "declare const x: `a${string}`;\n"
+     "export interface I {\n  f: <T = `k${string}`>(x: T) => `${T}!`;\n}\n"),
+    ("quoted member names after a modifier",
+     'export declare class X {\n  readonly "foo-bar": string;\n  get "x"(): number;\n}\n'),
+    ("an export renamed to a string name", 'declare const a: number;\nexport { a as "b-c" };\n'),
+    ("import aliases and export-equals inside one-line blocks",
+     'declare module "m" { import X = Y.Z; export = Foo; }\n'
+     'declare namespace N { type T<A = string> = A | `x${A}`; }\n'),
 ]
 
 for _name, _text in _DTS_NOT_DECLARATIONS:
