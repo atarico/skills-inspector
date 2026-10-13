@@ -205,6 +205,20 @@ def _(b: Path):
           "SEP = " + " + ".join(["'\"\"\"'"] * 20_000) + "\n")
 
 
+# One `.d.ts` line holding tens of thousands of literal initialisers, every one
+# of them legal. The declaration-file check reads each `=`; the version that
+# first did so copied the statement left of it and the line right of it, so
+# cost grew with the square of the line. Measured on the defect: 4000 enum
+# members on a 43KB line took 3.9 seconds, so this file's 60000 would run for
+# many minutes.
+@case("quadratic-dts-initialisers")
+def _(b: Path):
+    write(b, "SKILL.md", skill())
+    write(b, "types.d.ts",
+          "export declare enum E { "
+          + ", ".join(f"A{i} = 1" for i in range(60_000)) + " }\n")
+
+
 @case("many-tiny-files")
 def _(b: Path):
     write(b, "SKILL.md", skill())

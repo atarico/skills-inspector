@@ -625,35 +625,60 @@ _TAGGED = re.compile(
     r"|readonly|static|public|private|protected|get|set|is|extends|keyof|typeof"
     r"|in|as|infer|asserts|unique|satisfies)\b)[\w$]+|[)\]])\s*\"\$?\"")
 # What may stand left of an `=` whose right side is not a value.
-_TYPE_ALIAS_HEAD = re.compile(rf"{_MODS}type\s+{_NAME}\s*(?:<.*>)?$")
+_TYPE_ALIAS_START = re.compile(rf"{_MODS}type\s+{_NAME}\b")
 # `<out O`, `<const T`, `, U extends {` — a closed `{}` constraint leaves only
 # `extends` in the head, because the block's text is not kept.
-_TYPE_PARAM_HEAD = re.compile(
-    rf"[<,]\s*(?:(?:in|out|const)\s+)*{_NAME}(?:\s+extends\b[^=;()]*)?$")
-_IMPORT_ALIAS_HEAD = re.compile(rf"(?:export\s+)?import\s+(?:type\s+)?{_NAME}$")
+_TYPE_PARAM_TAIL = re.compile(
+    rf"[<,]\s*(?:(?:in|out|const)\s+)*{_NAME}(?:\s+extends\b[^=;()]*)?\s*$")
+_IMPORT_ALIAS_HEAD = re.compile(rf"(?:export\s+)?import\s+(?:type\s+)?{_NAME}")
 _QUALIFIED = re.compile(r"[\w$]+(?:\.[\w$]+)*")
+_RHS = re.compile(r"[^;,}]*")
+# How much of the statement around an `=` is read. Bounded so that one line
+# with many `=` costs linear time; a head longer than this is not exempted,
+# which only errs toward "violation".
+_WINDOW = 200
 
 
-def _bad_assignment(head: str, rhs: str) -> bool:
-    """Is this `=` an initialiser that a declaration file cannot hold?
+def _bad_assignment(line: str, i: int, seg: int, stmt: str, angle: int) -> bool:
+    """Is the `=` at `line[i]` an initialiser a declaration file cannot hold?
 
-    `head` is the statement text left of the `=`, `rhs` the line right of it.
-    A type alias and a type-parameter default take a type; `import X =` and
-    `export =` take a name; everything else (const, class field, enum member)
-    is a value, and ambient context only allows a literal. An empty right side
-    continues onto the next line, where nothing would check it: a violation.
+    The statement left of it is `stmt` (earlier lines) plus `line[seg:i]`, and
+    `angle` is how many `<` are open there. A type alias and a type-parameter
+    default take a type; `import X =` and `export =` take a name; everything
+    else (const, class field, enum member) is a value, and ambient context only
+    allows a literal. An empty right side continues onto the next line, where
+    nothing would check it: a violation.
     """
-    if _TYPE_ALIAS_HEAD.match(head):
+    start = (stmt[:_WINDOW] + " " + line[seg:seg + _WINDOW]).strip()
+    if _TYPE_ALIAS_START.match(start):
         return False
-    if (_TYPE_PARAM_HEAD.search(head)
-            and head.replace("=>", "").count("<") > head.count(">")):
-        return False
-    value = re.split(r"[;,}]", rhs, maxsplit=1)[0].strip()
-    if _IMPORT_ALIAS_HEAD.match(head):
-        return not (_QUALIFIED.fullmatch(value) or value == 'require("")')
-    if head == "export":
-        return not _QUALIFIED.fullmatch(value)
+    if angle:
+        tail = line[max(seg, i - _WINDOW):i]
+        if i - seg < _WINDOW and stmt:
+            tail = stmt[-_WINDOW:] + " " + tail
+        if _TYPE_PARAM_TAIL.search(tail):
+            return False
+    value = _RHS.match(line, i + 1).group().strip()
+    if len(stmt) + i - seg <= _WINDOW:
+        head = (stmt + " " + line[seg:i]).strip()
+        if _IMPORT_ALIAS_HEAD.fullmatch(head):
+            return not (_QUALIFIED.fullmatch(value) or value == 'require("")')
+        if head == "export":
+            return not _QUALIFIED.fullmatch(value)
     return not _LITERAL_VALUE.fullmatch(value)
+
+
+def _starts_statement(line: str, pos: int) -> bool:
+    """Is `line[pos:]` empty or the start of a declaration statement?
+
+    Matches in place rather than on a copy of the rest of the line, so a line
+    of many short statements costs linear time.
+    """
+    while pos < len(line) and line[pos] in " \t":
+        pos += 1
+    return pos == len(line) or _STMT_START.match(line, pos) is not None
+
+
 # An identifier (or `>` / `]`) glued to `(` is a call or a method signature.
 # Only a member line may be one; anywhere else it is an executable call.
 _CALLISH = re.compile(r"(?<![\w$])(?!(?:new|keyof|typeof|readonly|infer|asserts"
@@ -682,6 +707,8 @@ def _first_violation(text: str) -> str | None:
     stack: list[str] = []   # "(" "[" or a block kind: container/members/enum/list
     headers: list[str] = []  # the statement text before each open `{`
     stmt = ""               # text of the statement so far, for block kinds
+    angle = 0               # `<` open in the statement so far
+    angles: list[int] = []  # `angle` saved at each open `{`
     cont = False            # previous line ended mid-expression
     for line in lines:
         if not line:
@@ -695,6 +722,7 @@ def _first_violation(text: str) -> str | None:
             free = True   # `extends X {}` / `> {` finish the previous statement
         if not free:
             stmt = ""
+            angle = 0
         if free:
             # A continuation line is free-form, so it may not hold a call.
             if _CALLISH.search(line) and top not in ("members", "enum"):
@@ -738,28 +766,32 @@ def _first_violation(text: str) -> str | None:
                     return line
                 stack.append(kind or "members")
                 headers.append(before)
-                stmt = ""
+                angles.append(angle)
+                stmt, angle = "", 0
                 seg = i + 1
-                rest = line[i + 1:].strip()
-                if kind == "container" and rest and not _STMT_START.match(rest):
+                if kind == "container" and not _starts_statement(line, seg):
                     return line
             elif ch == "}":
                 if not stack or stack[-1] in ("(", "["):
                     return line
                 stack.pop()
                 stmt = headers.pop()
+                angle = angles.pop()
                 seg = i + 1
+            elif ch == "<":
+                angle += 1
+            elif ch == ">" and line[i - 1:i] != "=":
+                angle = max(0, angle - 1)
             elif (ch == "=" and line[i - 1:i] not in ("=", "!", "<", ">")
                     and line[i + 1:i + 2] not in ("=", ">")
                     and not (stack and stack[-1] in ("(", "["))):
-                if _bad_assignment((stmt + " " + line[seg:i]).strip(), line[i + 1:]):
+                if _bad_assignment(line, i, seg, stmt, angle):
                     return line
             elif ch == ";" and not (stack and stack[-1] in ("(", "[")):
-                stmt = ""
+                stmt, angle = "", 0
                 seg = i + 1
-                rest = line[i + 1:].strip()
-                if rest and (not stack or stack[-1] == "container") \
-                        and not _STMT_START.match(rest):
+                if (not stack or stack[-1] == "container") \
+                        and not _starts_statement(line, seg):
                     return line
             i += 1
         stmt = (stmt + " " + line[seg:]).strip()

@@ -381,6 +381,10 @@ _DTS_DECLARATIONS = [
      "export interface Z<out O = unknown, in I = never> {\n  o: O;\n}\n"
      "export interface C<T extends {} = {}> extends Omit<B<{}, T>, \"\"> {\n  x: T;\n}\n"
      "export declare const f: <E extends Env = Env>(o?: E) => void;\n"),
+    # The `>` of an arrow closes no type-parameter list, so it must not hide
+    # the `<` the default sits in.
+    ("a type-parameter default after an arrow",
+     "export declare const f: () => <T = string>() => T;\n"),
     ("an enum with literal initialisers on one line",
      'export const enum E { A = 1, B = "b", C = -2 }\n'),
     ("template literal types with interpolation",
