@@ -9,8 +9,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#quick-start)
-[![Detection](https://img.shields.io/badge/detection-142%2F142-brightgreen.svg)](#measured-not-asserted)
-[![Fuzz](https://img.shields.io/badge/malformed%20input-28%2F28-brightgreen.svg)](#measured-not-asserted)
+[![Detection](https://img.shields.io/badge/detection-145%2F145-brightgreen.svg)](#measured-not-asserted)
+[![Fuzz](https://img.shields.io/badge/malformed%20input-29%2F29-brightgreen.svg)](#measured-not-asserted)
 
 </div>
 
@@ -341,11 +341,11 @@ directory of extensions you already trust, CI does not have one, and it exits
 
 | Benchmark | Result |
 |---|---|
-| Invariant unit tests | **902/902** — every case pins a promise a docstring makes |
-| Detection, against `fixtures/` | **142/142**, plus **5/5** semantic cross-checks |
+| Invariant unit tests | **1011/1011** — every case pins a promise a docstring makes |
+| Detection, against `fixtures/` | **145/145**, plus **5/5** semantic cross-checks |
 | Ruleset exercised by the corpus | **70%** — 78 of 111 implemented rules have a fixture; one family (`SEM`) has none |
 | Documented blind spots, confirmed still open | **3** (prose exfiltration; HOK-004's two documented locations, neither implemented) |
-| Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **28/28** survived, no crash or hang |
+| Malformed input — truncated encodings, deep JSON, symlink cycles, ReDoS bait | **29/29** survived, no crash or hang |
 | Headline findings across 101 distinct installed extensions | **73% completely silent** (74/101), median **0**, p90 **1** |
 
 ### That 73% is not a false-positive rate, and it should not be 100%
