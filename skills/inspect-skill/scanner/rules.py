@@ -748,7 +748,9 @@ RULES: list[Rule] = [
          # markup and template files, plain-text docs, and code files. Every
          # other file is read as commands, as is anything invoked or auto-run,
          # a `#!` first line under any suffix, a shell or Windows shell script,
-         # and a code-file line that calls an exec sink outside a literal: an
+         # a code-file line that calls an exec sink outside a literal, a
+         # command span (Ruby/Perl/PHP backticks, `%x(`, `qx{`, zx's `` $` ``)
+         # and a Ruby/Perl/PHP heredoc body whatever its delimiter: an
          # unlisted kind costs a false positive, never a lowered redirect.
          # There a markup `>` keeps full confidence (`cat<p>CLAUDE.md`), with
          # one exception: one followed by whitespace
@@ -759,7 +761,8 @@ RULES: list[Rule] = [
          # `cat <in> CLAUDE.md`; the scanner cannot tell them apart.
          #
          # In a code file (`.jsx`/`.tsx` included), outside string literals
-         # and backtick spans, a markup `>` or a type argument close lowers
+         # and other backtick spans (JS template literals), a markup `>` or a
+         # type argument close lowers
          # (JSX, a PHP template, `Map<string, string>`); inside them only an
          # HTML element name, a comment or a processing instruction does, so
          # `'<li>AGENTS.md</li>'` lowers and `"cat<in>CLAUDE.md"` and

@@ -337,6 +337,8 @@ def _(b: Path):
     write(b, "lt.html", "<a <a " * 50_000 + ">CLAUDE.md\n")
     write(b, "word.sh", "#!/bin/sh\n" + "<a> CLAUDE.md " * 25_000 + "\n")
     write(b, "types.ts", "A<" * 100_000 + ">CLAUDE.md\n")
+    write(b, "heredocs.rb", "x = " + "<<A, " * 50_000 + "\n" + "A\n" * 50_000
+          + "`cat <in >CLAUDE.md` %x(" * 20_000 + "\n")
 
 
 def run_case(name: str, builder) -> tuple[bool, str]:

@@ -2328,6 +2328,42 @@ def _fsw002_context_cases() -> None:
                  "out = `echo pwned <in x-> y >CLAUDE.md`\n")):
             lead(label, {"SKILL.md": SKILL, name: text}, why)
 
+        # Text the language itself runs as a command is executed text, even
+        # where an HTML element name would lower a literal: Ruby/Perl/PHP
+        # backticks, `%x`/`qx`, zx's `$` template, and heredoc bodies.
+        why = "a command span in a code file is shell"
+        for label, name, text in (
+                ("element input in Ruby backticks", "tool.rb",
+                 "out = `envsubst <template >CLAUDE.md`\n"),
+                ("element tag in Perl backticks", "tool.pl",
+                 "my $o = `cat<p>CLAUDE.md`;\n"),
+                ("element input in PHP backticks", "tool.php",
+                 "<?php $o = `envsubst <template >CLAUDE.md`; ?>\n"),
+                ("element input in a zx template", "tool.mjs",
+                 "await $`envsubst <template >CLAUDE.md`\n"),
+                ("input redirect in Ruby %x()", "tool.rb",
+                 "out = %x(cat <in >CLAUDE.md)\n"),
+                ("input redirect in Perl qx{}", "tool.pl",
+                 "my $o = qx{cat <in >CLAUDE.md};\n"),
+                ("input redirect in a Ruby heredoc body", "tool.rb",
+                 "system <<~SH\n  cat <in >CLAUDE.md\nSH\n"),
+                ("element input in a Perl heredoc body", "tool.pl",
+                 'system(<<"SH");\nenvsubst <template >CLAUDE.md\nSH\n'),
+                ("input redirect in a PHP heredoc body", "tool.php",
+                 "<?php\nsystem(<<<SH\ncat <in >CLAUDE.md\nSH);\n")):
+            lead(label, {"SKILL.md": SKILL, name: text}, why)
+        quiet("HTML in a JS template literal",
+              {"SKILL.md": SKILL, "page.js": "el.innerHTML = `<p>Edit CLAUDE.md</p>`\n"},
+              "a template literal holding an HTML element is markup", present=True)
+        quiet("Perl readline before a control-file name",
+              {"SKILL.md": SKILL, "tool.pl": 'my $l = <STDIN>; print "see CLAUDE.md";\n'},
+              "a readline operator outside a literal is code syntax", present=True)
+        # Residual, pinned as behaviour: a heredoc body is read as commands
+        # whatever its delimiter says, so an HTML heredoc is not lowered.
+        lead("HTML in a Ruby heredoc body",
+             {"SKILL.md": SKILL, "page.rb": "html = <<~HTML\n  <li>Edit AGENTS.md</li>\nHTML\n"},
+             "the delimiter is chosen by the unit; the body is not trusted as markup")
+
         # A tag that is not an HTML element closes at its first `>`; the
         # arrow and quoted-value rules belong to real markup only.
         why = "an arrow or quoted `>` only extends an HTML element's tag"

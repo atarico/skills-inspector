@@ -307,7 +307,8 @@ def _placeholder_in_shell(rule, line: str, index: int) -> bool:
 
 
 def _reads_as_markup(rule, line: str, index: int, executed: bool,
-                     code_file: bool, probe: pos.LineProbe) -> bool:
+                     code_file: bool, probe: pos.LineProbe,
+                     backticks_run: bool) -> bool:
     """Does the candidate `>` at `index` lose confidence for being markup?
 
     In a code file a markup `>` inside a string literal or a backtick span (a
@@ -315,9 +316,10 @@ def _reads_as_markup(rule, line: str, index: int, executed: bool,
     element, a comment or a processing instruction; outside them a markup `>`
     or the close of a type argument list counts (JSX, a PHP template,
     `Map<string, string>`). Everywhere else every markup `>` counts.
-    Executed text (the file, a shell fence line, or a code line calling a live
-    sink) then keeps only a `<placeholder>`: it can cancel a lowering, never
-    add one.
+    Executed text (the file, a shell fence line, a heredoc body, a code line
+    calling a live sink, or a command span such as Ruby backticks, `%x(`,
+    `qx{` or a zx template) then keeps only a `<placeholder>`: it can cancel
+    a lowering, never add one.
     """
     name = probe.markup().get(index)
     if not code_file:
@@ -326,7 +328,8 @@ def _reads_as_markup(rule, line: str, index: int, executed: bool,
         lowered = name in pos.HTML_ELEMENTS or name in ("!", "?")
     else:
         lowered = name is not None or index in probe.type_argument_closes()
-    if lowered and (executed or (code_file and probe.live_sink())):
+    if lowered and (executed or (code_file and (
+            probe.live_sink() or probe.in_command_span(index, backticks_run)))):
         return _placeholder_in_shell(rule, line, index)
     return lowered
 
@@ -349,6 +352,8 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                  or Path(relpath).suffix.lower() in _SCRIPTED_MARKUP_SUFFIXES)
     executed_file = _executed_file(relpath, text, invoked, is_md, code_file)
     shell_fence = pos.non_markup_fence_lines(text) if is_md else None
+    heredoc = pos.heredoc_body_lines(relpath, text)
+    backticks_run = Path(relpath).suffix.lower() in pos.COMMAND_BACKTICK_SUFFIXES
 
     base_position = pos.file_base_position(relpath, invoked, text)
     hidden = ev.invisible_counts(text)
@@ -372,7 +377,8 @@ def _scan_text(unit: Unit, relpath: str, text: str,
         position, kind = positions[idx] if idx < len(positions) else (pos.ACTIVE, pos.PROSE)
         executed = (executed_file
                     or (is_md and shell_fence is not None
-                        and idx < len(shell_fence) and shell_fence[idx]))
+                        and idx < len(shell_fence) and shell_fence[idx])
+                    or (idx < len(heredoc) and heredoc[idx]))
         probe: pos.LineProbe | None = None
         for rule in R.RULES:
             if rule.markdown_only and not is_md:
@@ -424,7 +430,8 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                     for _ in range(probe.literal_demotion(match.start())):
                         confidence = pos.demote(confidence, pos.ILLUSTRATIVE)
                 if rule.tag_close_sensitive and _reads_as_markup(
-                        rule, line, match.start(), executed, code_file, probe):
+                        rule, line, match.start(), executed, code_file, probe,
+                        backticks_run):
                     confidence = pos.demote(confidence, pos.DOCUMENTARY)
                 if best is None or _CONF_RANK[confidence] < _CONF_RANK[best[0]]:
                     best = (confidence, reported, match)

@@ -12,6 +12,7 @@ here as an experiment, not a guarantee.
 from __future__ import annotations
 
 import bisect
+from collections import deque
 import re
 from pathlib import PurePosixPath
 
@@ -129,6 +130,44 @@ _DOC_SUFFIXES = {".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc"}
 def is_code_file(relpath: str) -> bool:
     """Is this a script or program by its suffix (`_TEXT_CODE_SUFFIXES`)?"""
     return PurePosixPath(relpath).suffix.lower() in _TEXT_CODE_SUFFIXES
+
+
+# Languages whose backticks run a shell command, and which have heredocs.
+COMMAND_BACKTICK_SUFFIXES = {".rb", ".pl", ".pm", ".php"}
+# `%x(...)` (Ruby) and `qx{...}` (Perl): the rest of the line is the command.
+_COMMAND_OPENER = re.compile(r"%x\s*[(\[{<|!/]|\bqx\s*[(\[{<|!/]")
+# Heredoc openers: `<<~ID`, `<<-ID`, `<<"ID"`, `<<'ID'`, PHP's `<<<ID`, and a
+# bare `<<ID` only in capitals, since `arr<<item` is a Ruby append.
+_HEREDOC_OPEN = re.compile(
+    r"<<<\s*([\"']?)([A-Za-z_]\w*)\1|<<[~-]([\"']?)([A-Za-z_]\w*)\3"
+    r"|<<([\"'])([A-Za-z_]\w*)\5|<<([A-Z_][A-Z0-9_]*)\b")
+
+
+def heredoc_body_lines(relpath: str, text: str) -> list[bool]:
+    """Per-line (0-indexed): is this line inside a Ruby, Perl or PHP heredoc?
+
+    A body is read as commands whatever its delimiter says, because the unit
+    picks the delimiter: `system <<~HTML` runs its body. A line holding only
+    the delimiter (indented, or followed by `;`, `,` or `)`) closes it; an
+    opener that never closes holds the rest of the file. Both mistakes
+    cancel a lowering, never cause one.
+    """
+    if PurePosixPath(relpath).suffix.lower() not in COMMAND_BACKTICK_SUFFIXES:
+        return []
+    out: list[bool] = []
+    pending: deque[str] = deque()
+    for raw in text.splitlines():
+        if pending:
+            if raw.strip().rstrip(";,)") == pending[0]:
+                pending.popleft()
+                out.append(False)
+            else:
+                out.append(True)
+            continue
+        out.append(False)
+        for m in _HEREDOC_OPEN.finditer(raw):
+            pending.append(m.group(2) or m.group(4) or m.group(6) or m.group(7))
+    return out
 
 
 # Execution sinks. A string literal is inert data UNLESS it flows into one of
@@ -412,6 +451,7 @@ class LineProbe:
         self._sink: bool | None = None
         self._markup: dict[int, str] | None = None
         self._type_args: set[int] | None = None
+        self._command_at: int | None | bool = False
 
     def in_inline_code(self, index: int) -> bool:
         """Same answer as `in_inline_code`: an odd number of backticks before."""
@@ -466,6 +506,27 @@ class LineProbe:
         if self._type_args is None:
             self._type_args = type_argument_closes(self.line)
         return self._type_args
+
+    def in_command_span(self, index: int, backticks_run: bool) -> bool:
+        """Is `index` inside text the language runs as a shell command?
+
+        A backtick span in a language whose backticks run (`backticks_run`),
+        a zx `` $`...` `` template anywhere, or the rest of a line after a
+        Ruby `%x(` or Perl `qx{` when backticks run.
+        """
+        if self._ticks is None:
+            self._ticks = [i for i, ch in enumerate(self.line) if ch == "`"]
+        k = bisect.bisect_left(self._ticks, index)
+        if k % 2 == 1:
+            opener = self._ticks[k - 1]
+            if backticks_run or (opener > 0 and self.line[opener - 1] == "$"):
+                return True
+        if not backticks_run:
+            return False
+        if self._command_at is False:
+            m = _COMMAND_OPENER.search(self.line)
+            self._command_at = m.start() if m else None
+        return self._command_at is not None and self._command_at < index
 
     def live_sink(self) -> bool:
         """Does the line call an execution sink outside a literal?"""
