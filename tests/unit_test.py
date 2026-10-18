@@ -2230,6 +2230,16 @@ def _fsw002_context_cases() -> None:
         quiet("spaced tag close in .html",
               {"SKILL.md": SKILL, "notes.html": "<p >CLAUDE.md\n"},
               "whitespace before the close is still a tag", present=True)
+        quiet("spaced attribute tag close in .html",
+              {"SKILL.md": SKILL, "notes.html": '<img src="x.png" >AGENTS.md\n'},
+              "an attribute before the space does not make the close a redirect",
+              present=True)
+        lead("a real redirect after a spaced tag on the same line",
+             {"SKILL.md": SKILL, "notes.html": "<p >note</p> echo x > CLAUDE.md\n"},
+             "the tag-close lowering must not blind the rest of the line")
+        lead("a real redirect after an already-closed tag",
+             {"SKILL.md": SKILL, "notes.html": "<p>ok</p> echo x > CLAUDE.md\n"},
+             "a closed tag earlier on the line must not swallow a later redirect")
         quiet("release-notes attribute tag",
               {"SKILL.md": SKILL,
                "release-notes-v1.5.0.html":
