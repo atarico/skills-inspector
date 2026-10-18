@@ -1,7 +1,13 @@
 {
   "must_detect": [
     "EXE-003",
-    "NET-001"
+    "NET-001",
+    "HOK-001",
+    "HOK-003"
+  ],
+  "must_headline": [
+    "HOK-001",
+    "HOK-003"
   ],
   "category": "malicious"
 }

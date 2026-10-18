@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Dependencias](https://img.shields.io/badge/dependencias-ninguna-brightgreen.svg)](#inicio-rápido)
 [![Detección](https://img.shields.io/badge/detecci%C3%B3n-146%2F146-brightgreen.svg)](#medido-no-afirmado)
-[![Fuzz](https://img.shields.io/badge/entrada%20malformada-33%2F33-brightgreen.svg)](#medido-no-afirmado)
+[![Fuzz](https://img.shields.io/badge/entrada%20malformada-34%2F34-brightgreen.svg)](#medido-no-afirmado)
 
 </div>
 
@@ -353,12 +353,12 @@ corrió — en vez de reportar un pass que no midió.
 
 | Benchmark | Resultado |
 |---|---|
-| Tests unitarios de invariantes | **1223/1223** — cada caso fija una promesa que hace un docstring |
+| Tests unitarios de invariantes | **1234/1234** — cada caso fija una promesa que hace un docstring |
 | Detección, contra `fixtures/` | **146/146**, más **5/5** contrastes semánticos |
 | Ruleset ejercitado por el corpus | **70%** — 78 de 111 reglas implementadas tienen fixture; una familia (`SEM`) no tiene ninguno |
-| Puntos ciegos documentados, confirmados aún abiertos | **5** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa; un CLI externo que se queda con la capacidad de red que el bundle sólo nombra; la comprobación estructural de hooks/servidores MCP que sólo lee el nivel superior de un manifest de marketplace, sin ver lo que declara en línea una entrada de plugin) |
-| Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **33/33** sobrevividos, sin crash ni cuelgue |
-| Hallazgos de titular sobre 101 extensiones instaladas distintas | **73% completamente silenciosas** (74/101), mediana **0**, p90 **1** |
+| Puntos ciegos documentados, confirmados aún abiertos | **4** (exfiltración por prosa; las dos ubicaciones que HOK-004 documenta y no implementa; un CLI externo que se queda con la capacidad de red que el bundle sólo nombra) |
+| Entrada malformada — encodings truncados, JSON profundo, ciclos de symlinks, cebo de ReDoS | **34/34** sobrevividos, sin crash ni cuelgue |
+| Hallazgos de titular sobre 127 extensiones instaladas distintas | **73% completamente silenciosas** (93/127), mediana **0**, p90 **1** |
 
 ### Ese 73% no es una tasa de falsos positivos, y no debería llegar a 100%
 
@@ -367,7 +367,7 @@ objetivo llevarla a cero. Las dos lecturas son incorrectas, y actuar sobre ellas
 vaciaría la herramienta.
 
 Un hallazgo de titular significa *"una capacidad sobre la que tenés que
-decidir"*, no *"un bug"*. De las 27 unidades que producen uno, el hallazgo más
+decidir"*, no *"un bug"*. De las 34 unidades que producen uno, el hallazgo más
 frecuente es `HOK-003`: la extensión registra un servidor MCP. El puente de
 Discord realmente registra un servidor MCP. Es una afirmación verdadera sobre una
 capacidad real, y suprimirla porque el plugin es popular sería decidir en nombre
