@@ -1,0 +1,8 @@
+{
+  "known_miss": [
+    "HOK-001",
+    "HOK-003"
+  ],
+  "note": "the structural JSON-shape checker reads only the manifest's own top level: it looks for a hooks key and an mcpServers key on the parsed document itself. A marketplace entry's inline grants sit one level down, inside one element of the plugins list, so the structural rule never sees them \u2014 only the line-based curl-pipe-shell and outbound-host rules do, because those read raw text regardless of JSON nesting",
+  "category": "known-miss"
+}
