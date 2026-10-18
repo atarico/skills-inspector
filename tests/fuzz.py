@@ -325,6 +325,20 @@ def _(b: Path):
     write(b, "lit.py", "x = '" + ">CLAUDE.md" * 40_000 + "'\n")
 
 
+@case("fsw002-markup-lexer-floods")
+def _(b: Path):
+    # Each shape makes the tag lexer look ahead for a close that never comes
+    # (`?>`, an end tag's `>`, a quote) or re-read a shell word per candidate;
+    # every scan must resume where the previous one stopped.
+    write(b, "SKILL.md", skill())
+    write(b, "pi.html", "<?" * 150_000 + ">CLAUDE.md\n")
+    write(b, "end.html", "</a " * 80_000 + ">CLAUDE.md\n")
+    write(b, "attr.html", '<a b="x" ' * 30_000 + ">CLAUDE.md\n")
+    write(b, "lt.html", "<a <a " * 50_000 + ">CLAUDE.md\n")
+    write(b, "word.sh", "#!/bin/sh\n" + "<a> CLAUDE.md " * 25_000 + "\n")
+    write(b, "types.ts", "A<" * 100_000 + ">CLAUDE.md\n")
+
+
 def run_case(name: str, builder) -> tuple[bool, str]:
     base = Path(tempfile.mkdtemp(prefix=f"fuzz-{name}-"))
     try:

@@ -126,6 +126,11 @@ _CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".conf", 
 _DOC_SUFFIXES = {".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc"}
 
 
+def is_code_file(relpath: str) -> bool:
+    """Is this a script or program by its suffix (`_TEXT_CODE_SUFFIXES`)?"""
+    return PurePosixPath(relpath).suffix.lower() in _TEXT_CODE_SUFFIXES
+
+
 # Execution sinks. A string literal is inert data UNLESS it flows into one of
 # these — the same logic as an imperative sentence above a markdown fence.
 # Blanket-demoting string literals would make `os.system("curl x | sh")` invisible,
@@ -404,6 +409,9 @@ class LineProbe:
         self._lits: tuple[list[int], list[float]] | None = None
         self._comment: int | None | bool = False
         self._shape: int | None = None
+        self._sink: bool | None = None
+        self._markup: dict[int, str] | None = None
+        self._type_args: set[int] | None = None
 
     def in_inline_code(self, index: int) -> bool:
         """Same answer as `in_inline_code`: an odd number of backticks before."""
@@ -443,6 +451,28 @@ class LineProbe:
         k = bisect.bisect_left(starts, index) - 1
         return k >= 0 and index <= ends[k]
 
+    def in_string(self, index: int) -> bool:
+        """Same answer as `in_string_literal`."""
+        return self._in_string(index)
+
+    def markup(self) -> dict[int, str]:
+        """Same answer as `markup_angles`."""
+        if self._markup is None:
+            self._markup = markup_angles(self.line)
+        return self._markup
+
+    def type_argument_closes(self) -> set[int]:
+        """Same answer as `type_argument_closes`."""
+        if self._type_args is None:
+            self._type_args = type_argument_closes(self.line)
+        return self._type_args
+
+    def live_sink(self) -> bool:
+        """Does the line call an execution sink outside a literal?"""
+        if self._sink is None:
+            self._sink = _exec_sink_outside_literal(self.line)
+        return self._sink
+
     def _in_comment(self, index: int) -> bool:
         if self._comment is False:
             self._comment = next(
@@ -457,7 +487,7 @@ class LineProbe:
         if not self._in_string(index):
             return 0
         if self._shape is None:
-            if _exec_sink_outside_literal(self.line):
+            if self.live_sink():
                 self._shape = 0
             elif (_REGEX_CONSTRUCTION.search(self.line)
                   or len(_REGEX_SHAPE.findall(self.line)) >= 2):
@@ -467,34 +497,184 @@ class LineProbe:
         return self._shape
 
 
-_ANGLE = re.compile(r"[<>]")
+# A tag name: an ASCII letter, then letters, digits, `-` and `:`. No `.`, `/`,
+# `$` or quote, so `<data.txt >f` and `</dev/null>f` are redirects, not tags.
+_TAG_NAME = re.compile(r"[A-Za-z][A-Za-z0-9:-]*")
+_END_TAG = re.compile(r"</([A-Za-z][A-Za-z0-9:-]*)\s*>")
+# Where a digit before `<` is a file descriptor (`0<file`), not text.
+_FD_BOUNDARY = " \t;&|("
+
+# HTML elements (WHATWG, current and obsolete-but-rendered). Inside a code
+# file's string literal only these read as markup: `'<li>x</li>'` is HTML,
+# while `"cat <in> f"` is a command whatever the literal is passed to.
+HTML_ELEMENTS = frozenset("""
+a abbr acronym address area article aside audio b base bdi bdo big blink
+blockquote body br button canvas caption center cite code col colgroup data
+datalist dd del details dfn dialog dir div dl dt em embed fieldset figcaption
+figure font footer form frame frameset h1 h2 h3 h4 h5 h6 head header hgroup hr
+html i iframe img input ins kbd label legend li link main map mark marquee menu
+meta meter nav nobr noscript object ol optgroup option output p param picture
+pre progress q rp rt ruby s samp script search section select slot small source
+span strike strong style sub summary sup table tbody td template textarea tfoot
+th thead time title tr track tt u ul var video wbr
+""".split())
 
 
-def tag_close_positions(line: str) -> set[int]:
-    """Indices of every `>` that closes a markup tag.
+def markup_angles(line: str) -> dict[int, str]:
+    """Every `>` that belongs to a markup tag, mapped to the tag's name.
 
-    A `>` closes a tag when the nearest `<` before it is followed by an ASCII
-    letter, `/`, `!` or `?` and no other `>` lies between them. One walk over
-    the angle brackets, so a line of a hundred thousand `<p>` costs one pass.
-    It is a lexical test with no HTML parser behind it: `a<b && x>f` reads as
-    a tag, which is why callers LOWER a candidate's confidence with it and
-    never drop the candidate.
+    The name is lowercased; a comment or `<!DOCTYPE>` maps to `!` and a
+    processing instruction (`<?php ... ?>`) to `?`. A tag is:
+
+    - `<!-- ... -->`, `<!` plus a letter or `[` up to `>`, `<? ... ?>`;
+    - an end tag, `</name>` with optional whitespace before the `>`;
+    - a start tag, `<name` followed by `>`, `/>`, or whitespace and attributes
+      up to the `>` that closes it. Inside the attributes a value quoted after
+      `=` is skipped, and the `>` of `->` or `=>` does not close the tag, so
+      `<p v-if="n > 0">` and `<b onClick={() => go()}>` each close once.
+
+    Every `>` inside a start tag counts, not only the closing one: the `>` of
+    `"n > 0"` is markup too. A comment's or a processing instruction's body is
+    not markup, only its close: a redirect inside `<!-- -->` is hidden from
+    the reader and still read by the model.
+
+    A `<` right after `<` (`<<EOF`, `<<<`), or after a digit that starts a word
+    (`0<file`), never opens a tag. It stays lexical, with no HTML parser behind
+    it: `<p >f` and `a<b && x>f` read as tags, which is why callers LOWER a
+    candidate's confidence with it and never drop the candidate.
+
+    One pass: every scan resumes where the previous one stopped.
+    """
+    out: dict[int, str] = {}
+    n = len(line)
+    # No `?>` after this index: a line of a hundred thousand `<?` searches once.
+    pi_close = [line.find("?>")]
+    i = line.find("<")
+    while i != -1:
+        i = _markup_at(line, i, n, out, pi_close)
+        if i >= n:
+            break
+        i = line.find("<", i)
+    return out
+
+
+# What a TypeScript type argument list may hold between `<` and `>`: names,
+# `.`, `,`, `[]`, `?`, unions, intersections, quoted literal types and object
+# types. No `/`, `=`, `(` or `-`, so `x</dev/null>f` never reads as one.
+_TYPE_ARGUMENT_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    "_$.,[]?|&:'\"{}; \t")
+
+
+def type_argument_closes(line: str) -> set[int]:
+    """Every `>` that closes a type argument list (`Map<string, string>`).
+
+    A list opens at a `<` right after a name character and holds only
+    `_TYPE_ARGUMENT_CHARS` and nested lists; any other character abandons
+    every list still open. Only code files read this, and only outside string
+    literals, where a `>` is code syntax and never a shell redirect. One pass.
     """
     closes: set[int] = set()
-    last_open = -1
-    for m in _ANGLE.finditer(line):
-        if m.group() == "<":
-            last_open = m.start()
-            continue
-        if last_open >= 0 and last_open + 1 < len(line):
-            nxt = line[last_open + 1]
-            if nxt in _TAG_START or ("a" <= nxt.lower() <= "z" and nxt.isascii()):
-                closes.add(m.start())
-        last_open = -1
+    depth = 0
+    for i, ch in enumerate(line):
+        if ch == "<":
+            if i > 0 and (line[i - 1].isalnum() or line[i - 1] in "_$"):
+                depth += 1
+            else:
+                depth = 0
+        elif ch == ">":
+            if depth:
+                closes.add(i)
+                depth -= 1
+        elif depth and ch not in _TYPE_ARGUMENT_CHARS:
+            depth = 0
     return closes
 
 
-_TAG_START = "/!?"
+def _markup_at(line: str, i: int, n: int, out: dict[int, str],
+               pi_close: list[int]) -> int:
+    """Record the tag that opens at `line[i] == "<"`; return where to resume."""
+    nxt = line[i + 1] if i + 1 < n else ""
+    if nxt == "<" or (i > 0 and line[i - 1] == "<"):
+        return i + 1
+    if (i > 0 and line[i - 1].isdigit()
+            and (i == 1 or line[i - 2] in _FD_BOUNDARY)):
+        return i + 1
+    if line.startswith("<!--", i):
+        close = line.find("-->", i + 4)
+        if close == -1:
+            return n
+        out[close + 2] = "!"
+        return close + 3
+    if nxt == "!" and i + 2 < n and (line[i + 2] == "[" or line[i + 2].isalpha()):
+        close = line.find(">", i + 2)
+        if close == -1:
+            return n
+        out[close] = "!"
+        return close + 1
+    if nxt == "?":
+        if pi_close[0] != -1 and pi_close[0] < i + 2:
+            pi_close[0] = line.find("?>", i + 2)
+        close = pi_close[0]
+        if close == -1:
+            return i + 2
+        out[close + 1] = "?"
+        return close + 2
+    if nxt == "/":
+        end = _END_TAG.match(line, i)
+        if end is None:
+            return i + 2
+        out[end.end() - 1] = end.group(1).lower()
+        return end.end()
+    name = _TAG_NAME.match(line, i + 1)
+    if name is None:
+        return i + 1
+    j = name.end()
+    tag = name.group().lower()
+    if j < n and line[j] == ">":
+        out[j] = tag
+        return j + 1
+    if line.startswith("/>", j):
+        out[j + 1] = tag
+        return j + 2
+    if j >= n or not line[j].isspace():
+        return j
+    return _attributes(line, j, n, tag, out)
+
+
+def _attributes(line: str, j: int, n: int, tag: str, out: dict[int, str]) -> int:
+    """Walk a start tag's attributes from `j` to the `>` that closes it.
+
+    A `<` before the close abandons this tag and resumes there. An unclosed
+    quoted value runs to the end of the line, so nothing after it is markup.
+    """
+    inside: list[int] = []
+    k = j
+    while k < n:
+        ch = line[k]
+        if ch == "<":
+            return k
+        if ch == ">":
+            inside.append(k)
+            if line[k - 1] not in "-=":
+                for index in inside:
+                    out[index] = tag
+                return k + 1
+        elif ch == "=":
+            v = k + 1
+            while v < n and line[v] in " \t":
+                v += 1
+            if v < n and line[v] in "\"'":
+                close = line.find(line[v], v + 1)
+                if close == -1:
+                    return n
+                gt = line.find(">", v + 1, close)
+                while gt != -1:
+                    inside.append(gt)
+                    gt = line.find(">", gt + 1, close)
+                k = close
+        k += 1
+    return n
 
 
 def literal_demotion(line: str, index: int) -> int:
@@ -1033,17 +1213,24 @@ def classify_lines(relpath: str, text: str,
     return [(_ORDER[max(_ORDER.index(p), floor)], k) for p, k in classified]
 
 
-# Fence languages that mark a line as shell. FSW-002 (rules.py) lowers the
-# confidence of a `>` that closes a markup tag, and a fence labelled with one of
-# these cancels that lowering for the lines inside it. Declaring `bash` can only
-# restore a candidate's confidence, never lower anything, so the label buys the
-# audited unit nothing it would want.
-_SHELL_FENCE_LANGS = {"bash", "sh", "shell", "zsh", "console"}
+# Fence languages whose lines a shell, a build tool or a terminal runs. FSW-002
+# (rules.py) lowers the confidence of a `>` that reads as markup, and a fence
+# labelled with one of these cancels that lowering for the lines inside it.
+# Declaring `bash` can only restore a candidate's confidence, never lower
+# anything, so the label buys the audited unit nothing it would want; a label
+# missing here is the expensive mistake, because it lowers a real redirect.
+_SHELL_FENCE_LANGS = {
+    "bash", "sh", "shell", "zsh", "console", "fish", "ksh", "csh", "tcsh",
+    "dash", "ash", "mksh", "nu", "nushell", "shell-session", "shellsession",
+    "sh-session", "bash-session", "terminal", "powershell", "pwsh", "ps1",
+    "posh", "cmd", "bat", "batch", "dosbatch", "winbatch", "dockerfile",
+    "docker", "containerfile", "makefile", "make", "mk", "just", "justfile",
+}
 
 
 def shell_fence_lines(text: str) -> list[bool]:
-    """Per-line (0-indexed): is this line inside a fence labeled bash/sh/shell/
-    zsh/console?
+    """Per-line (0-indexed): is this line inside a fence labelled with one of
+    `_SHELL_FENCE_LANGS`?
 
     Independent of `_classify_markdown`'s fence tracking, which answers a
     different question (is this fence's CONTENT live enough to demote a

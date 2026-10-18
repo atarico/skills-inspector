@@ -261,19 +261,66 @@ def unit_line_budget() -> int:
 
 _CONF_RANK = {"high": 0, "medium": 1, "low": 2}
 
-# `taint._is_shell` knows POSIX shells; a Windows batch file is shell here too.
-_WINDOWS_SHELL_SUFFIXES = {".bat", ".cmd"}
+# Files whose text something runs as commands, beyond the POSIX shells
+# `taint._is_shell` knows: Windows shells, build files, and the config formats
+# that carry hooks, npm scripts, `.mcp.json` args and CI steps.
+_EXECUTED_SUFFIXES = {
+    ".bat", ".cmd", ".ps1", ".psm1", ".mk", ".just", ".dockerfile",
+    ".containerfile", ".json", ".jsonc", ".json5", ".yaml", ".yml", ".toml",
+}
+_BUILD_FILE_NAMES = {"makefile", "gnumakefile", "justfile", ".justfile",
+                     "dockerfile", "containerfile"}
+_BUILD_FILE_PREFIXES = ("makefile.", "dockerfile.", "containerfile.")
+
+
+def _executed_file(relpath: str, text: str, invoked: bool) -> bool:
+    """Is this file's text run as commands, whatever its lines look like?
+
+    Each answer can only cancel a markup lowering, never cause one, so a unit
+    that names its file `Makefile` or starts it with `#!` gains nothing. A
+    route the scanner cannot see is the costly miss: it lowers a real redirect.
+    """
+    if invoked or text.startswith("#!") or taint._is_shell(relpath, text):
+        return True
+    path = Path(relpath)
+    name = path.name.lower()
+    return (path.suffix.lower() in _EXECUTED_SUFFIXES
+            or name in _BUILD_FILE_NAMES or name.startswith(_BUILD_FILE_PREFIXES))
 
 
 def _placeholder_in_shell(rule, line: str, index: int) -> bool:
-    """In shell context, is this tag-close candidate still a weak one?
+    """In executed text, is this markup candidate still a weak one?
 
     A `>` followed by whitespace reads as a `<placeholder>` unless the name the
-    rule looks for is the operand directly after it. A `>` followed by anything
-    else (`cat<p>CLAUDE.md`) keeps its full confidence.
+    rule looks for is in the shell word directly after it. A `>` followed by
+    anything else (`cat<p>CLAUDE.md`) keeps its full confidence.
     """
     after = line[index + 1:index + 2]
-    return after.isspace() and rule.operand.match(line, index + 1) is None
+    return after.isspace() and not rule.operand(line, index + 1)
+
+
+def _reads_as_markup(rule, line: str, index: int, executed: bool,
+                     code_file: bool, probe: pos.LineProbe) -> bool:
+    """Does the candidate `>` at `index` lose confidence for being markup?
+
+    In a code file a markup `>` inside a string literal counts only for an
+    HTML element, a comment or a processing instruction; outside a literal a
+    markup `>` or the close of a type argument list counts (JSX, a PHP
+    template, `Map<string, string>`). Everywhere else every markup `>` counts.
+    Executed text (the file, a shell fence line, or a code line calling a live
+    sink) then keeps only a `<placeholder>`: it can cancel a lowering, never
+    add one.
+    """
+    name = probe.markup().get(index)
+    if not code_file:
+        lowered = name is not None
+    elif probe.in_string(index):
+        lowered = name in pos.HTML_ELEMENTS or name in ("!", "?")
+    else:
+        lowered = name is not None or index in probe.type_argument_closes()
+    if lowered and (executed or (code_file and probe.live_sink())):
+        return _placeholder_in_shell(rule, line, index)
+    return lowered
 
 
 def _scan_text(unit: Unit, relpath: str, text: str,
@@ -285,13 +332,14 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     is_md = Path(relpath).suffix.lower() in _MD_SUFFIXES
     # Only the instruction-surface promotion reads this, and only for markdown.
     quoted = pos.quoted_carry(text, positions) if is_md else []
-    # Where the text is shell, a `<name>` is a redirect and not a markup tag:
-    # a shell file, a line inside a markdown fence labelled bash/sh/shell/zsh/
-    # console, or a file something invokes. Rules that read a `>` as a possible
-    # tag close (`Rule.tag_close_sensitive`) lower it everywhere else. Declaring
-    # a fence `bash` can only cancel a lowering, never buy one.
-    shell_file = (taint._is_shell(relpath, text)
-                  or Path(relpath).suffix.lower() in _WINDOWS_SHELL_SUFFIXES)
+    # Where the text is executed, a `<name>` is a redirect and not a markup
+    # tag: see `_executed_file`, plus a markdown line inside a fence labelled
+    # with a shell or build language. Rules that read a `>` as possible markup
+    # (`Rule.tag_close_sensitive`) lower it everywhere else; see
+    # `_reads_as_markup`. Declaring a fence `bash` can only cancel a lowering,
+    # never buy one.
+    executed_file = _executed_file(relpath, text, invoked)
+    code_file = pos.is_code_file(relpath)
     shell_fence = pos.shell_fence_lines(text) if is_md else None
 
     base_position = pos.file_base_position(relpath, invoked, text)
@@ -314,12 +362,10 @@ def _scan_text(unit: Unit, relpath: str, text: str,
         if not line.strip():
             continue
         position, kind = positions[idx] if idx < len(positions) else (pos.ACTIVE, pos.PROSE)
-        in_shell_context = (invoked
-                            or (not is_md and shell_file)
-                            or (is_md and shell_fence is not None
-                                and idx < len(shell_fence) and shell_fence[idx]))
+        executed = (executed_file
+                    or (is_md and shell_fence is not None
+                        and idx < len(shell_fence) and shell_fence[idx]))
         probe: pos.LineProbe | None = None
-        tag_closes: set[int] | None = None
         for rule in R.RULES:
             if rule.markdown_only and not is_md:
                 continue
@@ -369,13 +415,9 @@ def _scan_text(unit: Unit, relpath: str, text: str,
                 if not is_md:
                     for _ in range(probe.literal_demotion(match.start())):
                         confidence = pos.demote(confidence, pos.ILLUSTRATIVE)
-                if rule.tag_close_sensitive and (
-                        not in_shell_context
-                        or _placeholder_in_shell(rule, line, match.start())):
-                    if tag_closes is None:
-                        tag_closes = pos.tag_close_positions(line)
-                    if match.start() in tag_closes:
-                        confidence = pos.demote(confidence, pos.DOCUMENTARY)
+                if rule.tag_close_sensitive and _reads_as_markup(
+                        rule, line, match.start(), executed, code_file, probe):
+                    confidence = pos.demote(confidence, pos.DOCUMENTARY)
                 if best is None or _CONF_RANK[confidence] < _CONF_RANK[best[0]]:
                     best = (confidence, reported, match)
                 if confidence == rule.confidence:

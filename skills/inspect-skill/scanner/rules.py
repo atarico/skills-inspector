@@ -84,14 +84,15 @@ class Rule:
     # `pattern` match starting where it says it does, and the walk must cost
     # O(len(line)) plus a bounded window per candidate.
     candidates: "Callable[[str], Iterator[re.Match]] | None" = None
-    # The rule's operator can be the `>` that closes a markup tag, so the
+    # The rule's operator can be a `>` that belongs to a markup tag, so the
     # engine lowers such a candidate's confidence (never drops it) unless the
-    # line is shell, a shell-labelled fence or an invoked file. Needs `operand`.
+    # text is executed. See `engine._reads_as_markup`. Needs `operand`.
     tag_close_sensitive: bool = False
-    # Matched at the end of a tag-close operator, it says the thing the rule
-    # looks for is the operand directly after it. A `<placeholder> ` followed
-    # by whitespace keeps full confidence in shell context only when this does.
-    operand: re.Pattern | None = None
+    # Called with the line and the index just past a markup `>`: is the thing
+    # the rule looks for the operand directly after it? A `<placeholder> `
+    # followed by whitespace keeps full confidence in executed text only when
+    # this says yes.
+    operand: "Callable[[str, int], bool] | None" = None
 
 
 @dataclass(frozen=True)
@@ -263,9 +264,19 @@ _FSW002_REDIRECT = r"(?<![-=])>"
 _FSW002_PATTERN = _r(rf"({_FSW002_REDIRECT}|{_FSW002_WRITE_FORMS}){_FSW002_TARGETS}")
 _FSW002_ANCHOR = _r(rf"{_FSW002_REDIRECT}|{_FSW002_WRITE_FORMS}")
 _FSW002_NAME_AT = _r(rf"(?={_FSW002_NAMES})")
-# The operand directly after a `>`: optional whitespace, an optional quote and
-# one path word (no whitespace, quote or shell separator), then the name.
-_FSW002_OPERAND = _r(r"\s*[\"']?[^\s\"'|;&<>]{0,80}" + _FSW002_NAMES)
+_FSW002_NAME = _r(_FSW002_NAMES)
+# One shell word: unquoted characters, quoted runs, `$(...)`, `${...}` and
+# backticks, so `"$D"/CLAUDE.md`, `$(echo CLAUDE.md)` and
+# `~/'.claude'/settings.json` are each one word. Read in a bounded window.
+_SHELL_WORD = _r(
+    r"\s*(?:[^\s\"'`|;&<>()$]|\"[^\"\n]{0,80}\"|'[^'\n]{0,80}'|`[^`\n]{0,80}`"
+    r"|\$\([^()\n]{0,80}\)|\$\{[^}\n]{0,80}\}|\$)*")
+
+
+def _fsw002_operand(line: str, start: int) -> bool:
+    """Is a control-file name inside the shell word that starts at `start`?"""
+    word = _SHELL_WORD.match(line, start, start + 240)
+    return _FSW002_NAME.search(line, word.start(), word.end()) is not None
 
 
 def _fsw002_candidates(line: str):
@@ -716,34 +727,49 @@ RULES: list[Rule] = [
          # real redirect. `echo x->CLAUDE.md` is a real redirect this reading
          # misses; arrows are far commoner, so it is left out on purpose.
          #
-         # A `>` that closes a markup tag (`position.tag_close_positions`: the
-         # nearest `<` is followed by a letter, `/`, `!` or `?` and no `>`
-         # lies between) is a weaker candidate: `<li>AGENTS.md</li>` is HTML,
-         # and every tag in rendered documentation ends in `>`. The engine
-         # lowers it to `low` (reported, out of the headline) instead of
-         # excluding it, because `cat<p>CLAUDE.md` is a real input redirect
-         # plus an output redirect. The lowering is lexical and has no HTML
-         # parser behind it, so it also lowers `a<b && x>CLAUDE.md`.
+         # A `>` that belongs to a markup tag (`position.markup_angles`) is a
+         # weaker candidate: `<li>AGENTS.md</li>` is HTML, and every tag in
+         # rendered documentation ends in `>`. The engine lowers it to `low`
+         # (reported, out of the headline) instead of excluding it, because
+         # `cat<p>CLAUDE.md` is a real input redirect plus an output redirect.
+         # A tag is `<name` followed by `>`, `/>` or whitespace, an end tag is
+         # `</name>`, and a `<` after `<` or after an fd digit opens nothing,
+         # so `</dev/null>CLAUDE.md`, `cat <<EOF > CLAUDE.md`, `0<p>` and
+         # `<data.txt >` are never markup. The test is lexical, with no HTML
+         # parser behind it, so it still lowers `a<b && x>CLAUDE.md`.
          #
-         # The lowering does not apply where the text is shell: a shell file
-         # (`taint._is_shell`, `.bat`, `.cmd`), a line in a bash/sh/shell/zsh/
-         # console fence, or a file something invokes. There a tag close
-         # directly followed by the name (`cat<p>CLAUDE.md`) keeps full
-         # confidence. One exception: a tag close followed by whitespace
+         # The lowering does not apply where the text is executed
+         # (`engine._executed_file`): a file something invokes or a toolchain
+         # auto-runs, a `#!` first line under any suffix, a shell or batch
+         # suffix, a Makefile, justfile or Dockerfile, a JSON/YAML/TOML config
+         # (hooks, npm scripts, `.mcp.json` args and CI steps are commands), a
+         # line in a fence labelled with a shell, build or console language,
+         # and a code-file line that calls an exec sink outside a literal.
+         # There a markup `>` keeps full confidence (`cat<p>CLAUDE.md`), with
+         # one exception: one followed by whitespace
          # (`claude mcp add --scope project <name> ... # saved to .mcp.json`)
-         # keeps it only when the name is the operand directly after the `>`
-         # (`operand`). That leaves `tool --file <path> CLAUDE.md` in the
-         # headline in shell context, because it reads exactly like the real
+         # keeps it only when the name is inside the shell word right after
+         # the `>` (`operand`). That leaves `tool --file <path> CLAUDE.md` in
+         # the headline there, because it reads exactly like the real
          # `cat <in> CLAUDE.md`; the scanner cannot tell them apart.
+         #
+         # In a code file, outside a string literal, a markup `>` or a type
+         # argument close lowers (JSX, a PHP template, `Map<string, string>`);
+         # inside a literal only an HTML element name, a comment or a
+         # processing instruction does, so `'<li>AGENTS.md</li>'` lowers and
+         # `"cat<in>CLAUDE.md"` does not.
+         # A literal that IS an element (`"cat<p>CLAUDE.md"`) and is passed to
+         # a sink on another line still lowers: the sink test reads one line.
          #
          # Gaps not closed here: a markdown blockquote (`> AGENTS.md`) matches
          # and is read as prose by the position taxonomy; `tee CLAUDE.md`
-         # without `-` is not a write form.
+         # without `-` is not a write form; an HTML string in a JSON, YAML or
+         # TOML file is not lowered, because those files carry commands.
          _FSW002_PATTERN,
          specificity=93,
          candidates=_fsw002_candidates,
          tag_close_sensitive=True,
-         operand=_FSW002_OPERAND),
+         operand=_fsw002_operand),
 
     Rule("AGT-015", "HIGH", "high", CONTROL_PLANE,
          "Writes instructions for a different assistant",
