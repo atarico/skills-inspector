@@ -301,6 +301,46 @@ def _(b: Path):
     write(b, "settings.json/inner.txt", "not a config")
 
 
+# ------------------------------------------------- FSW-002 candidate walk
+# FSW-002 judges every `>` on a line, so a hostile line made of a hundred
+# thousand candidates must cost one pass, not one pass per candidate.
+@case("fsw002-many-tag-closes-then-name")
+def _(b: Path):
+    write(b, "SKILL.md", skill())
+    write(b, "notes.html", "<p>" * 170_000 + "CLAUDE.md\n")
+
+
+@case("fsw002-many-redirects")
+def _(b: Path):
+    write(b, "SKILL.md", skill())
+    write(b, "setup.sh", ">CLAUDE.md" * 50_000 + "\n")
+
+
+@case("fsw002-many-demoted-candidates")
+def _(b: Path):
+    # Every candidate is demoted (a comment, then backtick parity), so the walk
+    # never stops early and each per-index answer must be O(log n).
+    write(b, "SKILL.md", skill() + "`" + "<a>CLAUDE.md `" * 30_000 + "\n")
+    write(b, "tool.py", "# " + ">CLAUDE.md" * 50_000 + "\n")
+    write(b, "lit.py", "x = '" + ">CLAUDE.md" * 40_000 + "'\n")
+
+
+@case("fsw002-markup-lexer-floods")
+def _(b: Path):
+    # Each shape makes the tag lexer look ahead for a close that never comes
+    # (`?>`, an end tag's `>`, a quote) or re-read a shell word per candidate;
+    # every scan must resume where the previous one stopped.
+    write(b, "SKILL.md", skill())
+    write(b, "pi.html", "<?" * 150_000 + ">CLAUDE.md\n")
+    write(b, "end.html", "</a " * 80_000 + ">CLAUDE.md\n")
+    write(b, "attr.html", '<a b="x" ' * 30_000 + ">CLAUDE.md\n")
+    write(b, "lt.html", "<a <a " * 50_000 + ">CLAUDE.md\n")
+    write(b, "word.sh", "#!/bin/sh\n" + "<a> CLAUDE.md " * 25_000 + "\n")
+    write(b, "types.ts", "A<" * 100_000 + ">CLAUDE.md\n")
+    write(b, "heredocs.rb", "x = " + "<<A, " * 50_000 + "\n" + "A\n" * 50_000
+          + "`cat <in >CLAUDE.md` %x(" * 20_000 + "\n")
+
+
 def run_case(name: str, builder) -> tuple[bool, str]:
     base = Path(tempfile.mkdtemp(prefix=f"fuzz-{name}-"))
     try:

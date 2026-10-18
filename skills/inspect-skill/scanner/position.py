@@ -11,6 +11,8 @@ here as an experiment, not a guarantee.
 
 from __future__ import annotations
 
+import bisect
+from collections import deque
 import re
 from pathlib import PurePosixPath
 
@@ -123,6 +125,49 @@ _TEXT_CODE_SUFFIXES = {
 }
 _CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".conf", ".env"}
 _DOC_SUFFIXES = {".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc"}
+
+
+def is_code_file(relpath: str) -> bool:
+    """Is this a script or program by its suffix (`_TEXT_CODE_SUFFIXES`)?"""
+    return PurePosixPath(relpath).suffix.lower() in _TEXT_CODE_SUFFIXES
+
+
+# Languages whose backticks run a shell command, and which have heredocs.
+COMMAND_BACKTICK_SUFFIXES = {".rb", ".pl", ".pm", ".php"}
+# `%x(...)` (Ruby) and `qx{...}` (Perl): the rest of the line is the command.
+_COMMAND_OPENER = re.compile(r"%x\s*[(\[{<|!/]|\bqx\s*[(\[{<|!/]")
+# Heredoc openers: `<<~ID`, `<<-ID`, `<<"ID"`, `<<'ID'`, PHP's `<<<ID`, and a
+# bare `<<ID` only in capitals, since `arr<<item` is a Ruby append.
+_HEREDOC_OPEN = re.compile(
+    r"<<<\s*([\"']?)([A-Za-z_]\w*)\1|<<[~-]([\"']?)([A-Za-z_]\w*)\3"
+    r"|<<([\"'])([A-Za-z_]\w*)\5|<<([A-Z_][A-Z0-9_]*)\b")
+
+
+def heredoc_body_lines(relpath: str, text: str) -> list[bool]:
+    """Per-line (0-indexed): is this line inside a Ruby, Perl or PHP heredoc?
+
+    A body is read as commands whatever its delimiter says, because the unit
+    picks the delimiter: `system <<~HTML` runs its body. A line holding only
+    the delimiter (indented, or followed by `;`, `,` or `)`) closes it; an
+    opener that never closes holds the rest of the file. Both mistakes
+    cancel a lowering, never cause one.
+    """
+    if PurePosixPath(relpath).suffix.lower() not in COMMAND_BACKTICK_SUFFIXES:
+        return []
+    out: list[bool] = []
+    pending: deque[str] = deque()
+    for raw in text.splitlines():
+        if pending:
+            if raw.strip().rstrip(";,)") == pending[0]:
+                pending.popleft()
+                out.append(False)
+            else:
+                out.append(True)
+            continue
+        out.append(False)
+        for m in _HEREDOC_OPEN.finditer(raw):
+            pending.append(m.group(2) or m.group(4) or m.group(6) or m.group(7))
+    return out
 
 
 # Execution sinks. A string literal is inert data UNLESS it flows into one of
@@ -383,6 +428,330 @@ def _in_comment(line: str, index: int) -> bool:
     return False
 
 
+class LineProbe:
+    """Per-index position questions about ONE line, answered in a single pass.
+
+    `in_string_literal`, `_in_comment` and `in_inline_code` each re-walk the
+    line from column zero, which is right for one question and quadratic for a
+    rule that judges every candidate on a line: this scanner reads untrusted
+    lines up to megabytes long, and a hostile line made of a hundred thousand
+    candidates would turn one lookup per candidate into a hang. Each table
+    below is built once, lazily, and answered by bisection.
+
+    `tests/unit_test.py` pins agreement with the per-call functions on random
+    lines, so the one-pass walk cannot drift from what they promise.
+    """
+
+    def __init__(self, line: str) -> None:
+        self.line = line
+        self._ticks: list[int] | None = None
+        self._lits: tuple[list[int], list[float]] | None = None
+        self._comment: int | None | bool = False
+        self._shape: int | None = None
+        self._sink: bool | None = None
+        self._markup: dict[int, str] | None = None
+        self._type_args: set[int] | None = None
+        self._command_at: int | None | bool = False
+
+    def in_inline_code(self, index: int) -> bool:
+        """Same answer as `in_inline_code`: an odd number of backticks before."""
+        if self._ticks is None:
+            self._ticks = [i for i, ch in enumerate(self.line) if ch == "`"]
+        return bisect.bisect_left(self._ticks, index) % 2 == 1
+
+    def _in_string(self, index: int) -> bool:
+        """Same answer as `in_string_literal`, from precomputed spans.
+
+        A literal opened at `a` and closed at `b` holds every index in
+        `(a, b]`; one never closed holds everything after its opener.
+        """
+        if self._lits is None:
+            starts: list[int] = []
+            ends: list[float] = []
+            line, n = self.line, len(self.line)
+            quote: str | None = None
+            i = 0
+            while i < n:
+                ch = line[i]
+                if quote:
+                    if ch == "\\":
+                        i += 2
+                        continue
+                    if ch == quote:
+                        ends.append(i)
+                        quote = None
+                elif ch in "\"'":
+                    quote = ch
+                    starts.append(i)
+                i += 1
+            if quote:
+                ends.append(float("inf"))
+            self._lits = (starts, ends)
+        starts, ends = self._lits
+        k = bisect.bisect_left(starts, index) - 1
+        return k >= 0 and index <= ends[k]
+
+    def in_string(self, index: int) -> bool:
+        """Same answer as `in_string_literal`."""
+        return self._in_string(index)
+
+    def markup(self) -> dict[int, str]:
+        """Same answer as `markup_angles`."""
+        if self._markup is None:
+            self._markup = markup_angles(self.line)
+        return self._markup
+
+    def type_argument_closes(self) -> set[int]:
+        """Same answer as `type_argument_closes`."""
+        if self._type_args is None:
+            self._type_args = type_argument_closes(self.line)
+        return self._type_args
+
+    def in_command_span(self, index: int, backticks_run: bool) -> bool:
+        """Is `index` inside text the language runs as a shell command?
+
+        A backtick span in a language whose backticks run (`backticks_run`),
+        a zx `` $`...` `` template anywhere, or the rest of a line after a
+        Ruby `%x(` or Perl `qx{` when backticks run.
+        """
+        if self._ticks is None:
+            self._ticks = [i for i, ch in enumerate(self.line) if ch == "`"]
+        k = bisect.bisect_left(self._ticks, index)
+        if k % 2 == 1:
+            opener = self._ticks[k - 1]
+            if backticks_run or (opener > 0 and self.line[opener - 1] == "$"):
+                return True
+        if not backticks_run:
+            return False
+        if self._command_at is False:
+            m = _COMMAND_OPENER.search(self.line)
+            self._command_at = m.start() if m else None
+        return self._command_at is not None and self._command_at < index
+
+    def live_sink(self) -> bool:
+        """Does the line call an execution sink outside a literal?"""
+        if self._sink is None:
+            self._sink = _exec_sink_outside_literal(self.line)
+        return self._sink
+
+    def _in_comment(self, index: int) -> bool:
+        if self._comment is False:
+            self._comment = next(
+                (m.start() for m in _COMMENT.finditer(self.line)
+                 if not self._in_string(m.start())), None)
+        return self._comment is not None and self._comment < index
+
+    def literal_demotion(self, index: int) -> int:
+        """See the module-level `literal_demotion` for the contract."""
+        if self._in_comment(index):
+            return 2
+        if not self._in_string(index):
+            return 0
+        if self._shape is None:
+            if self.live_sink():
+                self._shape = 0
+            elif (_REGEX_CONSTRUCTION.search(self.line)
+                  or len(_REGEX_SHAPE.findall(self.line)) >= 2):
+                self._shape = 2
+            else:
+                self._shape = 1
+        return self._shape
+
+
+# A tag name: an ASCII letter, then letters, digits, `-` and `:`. No `.`, `/`,
+# `$` or quote, so `<data.txt >f` and `</dev/null>f` are redirects, not tags.
+_TAG_NAME = re.compile(r"[A-Za-z][A-Za-z0-9:-]*")
+_END_TAG = re.compile(r"</([A-Za-z][A-Za-z0-9:-]*)\s*>")
+# Where a digit before `<` is a file descriptor (`0<file`), not text.
+_FD_BOUNDARY = " \t;&|("
+
+# HTML elements (WHATWG, current and obsolete-but-rendered). Inside a code
+# file's string literal only these read as markup: `'<li>x</li>'` is HTML,
+# while `"cat <in> f"` is a command whatever the literal is passed to.
+HTML_ELEMENTS = frozenset("""
+a abbr acronym address area article aside audio b base bdi bdo big blink
+blockquote body br button canvas caption center cite code col colgroup data
+datalist dd del details dfn dialog dir div dl dt em embed fieldset figcaption
+figure font footer form frame frameset h1 h2 h3 h4 h5 h6 head header hgroup hr
+html i iframe img input ins kbd label legend li link main map mark marquee menu
+meta meter nav nobr noscript object ol optgroup option output p param picture
+pre progress q rp rt ruby s samp script search section select slot small source
+span strike strong style sub summary sup table tbody td template textarea tfoot
+th thead time title tr track tt u ul var video wbr svg math
+""".split())
+
+
+def markup_angles(line: str) -> dict[int, str]:
+    """Every `>` that belongs to a markup tag, mapped to the tag's name.
+
+    The name is lowercased; a comment or `<!DOCTYPE>` maps to `!` and a
+    processing instruction (`<?php ... ?>`) to `?`. A tag is:
+
+    - `<!-- ... -->`, `<!` plus a letter or `[` up to `>`, `<? ... ?>`;
+    - an end tag, `</name>` with optional whitespace before the `>`;
+    - a start tag, `<name` followed by `>`, `/>`, or whitespace and attributes
+      up to the `>` that closes it. In an HTML element's tag (`HTML_ELEMENTS`)
+      a value quoted after `=` is skipped and the `>` of `->` or `=>` does not
+      close the tag, so `<p v-if="n > 0">` and `<b onClick={() => go()}>`
+      each close once, and every `>` inside counts as markup. Any other name
+      closes at its first `>`: `<in x="1>2" >f` is an input redirect, an
+      argument and an output redirect, and its last `>` is not markup. A comment's or a processing instruction's body is
+    not markup, only its close: a redirect inside `<!-- -->` is hidden from
+    the reader and still read by the model.
+
+    A `<` right after `<` (`<<EOF`, `<<<`), or after a digit that starts a word
+    (`0<file`), never opens a tag. It stays lexical, with no HTML parser behind
+    it: `<p >f` and `a<b && x>f` read as tags, which is why callers LOWER a
+    candidate's confidence with it and never drop the candidate.
+
+    One pass: every scan resumes where the previous one stopped.
+    """
+    out: dict[int, str] = {}
+    n = len(line)
+    # No `?>` after this index: a line of a hundred thousand `<?` searches once.
+    pi_close = [line.find("?>")]
+    i = line.find("<")
+    while i != -1:
+        i = _markup_at(line, i, n, out, pi_close)
+        if i >= n:
+            break
+        i = line.find("<", i)
+    return out
+
+
+# What a TypeScript type argument list may hold between `<` and `>`: names,
+# `.`, `,`, `[]`, `?`, unions, intersections, quoted literal types and object
+# types. No `/`, `=`, `(`, `-` or `$`, so `x</dev/null>f` and `x<$PWD>f`
+# never read as one.
+_TYPE_ARGUMENT_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    "_.,[]?|&:'\"{}; \t")
+
+
+def type_argument_closes(line: str) -> set[int]:
+    """Every `>` that closes a type argument list (`Map<string, string>`).
+
+    A list opens at a `<` between a name character and an ASCII letter or `_`
+    (`Map<s`, not `x<.` or `x<$`) and holds only `_TYPE_ARGUMENT_CHARS` and
+    nested lists; any other character abandons every list still open. Only
+    code files read this, and only outside string literals and backtick
+    spans, where a `>` is code syntax. One pass.
+    """
+    closes: set[int] = set()
+    depth = 0
+    n = len(line)
+    for i, ch in enumerate(line):
+        if ch == "<":
+            nxt = line[i + 1] if i + 1 < n else ""
+            if (i > 0 and (line[i - 1].isalnum() or line[i - 1] == "_")
+                    and (nxt == "_" or (nxt.isascii() and nxt.isalpha()))):
+                depth += 1
+            else:
+                depth = 0
+        elif ch == ">":
+            if depth:
+                closes.add(i)
+                depth -= 1
+        elif depth and ch not in _TYPE_ARGUMENT_CHARS:
+            depth = 0
+    return closes
+
+
+def _markup_at(line: str, i: int, n: int, out: dict[int, str],
+               pi_close: list[int]) -> int:
+    """Record the tag that opens at `line[i] == "<"`; return where to resume."""
+    nxt = line[i + 1] if i + 1 < n else ""
+    if nxt == "<" or (i > 0 and line[i - 1] == "<"):
+        return i + 1
+    if (i > 0 and line[i - 1].isdigit()
+            and (i == 1 or line[i - 2] in _FD_BOUNDARY)):
+        return i + 1
+    if line.startswith("<!--", i):
+        close = line.find("-->", i + 4)
+        if close == -1:
+            return n
+        out[close + 2] = "!"
+        return close + 3
+    if nxt == "!" and i + 2 < n and (line[i + 2] == "[" or line[i + 2].isalpha()):
+        close = line.find(">", i + 2)
+        if close == -1:
+            return n
+        out[close] = "!"
+        return close + 1
+    if nxt == "?":
+        if pi_close[0] != -1 and pi_close[0] < i + 2:
+            pi_close[0] = line.find("?>", i + 2)
+        close = pi_close[0]
+        if close == -1:
+            return i + 2
+        out[close + 1] = "?"
+        return close + 2
+    if nxt == "/":
+        end = _END_TAG.match(line, i)
+        if end is None:
+            return i + 2
+        out[end.end() - 1] = end.group(1).lower()
+        return end.end()
+    name = _TAG_NAME.match(line, i + 1)
+    if name is None:
+        return i + 1
+    j = name.end()
+    tag = name.group().lower()
+    if j < n and line[j] == ">":
+        out[j] = tag
+        return j + 1
+    if line.startswith("/>", j):
+        out[j + 1] = tag
+        return j + 2
+    if j >= n or not line[j].isspace():
+        return j
+    return _attributes(line, j, n, tag, out)
+
+
+def _attributes(line: str, j: int, n: int, tag: str, out: dict[int, str]) -> int:
+    """Walk a start tag's attributes from `j` to the `>` that closes it.
+
+    A `<` before the close abandons this tag and resumes there. In an HTML
+    element's tag an unclosed quoted value runs to the end of the line, so
+    nothing after it is markup.
+    """
+    if tag not in HTML_ELEMENTS:
+        k = j
+        while k < n and line[k] not in "<>":
+            k += 1
+        if k < n and line[k] == ">":
+            out[k] = tag
+            return k + 1
+        return k
+    inside: list[int] = []
+    k = j
+    while k < n:
+        ch = line[k]
+        if ch == "<":
+            return k
+        if ch == ">":
+            inside.append(k)
+            if line[k - 1] not in "-=":
+                for index in inside:
+                    out[index] = tag
+                return k + 1
+        elif ch == "=":
+            v = k + 1
+            while v < n and line[v] in " \t":
+                v += 1
+            if v < n and line[v] in "\"'":
+                close = line.find(line[v], v + 1)
+                if close == -1:
+                    return n
+                gt = line.find(">", v + 1, close)
+                while gt != -1:
+                    inside.append(gt)
+                    gt = line.find(">", gt + 1, close)
+                k = close
+        k += 1
+    return n
+
+
 def literal_demotion(line: str, index: int) -> int:
     """Confidence levels a code-file match loses for being inert data.
 
@@ -407,17 +776,7 @@ def literal_demotion(line: str, index: int) -> int:
     True and must win. `tests/unit_test.py` pins both directions, and
     `fixtures/benign/security-tool` pins the catalogue case end to end.
     """
-    if _in_comment(line, index):
-        return 2
-    if not in_string_literal(line, index):
-        return 0
-    if _exec_sink_outside_literal(line):
-        return 0
-    # Structurally a regex: a description of a pattern, not a value. This is the
-    # source-code equivalent of a markdown table row.
-    if _REGEX_CONSTRUCTION.search(line) or len(_REGEX_SHAPE.findall(line)) >= 2:
-        return 2
-    return 1
+    return LineProbe(line).literal_demotion(index)
 
 
 def demote(confidence: str, position: str) -> str:
@@ -927,6 +1286,54 @@ def classify_lines(relpath: str, text: str,
         return classified
     floor = _ORDER.index(DOCUMENTARY)
     return [(_ORDER[max(_ORDER.index(p), floor)], k) for p, k in classified]
+
+
+# Fence languages that hold markup. FSW-002 (rules.py) lowers the confidence of
+# a `>` that reads as markup only where markup is expected: markdown prose, an
+# unlabelled fence, or a fence labelled with one of these. Any other label
+# (`bash`, `text`, `python`, one nobody has heard of) cancels the lowering for
+# the lines inside it, so a label missing here costs a false positive, never a
+# lowered redirect. A unit can always move a line into prose instead, and
+# prose is a markup context, so this list buys it nothing.
+_MARKUP_FENCE_LANGS = {
+    "html", "htm", "xhtml", "xml", "svg", "vue", "svelte", "astro", "jsx",
+    "tsx", "markdown", "md", "mdx", "handlebars", "hbs", "mustache", "ejs",
+    "erb", "njk", "nunjucks", "jinja", "jinja2", "j2", "liquid", "twig", "php",
+    "blade", "razor", "cshtml",
+}
+
+
+def non_markup_fence_lines(text: str) -> list[bool]:
+    """Per-line (0-indexed): is this line inside a fence with a label that is
+    not in `_MARKUP_FENCE_LANGS`?
+
+    Independent of `_classify_markdown`'s fence tracking, which answers a
+    different question (is this fence's CONTENT live enough to demote a
+    finding's confidence) and does not expose the declared language to its
+    caller. This only tracks open/close and the language tag.
+    """
+    out: list[bool] = []
+    in_fence = False
+    fence_marker = ""
+    fence_is_shell = False
+    for raw in text.splitlines():
+        fence_match = _FENCE.match(raw)
+        if in_fence:
+            if fence_match and raw.strip().startswith(fence_marker):
+                in_fence = False
+                out.append(False)
+                continue
+            out.append(fence_is_shell)
+            continue
+        if fence_match:
+            in_fence = True
+            fence_marker = fence_match.group(1)[:3]
+            label = fence_match.group(2).strip().lower()
+            fence_is_shell = bool(label) and label not in _MARKUP_FENCE_LANGS
+            out.append(False)
+            continue
+        out.append(False)
+    return out
 
 
 # Triple-quoted / heredoc bodies are prose, not statements. A security tool that

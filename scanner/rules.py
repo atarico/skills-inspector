@@ -8,6 +8,7 @@ DEFERRED and reported as coverage gaps, never silently dropped.
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass
 
@@ -76,6 +77,22 @@ class Rule:
     # on the line qualifies. One extra argument anywhere breaks it back to
     # this rule's own `severity`.
     tempered: "Tempered | None" = None
+    # Every place `pattern` matches on a line, in order, for a rule whose
+    # leftmost match is not the whole story: the engine judges each one and
+    # keeps the strongest, still reporting one finding per rule per line. Only
+    # FSW-002 sets it (see its comment below). Each yielded match must be a
+    # `pattern` match starting where it says it does, and the walk must cost
+    # O(len(line)) plus a bounded window per candidate.
+    candidates: "Callable[[str], Iterator[re.Match]] | None" = None
+    # The rule's operator can be a `>` that belongs to a markup tag, so the
+    # engine lowers such a candidate's confidence (never drops it) unless the
+    # text is executed. See `engine._reads_as_markup`. Needs `operand`.
+    tag_close_sensitive: bool = False
+    # Called with the line and the index just past a markup `>`: is the thing
+    # the rule looks for the operand directly after it? A `<placeholder> `
+    # followed by whitespace keeps full confidence in executed text only when
+    # this says yes.
+    operand: "Callable[[str, int], bool] | None" = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +243,61 @@ _CONCEAL_DIRECTIVE = (
     r"(do\s+not|don'?t|never|avoid)\s+(\w+\s+){0,3}"
     r"(mention|tell|inform|notify|show|display|report|reveal|disclose|log)"
     r"\s+(\w+\s+){0,2}")
+
+# FSW-002's pieces, shared so the pattern, the candidate walk and the operand
+# test cannot drift apart. See the comment on the rule for what they mean.
+_FSW002_NAMES = (
+    r"(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
+    r"|settings\.local\.json|settings\.json"
+    r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
+    r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))"
+)
+_FSW002_TARGETS = r"[^\n]{0,80}" + _FSW002_NAMES
+# The non-redirect write forms carry tokens that markup never produces.
+_FSW002_WRITE_FORMS = (
+    r"tee\s+-a?|write_text|writeFile"
+    r"|open\s*\([^)]{0,60}[\"']w"
+)
+# A redirect is any `>` that is not the tail of `->` or `=>`. `>>` is two
+# candidates: the first is the operator, the second is judged on its own.
+_FSW002_REDIRECT = r"(?<![-=])>"
+_FSW002_PATTERN = _r(rf"({_FSW002_REDIRECT}|{_FSW002_WRITE_FORMS}){_FSW002_TARGETS}")
+_FSW002_ANCHOR = _r(rf"{_FSW002_REDIRECT}|{_FSW002_WRITE_FORMS}")
+_FSW002_NAME_AT = _r(rf"(?={_FSW002_NAMES})")
+_FSW002_NAME = _r(_FSW002_NAMES)
+# One shell word: unquoted characters, a backslash escape, quoted runs,
+# `$(...)` nested two deep, `${...}` and backticks, so `"$D"/CLAUDE.md`,
+# `$(cd "$(dirname "$0")" && pwd)/CLAUDE.md`, `my\ dir/CLAUDE.md` and
+# `~/'.claude'/settings.json` are each one word. Read in a bounded window.
+_SHELL_WORD = _r(
+    r"\s*(?:\\[^\n]|[^\s\"'`|;&<>()$\\]|\"[^\"\n]{0,80}\"|'[^'\n]{0,80}'"
+    r"|`[^`\n]{0,80}`|\$\((?:[^()\n]|\((?:[^()\n]|\([^()\n]{0,80}\)){0,80}\))"
+    r"{0,160}\)|\$\{[^}\n]{0,80}\}|\$)*")
+
+
+def _fsw002_operand(line: str, start: int) -> bool:
+    """Is a control-file name inside the shell word that starts at `start`?"""
+    word = _SHELL_WORD.match(line, start, start + 240)
+    return _FSW002_NAME.search(line, word.start(), word.end()) is not None
+
+
+def _fsw002_candidates(line: str):
+    """Every `_FSW002_PATTERN` match on the line, not only the leftmost.
+
+    Names are located once, so a candidate is tried only when one lies inside
+    its 80-character window: a line of a hundred thousand `>` and no name costs
+    one pass, not a window scan per `>`.
+    """
+    starts = [m.start() for m in _FSW002_NAME_AT.finditer(line)]
+    if not starts:
+        return
+    for anchor in _FSW002_ANCHOR.finditer(line):
+        i = bisect.bisect_left(starts, anchor.end())
+        if i == len(starts) or starts[i] - anchor.end() > 80:
+            continue
+        match = _FSW002_PATTERN.match(line, anchor.start())
+        if match:
+            yield match
 
 
 RULES: list[Rule] = [
@@ -635,51 +707,78 @@ RULES: list[Rule] = [
          "Rewrites the rules the agent follows — a persistent foothold in your assistant.",
          "Only as the unit's stated purpose.",
          "What exactly is written into the agent config?",
-         # The `.claude/` and `.codex/` alternatives used to match ANY path under
-         # those directories, so `echo ... >> .claude/deployment-checkpoints.log`
-         # was reported as rewriting the agent's instructions. It is not: the
-         # rule's own name is "modifies agent instructions or CONFIG", and a log,
-         # lock or cache file is neither. Writing `.claude/commands/x.md` still
-         # fires, because that IS a command definition.
+         # What the rule means. A control-plane filename within 80 characters
+         # after a redirect (`>`, `>>`) or a write form (`tee -a`, `write_text`,
+         # `writeFile`, `open(..., "w")`). `.claude/` and `.codex/` count only
+         # for config: a log, lock, cache or flag file there is not the agent's
+         # instructions, while `.claude/commands/x.md` is.
          #
-         # The bare `>` / `>>` alternative used to have nothing requiring it to
-         # be a shell redirect at all, so it read the CLOSE of an HTML tag the
-         # same way — every tag in HTML ends in `>`. Measured verbatim against a
-         # real skill's rendered documentation: `<p>…<code>AGENTS.md</code>…`
-         # matched on the `<p>`'s `>`, and `<li>AGENTS.md に追記してください</li>`
-         # matched on the `<li>`'s. Any tag within 80 characters of a
-         # control-plane filename fired CRITICAL at high confidence — this is
-         # the third instance of the same shape in this repository; the same
-         # rule already fired on the `>` of a markdown arrow `->` in a fixture
-         # note (odd/tasks/declaration-files-and-fsw002.md, D4).
+         # One pattern in every context. The audited unit picks its own file
+         # suffix and fence labels, so context may only LOWER a match's
+         # confidence, never drop it, and an execution route cancels the
+         # lowering. An earlier design chose a narrower pattern for `.html`
+         # files and a wider one for code suffixes and shell fences; both
+         # choices were attacker-controlled (a shell script named `setup.html`
+         # and run with `bash setup.html` was silent), and the narrow class
+         # missed `;>`, `(>`, `{>`, `|>`, `:>`, `!>`, `*>` and `1<>`.
          #
-         # That over-corrected, silencing the real no-space redirect
-         # (`echo x>AGENTS.md`) the comment above still claims is covered. The
-         # anchored alternative stays; a second one below excludes an HTML
-         # OPEN tag's close instead of every bare `>`, via `(?<!<[A-Za-z]{N})`
-         # chained for N=1..8 (`re` has no variable-width lookbehind). A tag
-         # name over 8 letters is a known gap; a CLOSING tag needs no
-         # exclusion — its `>` sits after the content it names.
+         # Every `>` is a redirect candidate except the tail of `->` and `=>`
+         # (arrows in prose). `candidates` walks all of them and the engine
+         # keeps the strongest per line, because the leftmost can be a tag
+         # close or sit in backticks while a later one on the same line is the
+         # real redirect. `echo x->CLAUDE.md` is a real redirect this reading
+         # misses; arrows are far commoner, so it is left out on purpose.
          #
-         # This narrows only the `>` / `>>` branch. The other alternatives
-         # (`tee`, `write_text`, `writeFile`, `open(...` w") already carry
-         # their own distinguishing tokens that markup never produces, so they
-         # are untouched.
+         # A `>` that belongs to a markup tag (`position.markup_angles`) is a
+         # weaker candidate: `<li>AGENTS.md</li>` is HTML, and every tag in
+         # rendered documentation ends in `>`. The engine lowers it to `low`
+         # (reported, out of the headline) instead of excluding it, because
+         # `cat<p>CLAUDE.md` is a real input redirect plus an output redirect.
+         # A tag is `<name` followed by `>`, `/>` or whitespace, an end tag is
+         # `</name>`, and a `<` after `<` or after an fd digit opens nothing,
+         # so `</dev/null>CLAUDE.md`, `cat <<EOF > CLAUDE.md`, `0<p>` and
+         # `<data.txt >` are never markup. Only an HTML element's tag runs past
+         # a quoted `>` or an arrow (`<p v-if="n > 0">`); any other name closes
+         # at its first `>`. The test is lexical, with no HTML parser behind
+         # it, so it still lowers `a<b && x>CLAUDE.md`.
          #
-         # A markdown blockquote `> …` still matches this anchor (start-of-line
-         # then `>`) — it is prose inside a `.md` file, which the position
-         # taxonomy already reads as documentary rather than active shell.
-         # Noted, not chased here (D4).
-         _r(r"((?:^|(?<=[\s\d&]))(?:>>|>)|(?<!<[A-Za-z])(?<!<[A-Za-z]{2})"
-            r"(?<!<[A-Za-z]{3})(?<!<[A-Za-z]{4})(?<!<[A-Za-z]{5})(?<!<[A-Za-z]{6})"
-            r"(?<!<[A-Za-z]{7})(?<!<[A-Za-z]{8})(?<=[\w\"'`)}\]])(?:>>|>)"
-            r"|tee\s+-a?|write_text|writeFile"
-            r"|open\s*\([^)]{0,60}[\"']w)"
-            r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
-            r"|settings\.local\.json|settings\.json"
-            r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
-            r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))"),
-         specificity=93),
+         # The lowering applies only where markup is expected
+         # (`engine._executed_file`, `engine._reads_as_markup`): markdown prose
+         # and fences that are unlabelled or labelled with a markup language,
+         # markup and template files, plain-text docs, and code files. Every
+         # other file is read as commands, as is anything invoked or auto-run,
+         # a `#!` first line under any suffix, a shell or Windows shell script,
+         # a code-file line that calls an exec sink outside a literal, a
+         # command span (Ruby/Perl/PHP backticks, `%x(`, `qx{`, zx's `` $` ``)
+         # and a Ruby/Perl/PHP heredoc body whatever its delimiter: an
+         # unlisted kind costs a false positive, never a lowered redirect.
+         # There a markup `>` keeps full confidence (`cat<p>CLAUDE.md`), with
+         # one exception: one followed by whitespace
+         # (`claude mcp add --scope project <name> ... # saved to .mcp.json`)
+         # keeps it only when the name is inside the shell word right after
+         # the `>` (`operand`). That leaves `tool --file <path> CLAUDE.md` in
+         # the headline there, because it reads exactly like the real
+         # `cat <in> CLAUDE.md`; the scanner cannot tell them apart.
+         #
+         # In a code file (`.jsx`/`.tsx` included), outside string literals
+         # and other backtick spans (JS template literals), a markup `>` or a
+         # type argument close lowers
+         # (JSX, a PHP template, `Map<string, string>`); inside them only an
+         # HTML element name, a comment or a processing instruction does, so
+         # `'<li>AGENTS.md</li>'` lowers and `"cat<in>CLAUDE.md"` and
+         # `` `echo x<.>CLAUDE.md` `` do not. A literal that IS an element
+         # (`"cat<p>CLAUDE.md"`) and is passed to a sink on another line still
+         # lowers: the sink test reads one line.
+         #
+         # Gaps not closed here: a markdown blockquote (`> AGENTS.md`) matches
+         # and is read as prose by the position taxonomy; `tee CLAUDE.md`
+         # without `-` is not a write form; an HTML string in a JSON, YAML or
+         # TOML file is not lowered, because those files are read as commands.
+         _FSW002_PATTERN,
+         specificity=93,
+         candidates=_fsw002_candidates,
+         tag_close_sensitive=True,
+         operand=_fsw002_operand),
 
     Rule("AGT-015", "HIGH", "high", CONTROL_PLANE,
          "Writes instructions for a different assistant",

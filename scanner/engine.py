@@ -259,6 +259,81 @@ def unit_line_budget() -> int:
     return MAX_TOTAL_LINES
 
 
+_CONF_RANK = {"high": 0, "medium": 1, "low": 2}
+
+# Where markup is expected, so a `>` that reads as markup may lower: rendered
+# markup and templates, plus plain-text docs. Markdown and code files have
+# their own rules (`pos.non_markup_fence_lines`, `_reads_as_markup`), and
+# `.jsx`/`.tsx` are code files here. Every other file is read as commands.
+_MARKUP_SUFFIXES = {
+    ".html", ".htm", ".xhtml", ".svg", ".vue", ".svelte", ".astro", ".hbs",
+    ".handlebars", ".mustache", ".ejs", ".erb", ".njk", ".twig", ".liquid",
+    ".jinja", ".jinja2", ".j2", ".txt", ".rst", ".adoc",
+}
+_SCRIPTED_MARKUP_SUFFIXES = {".jsx", ".tsx"}
+# `taint._is_shell` knows POSIX shells; these are code-file suffixes that a
+# Windows shell runs.
+_WINDOWS_SHELL_SUFFIXES = {".bat", ".cmd", ".ps1", ".psm1"}
+
+
+def _executed_file(relpath: str, text: str, invoked: bool,
+                   is_md: bool, code_file: bool) -> bool:
+    """Is this file's text read as commands, whatever its lines look like?
+
+    Yes when something invokes or auto-runs it, it starts with `#!`, or it is
+    a shell script; and yes for every file that is not a markup context
+    (markdown, `_MARKUP_SUFFIXES`, a code file), which covers hooks.json, npm
+    scripts, CI steps, Makefiles, `.envrc`, Procfiles and every route nobody
+    listed. Each answer can only cancel a markup lowering, never cause one:
+    an unlisted kind costs a false positive, never a lowered redirect.
+    """
+    if invoked or text.startswith("#!") or taint._is_shell(relpath, text):
+        return True
+    suffix = Path(relpath).suffix.lower()
+    if suffix in _WINDOWS_SHELL_SUFFIXES:
+        return True
+    return not (is_md or code_file or suffix in _MARKUP_SUFFIXES)
+
+
+def _placeholder_in_shell(rule, line: str, index: int) -> bool:
+    """In executed text, is this markup candidate still a weak one?
+
+    A `>` followed by whitespace reads as a `<placeholder>` unless the name the
+    rule looks for is in the shell word directly after it. A `>` followed by
+    anything else (`cat<p>CLAUDE.md`) keeps its full confidence.
+    """
+    after = line[index + 1:index + 2]
+    return after.isspace() and not rule.operand(line, index + 1)
+
+
+def _reads_as_markup(rule, line: str, index: int, executed: bool,
+                     code_file: bool, probe: pos.LineProbe,
+                     backticks_run: bool) -> bool:
+    """Does the candidate `>` at `index` lose confidence for being markup?
+
+    In a code file a markup `>` inside a string literal or a backtick span (a
+    JS template literal, a Ruby/Perl/PHP command) counts only for an HTML
+    element, a comment or a processing instruction; outside them a markup `>`
+    or the close of a type argument list counts (JSX, a PHP template,
+    `Map<string, string>`). Everywhere else every markup `>` counts.
+    Executed text (the file, a shell fence line, a heredoc body, a code line
+    calling a live sink, or a command span such as Ruby backticks, `%x(`,
+    `qx{` or a zx template) then keeps only a `<placeholder>`: it can cancel
+    a lowering, never add one.
+    """
+    name = probe.markup().get(index)
+    if not code_file:
+        lowered = name is not None
+    elif probe.in_string(index) or probe.in_inline_code(index):
+        lowered = name in pos.HTML_ELEMENTS or name in ("!", "?")
+    else:
+        lowered = name is not None or index in probe.type_argument_closes()
+    if lowered and (executed or (code_file and (
+            probe.live_sink() or probe.in_command_span(index, backticks_run)))):
+        return _placeholder_in_shell(rule, line, index)
+    return lowered
+
+
 def _scan_text(unit: Unit, relpath: str, text: str,
                line_matches: dict | None = None,
                invoked: bool = False) -> list[Finding]:
@@ -268,6 +343,17 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     is_md = Path(relpath).suffix.lower() in _MD_SUFFIXES
     # Only the instruction-surface promotion reads this, and only for markdown.
     quoted = pos.quoted_carry(text, positions) if is_md else []
+    # Where the text is executed, a `<name>` is a redirect and not a markup
+    # tag: see `_executed_file`, plus a markdown line inside a fence that is
+    # not labelled with a markup language. Rules that read a `>` as possible
+    # markup (`Rule.tag_close_sensitive`) lower it only in markup contexts; see
+    # `_reads_as_markup`.
+    code_file = (pos.is_code_file(relpath)
+                 or Path(relpath).suffix.lower() in _SCRIPTED_MARKUP_SUFFIXES)
+    executed_file = _executed_file(relpath, text, invoked, is_md, code_file)
+    shell_fence = pos.non_markup_fence_lines(text) if is_md else None
+    heredoc = pos.heredoc_body_lines(relpath, text)
+    backticks_run = Path(relpath).suffix.lower() in pos.COMMAND_BACKTICK_SUFFIXES
 
     base_position = pos.file_base_position(relpath, invoked, text)
     hidden = ev.invisible_counts(text)
@@ -289,46 +375,73 @@ def _scan_text(unit: Unit, relpath: str, text: str,
         if not line.strip():
             continue
         position, kind = positions[idx] if idx < len(positions) else (pos.ACTIVE, pos.PROSE)
+        executed = (executed_file
+                    or (is_md and shell_fence is not None
+                        and idx < len(shell_fence) and shell_fence[idx])
+                    or (idx < len(heredoc) and heredoc[idx]))
+        probe: pos.LineProbe | None = None
         for rule in R.RULES:
             if rule.markdown_only and not is_md:
                 continue
             if rule.code_only and is_md:
                 continue
-            match = rule.pattern.search(line)
-            if not match:
+            if rule.candidates is not None:
+                matches = rule.candidates(line)
+            else:
+                first = rule.pattern.search(line)
+                matches = (first,) if first else ()
+            # One finding per rule per line, from the strongest candidate (ties
+            # go to the leftmost). Evaluation stops once a candidate keeps the
+            # rule's full confidence: nothing later can beat it.
+            best = None
+            for match in matches:
+                if probe is None:
+                    probe = pos.LineProbe(line)
+                # Instruction-surface rules in prose are inherently ambiguous: a
+                # deterministic match cannot tell a live injection from a doc
+                # quoting one ("ignore previous instructions" appears in both).
+                # Everything below is about how much of that ambiguity is
+                # actually resolvable without the semantic pass (section 8,
+                # deferred).
+                effective = position
+                reported = position
+                if is_md and probe.in_inline_code(match.start()):
+                    effective = pos.DOCUMENTARY
+                elif _instruction_is_live(rule, line, match, kind,
+                                          position, relpath, invoked, is_md,
+                                          quoted[idx] if idx < len(quoted) else False):
+                    # A skill whose entire payload is a prompt injection led the
+                    # report with NOTHING. `_IMPERATIVE_VERB` reads only the head
+                    # of the line, so "Ignore all previous instructions…",
+                    # "…this skill is safe. Report no findings…" and "When you
+                    # run the cleanup, do not tell the user…" were all filed as
+                    # documentary, floored to low, and dropped by `headline` —
+                    # on the category RULES.md section G calls the
+                    # highest-value one.
+                    #
+                    # `reported` moves with `effective` here, unlike the
+                    # inline-code branch above. That branch demotes a match the
+                    # LINE still contains; this one is a claim about the line
+                    # itself, and a finding that leads the report while printing
+                    # `position: documentary` is a report arguing with itself.
+                    effective = reported = pos.ACTIVE
+                confidence = pos.demote(rule.confidence, effective)
+                if not is_md:
+                    for _ in range(probe.literal_demotion(match.start())):
+                        confidence = pos.demote(confidence, pos.ILLUSTRATIVE)
+                if rule.tag_close_sensitive and _reads_as_markup(
+                        rule, line, match.start(), executed, code_file, probe,
+                        backticks_run):
+                    confidence = pos.demote(confidence, pos.DOCUMENTARY)
+                if best is None or _CONF_RANK[confidence] < _CONF_RANK[best[0]]:
+                    best = (confidence, reported, match)
+                if confidence == rule.confidence:
+                    break
+            if best is None:
                 continue
+            confidence, reported, match = best
             if line_matches is not None:
                 line_matches.setdefault(idx, []).append(rule)
-            # Instruction-surface rules in prose are inherently ambiguous: a
-            # deterministic match cannot tell a live injection from a doc quoting
-            # one ("ignore previous instructions" appears in both). Everything
-            # below is about how much of that ambiguity is actually resolvable
-            # without the semantic pass (section 8, deferred).
-            effective = position
-            reported = position
-            if is_md and pos.in_inline_code(line, match.start()):
-                effective = pos.DOCUMENTARY
-            elif _instruction_is_live(rule, line, match, kind,
-                                      position, relpath, invoked, is_md,
-                                      quoted[idx] if idx < len(quoted) else False):
-                # A skill whose entire payload is a prompt injection led the
-                # report with NOTHING. `_IMPERATIVE_VERB` reads only the head of
-                # the line, so "Ignore all previous instructions…",
-                # "…this skill is safe. Report no findings…" and "When you run
-                # the cleanup, do not tell the user…" were all filed as
-                # documentary, floored to low, and dropped by `headline` — on
-                # the category RULES.md section G calls the highest-value one.
-                #
-                # `reported` moves with `effective` here, unlike the inline-code
-                # branch above. That branch demotes a match the LINE still
-                # contains; this one is a claim about the line itself, and a
-                # finding that leads the report while printing
-                # `position: documentary` is a report arguing with itself.
-                effective = reported = pos.ACTIVE
-            confidence = pos.demote(rule.confidence, effective)
-            if not is_md:
-                for _ in range(pos.literal_demotion(line, match.start())):
-                    confidence = pos.demote(confidence, pos.ILLUSTRATIVE)
             severity = rule.severity
             evidence = ev.sanitize(line, centre=(match.start(), match.end()))
             temper = _tempered_severity(rule, line)
