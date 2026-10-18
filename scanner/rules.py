@@ -265,12 +265,14 @@ _FSW002_PATTERN = _r(rf"({_FSW002_REDIRECT}|{_FSW002_WRITE_FORMS}){_FSW002_TARGE
 _FSW002_ANCHOR = _r(rf"{_FSW002_REDIRECT}|{_FSW002_WRITE_FORMS}")
 _FSW002_NAME_AT = _r(rf"(?={_FSW002_NAMES})")
 _FSW002_NAME = _r(_FSW002_NAMES)
-# One shell word: unquoted characters, quoted runs, `$(...)`, `${...}` and
-# backticks, so `"$D"/CLAUDE.md`, `$(echo CLAUDE.md)` and
+# One shell word: unquoted characters, a backslash escape, quoted runs,
+# `$(...)` nested two deep, `${...}` and backticks, so `"$D"/CLAUDE.md`,
+# `$(cd "$(dirname "$0")" && pwd)/CLAUDE.md`, `my\ dir/CLAUDE.md` and
 # `~/'.claude'/settings.json` are each one word. Read in a bounded window.
 _SHELL_WORD = _r(
-    r"\s*(?:[^\s\"'`|;&<>()$]|\"[^\"\n]{0,80}\"|'[^'\n]{0,80}'|`[^`\n]{0,80}`"
-    r"|\$\([^()\n]{0,80}\)|\$\{[^}\n]{0,80}\}|\$)*")
+    r"\s*(?:\\[^\n]|[^\s\"'`|;&<>()$\\]|\"[^\"\n]{0,80}\"|'[^'\n]{0,80}'"
+    r"|`[^`\n]{0,80}`|\$\((?:[^()\n]|\((?:[^()\n]|\([^()\n]{0,80}\)){0,80}\))"
+    r"{0,160}\)|\$\{[^}\n]{0,80}\}|\$)*")
 
 
 def _fsw002_operand(line: str, start: int) -> bool:
@@ -735,16 +737,19 @@ RULES: list[Rule] = [
          # A tag is `<name` followed by `>`, `/>` or whitespace, an end tag is
          # `</name>`, and a `<` after `<` or after an fd digit opens nothing,
          # so `</dev/null>CLAUDE.md`, `cat <<EOF > CLAUDE.md`, `0<p>` and
-         # `<data.txt >` are never markup. The test is lexical, with no HTML
-         # parser behind it, so it still lowers `a<b && x>CLAUDE.md`.
+         # `<data.txt >` are never markup. Only an HTML element's tag runs past
+         # a quoted `>` or an arrow (`<p v-if="n > 0">`); any other name closes
+         # at its first `>`. The test is lexical, with no HTML parser behind
+         # it, so it still lowers `a<b && x>CLAUDE.md`.
          #
-         # The lowering does not apply where the text is executed
-         # (`engine._executed_file`): a file something invokes or a toolchain
-         # auto-runs, a `#!` first line under any suffix, a shell or batch
-         # suffix, a Makefile, justfile or Dockerfile, a JSON/YAML/TOML config
-         # (hooks, npm scripts, `.mcp.json` args and CI steps are commands), a
-         # line in a fence labelled with a shell, build or console language,
-         # and a code-file line that calls an exec sink outside a literal.
+         # The lowering applies only where markup is expected
+         # (`engine._executed_file`, `engine._reads_as_markup`): markdown prose
+         # and fences that are unlabelled or labelled with a markup language,
+         # markup and template files, plain-text docs, and code files. Every
+         # other file is read as commands, as is anything invoked or auto-run,
+         # a `#!` first line under any suffix, a shell or Windows shell script,
+         # and a code-file line that calls an exec sink outside a literal: an
+         # unlisted kind costs a false positive, never a lowered redirect.
          # There a markup `>` keeps full confidence (`cat<p>CLAUDE.md`), with
          # one exception: one followed by whitespace
          # (`claude mcp add --scope project <name> ... # saved to .mcp.json`)
@@ -753,18 +758,19 @@ RULES: list[Rule] = [
          # the headline there, because it reads exactly like the real
          # `cat <in> CLAUDE.md`; the scanner cannot tell them apart.
          #
-         # In a code file, outside a string literal, a markup `>` or a type
-         # argument close lowers (JSX, a PHP template, `Map<string, string>`);
-         # inside a literal only an HTML element name, a comment or a
-         # processing instruction does, so `'<li>AGENTS.md</li>'` lowers and
-         # `"cat<in>CLAUDE.md"` does not.
-         # A literal that IS an element (`"cat<p>CLAUDE.md"`) and is passed to
-         # a sink on another line still lowers: the sink test reads one line.
+         # In a code file (`.jsx`/`.tsx` included), outside string literals
+         # and backtick spans, a markup `>` or a type argument close lowers
+         # (JSX, a PHP template, `Map<string, string>`); inside them only an
+         # HTML element name, a comment or a processing instruction does, so
+         # `'<li>AGENTS.md</li>'` lowers and `"cat<in>CLAUDE.md"` and
+         # `` `echo x<.>CLAUDE.md` `` do not. A literal that IS an element
+         # (`"cat<p>CLAUDE.md"`) and is passed to a sink on another line still
+         # lowers: the sink test reads one line.
          #
          # Gaps not closed here: a markdown blockquote (`> AGENTS.md`) matches
          # and is read as prose by the position taxonomy; `tee CLAUDE.md`
          # without `-` is not a write form; an HTML string in a JSON, YAML or
-         # TOML file is not lowered, because those files carry commands.
+         # TOML file is not lowered, because those files are read as commands.
          _FSW002_PATTERN,
          specificity=93,
          candidates=_fsw002_candidates,

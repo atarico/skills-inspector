@@ -516,7 +516,7 @@ html i iframe img input ins kbd label legend li link main map mark marquee menu
 meta meter nav nobr noscript object ol optgroup option output p param picture
 pre progress q rp rt ruby s samp script search section select slot small source
 span strike strong style sub summary sup table tbody td template textarea tfoot
-th thead time title tr track tt u ul var video wbr
+th thead time title tr track tt u ul var video wbr svg math
 """.split())
 
 
@@ -529,12 +529,12 @@ def markup_angles(line: str) -> dict[int, str]:
     - `<!-- ... -->`, `<!` plus a letter or `[` up to `>`, `<? ... ?>`;
     - an end tag, `</name>` with optional whitespace before the `>`;
     - a start tag, `<name` followed by `>`, `/>`, or whitespace and attributes
-      up to the `>` that closes it. Inside the attributes a value quoted after
-      `=` is skipped, and the `>` of `->` or `=>` does not close the tag, so
-      `<p v-if="n > 0">` and `<b onClick={() => go()}>` each close once.
-
-    Every `>` inside a start tag counts, not only the closing one: the `>` of
-    `"n > 0"` is markup too. A comment's or a processing instruction's body is
+      up to the `>` that closes it. In an HTML element's tag (`HTML_ELEMENTS`)
+      a value quoted after `=` is skipped and the `>` of `->` or `=>` does not
+      close the tag, so `<p v-if="n > 0">` and `<b onClick={() => go()}>`
+      each close once, and every `>` inside counts as markup. Any other name
+      closes at its first `>`: `<in x="1>2" >f` is an input redirect, an
+      argument and an output redirect, and its last `>` is not markup. A comment's or a processing instruction's body is
     not markup, only its close: a redirect inside `<!-- -->` is hidden from
     the reader and still read by the model.
 
@@ -560,25 +560,30 @@ def markup_angles(line: str) -> dict[int, str]:
 
 # What a TypeScript type argument list may hold between `<` and `>`: names,
 # `.`, `,`, `[]`, `?`, unions, intersections, quoted literal types and object
-# types. No `/`, `=`, `(` or `-`, so `x</dev/null>f` never reads as one.
+# types. No `/`, `=`, `(`, `-` or `$`, so `x</dev/null>f` and `x<$PWD>f`
+# never read as one.
 _TYPE_ARGUMENT_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    "_$.,[]?|&:'\"{}; \t")
+    "_.,[]?|&:'\"{}; \t")
 
 
 def type_argument_closes(line: str) -> set[int]:
     """Every `>` that closes a type argument list (`Map<string, string>`).
 
-    A list opens at a `<` right after a name character and holds only
-    `_TYPE_ARGUMENT_CHARS` and nested lists; any other character abandons
-    every list still open. Only code files read this, and only outside string
-    literals, where a `>` is code syntax and never a shell redirect. One pass.
+    A list opens at a `<` between a name character and an ASCII letter or `_`
+    (`Map<s`, not `x<.` or `x<$`) and holds only `_TYPE_ARGUMENT_CHARS` and
+    nested lists; any other character abandons every list still open. Only
+    code files read this, and only outside string literals and backtick
+    spans, where a `>` is code syntax. One pass.
     """
     closes: set[int] = set()
     depth = 0
+    n = len(line)
     for i, ch in enumerate(line):
         if ch == "<":
-            if i > 0 and (line[i - 1].isalnum() or line[i - 1] in "_$"):
+            nxt = line[i + 1] if i + 1 < n else ""
+            if (i > 0 and (line[i - 1].isalnum() or line[i - 1] == "_")
+                    and (nxt == "_" or (nxt.isascii() and nxt.isalpha()))):
                 depth += 1
             else:
                 depth = 0
@@ -645,9 +650,18 @@ def _markup_at(line: str, i: int, n: int, out: dict[int, str],
 def _attributes(line: str, j: int, n: int, tag: str, out: dict[int, str]) -> int:
     """Walk a start tag's attributes from `j` to the `>` that closes it.
 
-    A `<` before the close abandons this tag and resumes there. An unclosed
-    quoted value runs to the end of the line, so nothing after it is markup.
+    A `<` before the close abandons this tag and resumes there. In an HTML
+    element's tag an unclosed quoted value runs to the end of the line, so
+    nothing after it is markup.
     """
+    if tag not in HTML_ELEMENTS:
+        k = j
+        while k < n and line[k] not in "<>":
+            k += 1
+        if k < n and line[k] == ">":
+            out[k] = tag
+            return k + 1
+        return k
     inside: list[int] = []
     k = j
     while k < n:
@@ -1213,24 +1227,24 @@ def classify_lines(relpath: str, text: str,
     return [(_ORDER[max(_ORDER.index(p), floor)], k) for p, k in classified]
 
 
-# Fence languages whose lines a shell, a build tool or a terminal runs. FSW-002
-# (rules.py) lowers the confidence of a `>` that reads as markup, and a fence
-# labelled with one of these cancels that lowering for the lines inside it.
-# Declaring `bash` can only restore a candidate's confidence, never lower
-# anything, so the label buys the audited unit nothing it would want; a label
-# missing here is the expensive mistake, because it lowers a real redirect.
-_SHELL_FENCE_LANGS = {
-    "bash", "sh", "shell", "zsh", "console", "fish", "ksh", "csh", "tcsh",
-    "dash", "ash", "mksh", "nu", "nushell", "shell-session", "shellsession",
-    "sh-session", "bash-session", "terminal", "powershell", "pwsh", "ps1",
-    "posh", "cmd", "bat", "batch", "dosbatch", "winbatch", "dockerfile",
-    "docker", "containerfile", "makefile", "make", "mk", "just", "justfile",
+# Fence languages that hold markup. FSW-002 (rules.py) lowers the confidence of
+# a `>` that reads as markup only where markup is expected: markdown prose, an
+# unlabelled fence, or a fence labelled with one of these. Any other label
+# (`bash`, `text`, `python`, one nobody has heard of) cancels the lowering for
+# the lines inside it, so a label missing here costs a false positive, never a
+# lowered redirect. A unit can always move a line into prose instead, and
+# prose is a markup context, so this list buys it nothing.
+_MARKUP_FENCE_LANGS = {
+    "html", "htm", "xhtml", "xml", "svg", "vue", "svelte", "astro", "jsx",
+    "tsx", "markdown", "md", "mdx", "handlebars", "hbs", "mustache", "ejs",
+    "erb", "njk", "nunjucks", "jinja", "jinja2", "j2", "liquid", "twig", "php",
+    "blade", "razor", "cshtml",
 }
 
 
-def shell_fence_lines(text: str) -> list[bool]:
-    """Per-line (0-indexed): is this line inside a fence labelled with one of
-    `_SHELL_FENCE_LANGS`?
+def non_markup_fence_lines(text: str) -> list[bool]:
+    """Per-line (0-indexed): is this line inside a fence with a label that is
+    not in `_MARKUP_FENCE_LANGS`?
 
     Independent of `_classify_markdown`'s fence tracking, which answers a
     different question (is this fence's CONTENT live enough to demote a
@@ -1253,7 +1267,8 @@ def shell_fence_lines(text: str) -> list[bool]:
         if fence_match:
             in_fence = True
             fence_marker = fence_match.group(1)[:3]
-            fence_is_shell = fence_match.group(2).strip().lower() in _SHELL_FENCE_LANGS
+            label = fence_match.group(2).strip().lower()
+            fence_is_shell = bool(label) and label not in _MARKUP_FENCE_LANGS
             out.append(False)
             continue
         out.append(False)

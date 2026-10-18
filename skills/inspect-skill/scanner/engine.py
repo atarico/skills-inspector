@@ -261,31 +261,38 @@ def unit_line_budget() -> int:
 
 _CONF_RANK = {"high": 0, "medium": 1, "low": 2}
 
-# Files whose text something runs as commands, beyond the POSIX shells
-# `taint._is_shell` knows: Windows shells, build files, and the config formats
-# that carry hooks, npm scripts, `.mcp.json` args and CI steps.
-_EXECUTED_SUFFIXES = {
-    ".bat", ".cmd", ".ps1", ".psm1", ".mk", ".just", ".dockerfile",
-    ".containerfile", ".json", ".jsonc", ".json5", ".yaml", ".yml", ".toml",
+# Where markup is expected, so a `>` that reads as markup may lower: rendered
+# markup and templates, plus plain-text docs. Markdown and code files have
+# their own rules (`pos.non_markup_fence_lines`, `_reads_as_markup`), and
+# `.jsx`/`.tsx` are code files here. Every other file is read as commands.
+_MARKUP_SUFFIXES = {
+    ".html", ".htm", ".xhtml", ".svg", ".vue", ".svelte", ".astro", ".hbs",
+    ".handlebars", ".mustache", ".ejs", ".erb", ".njk", ".twig", ".liquid",
+    ".jinja", ".jinja2", ".j2", ".txt", ".rst", ".adoc",
 }
-_BUILD_FILE_NAMES = {"makefile", "gnumakefile", "justfile", ".justfile",
-                     "dockerfile", "containerfile"}
-_BUILD_FILE_PREFIXES = ("makefile.", "dockerfile.", "containerfile.")
+_SCRIPTED_MARKUP_SUFFIXES = {".jsx", ".tsx"}
+# `taint._is_shell` knows POSIX shells; these are code-file suffixes that a
+# Windows shell runs.
+_WINDOWS_SHELL_SUFFIXES = {".bat", ".cmd", ".ps1", ".psm1"}
 
 
-def _executed_file(relpath: str, text: str, invoked: bool) -> bool:
-    """Is this file's text run as commands, whatever its lines look like?
+def _executed_file(relpath: str, text: str, invoked: bool,
+                   is_md: bool, code_file: bool) -> bool:
+    """Is this file's text read as commands, whatever its lines look like?
 
-    Each answer can only cancel a markup lowering, never cause one, so a unit
-    that names its file `Makefile` or starts it with `#!` gains nothing. A
-    route the scanner cannot see is the costly miss: it lowers a real redirect.
+    Yes when something invokes or auto-runs it, it starts with `#!`, or it is
+    a shell script; and yes for every file that is not a markup context
+    (markdown, `_MARKUP_SUFFIXES`, a code file), which covers hooks.json, npm
+    scripts, CI steps, Makefiles, `.envrc`, Procfiles and every route nobody
+    listed. Each answer can only cancel a markup lowering, never cause one:
+    an unlisted kind costs a false positive, never a lowered redirect.
     """
     if invoked or text.startswith("#!") or taint._is_shell(relpath, text):
         return True
-    path = Path(relpath)
-    name = path.name.lower()
-    return (path.suffix.lower() in _EXECUTED_SUFFIXES
-            or name in _BUILD_FILE_NAMES or name.startswith(_BUILD_FILE_PREFIXES))
+    suffix = Path(relpath).suffix.lower()
+    if suffix in _WINDOWS_SHELL_SUFFIXES:
+        return True
+    return not (is_md or code_file or suffix in _MARKUP_SUFFIXES)
 
 
 def _placeholder_in_shell(rule, line: str, index: int) -> bool:
@@ -303,10 +310,11 @@ def _reads_as_markup(rule, line: str, index: int, executed: bool,
                      code_file: bool, probe: pos.LineProbe) -> bool:
     """Does the candidate `>` at `index` lose confidence for being markup?
 
-    In a code file a markup `>` inside a string literal counts only for an
-    HTML element, a comment or a processing instruction; outside a literal a
-    markup `>` or the close of a type argument list counts (JSX, a PHP
-    template, `Map<string, string>`). Everywhere else every markup `>` counts.
+    In a code file a markup `>` inside a string literal or a backtick span (a
+    JS template literal, a Ruby/Perl/PHP command) counts only for an HTML
+    element, a comment or a processing instruction; outside them a markup `>`
+    or the close of a type argument list counts (JSX, a PHP template,
+    `Map<string, string>`). Everywhere else every markup `>` counts.
     Executed text (the file, a shell fence line, or a code line calling a live
     sink) then keeps only a `<placeholder>`: it can cancel a lowering, never
     add one.
@@ -314,7 +322,7 @@ def _reads_as_markup(rule, line: str, index: int, executed: bool,
     name = probe.markup().get(index)
     if not code_file:
         lowered = name is not None
-    elif probe.in_string(index):
+    elif probe.in_string(index) or probe.in_inline_code(index):
         lowered = name in pos.HTML_ELEMENTS or name in ("!", "?")
     else:
         lowered = name is not None or index in probe.type_argument_closes()
@@ -333,14 +341,14 @@ def _scan_text(unit: Unit, relpath: str, text: str,
     # Only the instruction-surface promotion reads this, and only for markdown.
     quoted = pos.quoted_carry(text, positions) if is_md else []
     # Where the text is executed, a `<name>` is a redirect and not a markup
-    # tag: see `_executed_file`, plus a markdown line inside a fence labelled
-    # with a shell or build language. Rules that read a `>` as possible markup
-    # (`Rule.tag_close_sensitive`) lower it everywhere else; see
-    # `_reads_as_markup`. Declaring a fence `bash` can only cancel a lowering,
-    # never buy one.
-    executed_file = _executed_file(relpath, text, invoked)
-    code_file = pos.is_code_file(relpath)
-    shell_fence = pos.shell_fence_lines(text) if is_md else None
+    # tag: see `_executed_file`, plus a markdown line inside a fence that is
+    # not labelled with a markup language. Rules that read a `>` as possible
+    # markup (`Rule.tag_close_sensitive`) lower it only in markup contexts; see
+    # `_reads_as_markup`.
+    code_file = (pos.is_code_file(relpath)
+                 or Path(relpath).suffix.lower() in _SCRIPTED_MARKUP_SUFFIXES)
+    executed_file = _executed_file(relpath, text, invoked, is_md, code_file)
+    shell_fence = pos.non_markup_fence_lines(text) if is_md else None
 
     base_position = pos.file_base_position(relpath, invoked, text)
     hidden = ev.invisible_counts(text)

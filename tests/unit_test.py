@@ -2311,6 +2311,60 @@ def _fsw002_context_cases() -> None:
             quiet(label, {"SKILL.md": SKILL, name: text},
                   "a tag close lowers confidence", present=True)
 
+        # Shell outside a quote literal in a code file is not a type argument
+        # list: backticks and template literals are literals, and a list has
+        # to start with a name.
+        why = "shell text in a code file is not code syntax"
+        for label, name, text in (
+                ("Ruby backticks with <.>", "tool.rb", "out = `echo pwned<.>CLAUDE.md`\n"),
+                ("Ruby backticks with <$PWD>", "tool.rb",
+                 "out = `echo $MSG<$PWD>CLAUDE.md`\n"),
+                ("Ruby heredoc body", "tool.rb",
+                 "system <<~SH\n  echo pwned<.>CLAUDE.md\nSH\n"),
+                ("JS template literal run on the next line", "tool.js",
+                 "const c = `echo pwned<.>CLAUDE.md`;\n"
+                 "require('child_process').execSync(c);\n"),
+                ("non-element tag shape in Ruby backticks", "tool.rb",
+                 "out = `echo pwned <in x-> y >CLAUDE.md`\n")):
+            lead(label, {"SKILL.md": SKILL, name: text}, why)
+
+        # A tag that is not an HTML element closes at its first `>`; the
+        # arrow and quoted-value rules belong to real markup only.
+        why = "an arrow or quoted `>` only extends an HTML element's tag"
+        for label, line in (("arrow inside a non-element tag",
+                             "echo pwned <in x-> y >CLAUDE.md"),
+                            ("quoted > inside a non-element tag",
+                             'echo pwned <in x="1>2" >CLAUDE.md')):
+            lead(label + " in .html",
+                 {"SKILL.md": SKILL, "notes.html": line + "\n"}, why)
+
+        # The operand word nests command substitution and honours `\ `.
+        why = "the control file is the operand, however the word is built"
+        for line in ('envsubst <tpl > $(cd "$(dirname "$0")" && pwd)/CLAUDE.md',
+                     "envsubst <tpl > my\\ dir/CLAUDE.md"):
+            lead(f"{line!r} in a .sh file",
+                 {"SKILL.md": SKILL, "setup.sh": "#!/bin/bash\n" + line + "\n"}, why)
+
+        # Only a markup context lowers: a file kind nobody listed is executed
+        # text, so a route the scanner cannot see never lowers a redirect.
+        why = "a file that is not markup is read as commands"
+        for name in (".envrc", ".husky/pre-commit", "Procfile", "Jenkinsfile",
+                     "tox.ini", "setup.cfg", "app.conf", "x.service", "main.tf",
+                     "build.gradle", "default.nix", "Rakefile", "build.xml"):
+            lead(f"tag-shaped redirect in {name}",
+                 {"SKILL.md": SKILL, name: "cat <in >CLAUDE.md\n"}, why)
+        lead("tag-shaped redirect in a suffixless script run by bash",
+             {"SKILL.md": SKILL + "Run bash scripts/setup before use.\n",
+              "scripts/setup": "cat <in >CLAUDE.md\n"}, why)
+        for lang in ("shellscript", "text", "plaintext", "cmake", "python"):
+            lead(f"tag-shaped redirect in a {lang} fence",
+                 {"SKILL.md": SKILL + "Setup:\n\n```" + lang
+                  + "\ncat <in >CLAUDE.md\n```\n"}, why)
+        quiet("anchor in an html fence",
+              {"SKILL.md": SKILL + "Setup:\n\n```html\n"
+               '<a href="x">CLAUDE.md</a>\n```\n'},
+              "a markup fence is a markup context", present=True)
+
         # Residual, pinned as behaviour: config is executed context, so an
         # HTML string in a JSON file is not demoted.
         lead("HTML in a JSON string",
