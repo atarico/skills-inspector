@@ -958,15 +958,17 @@ RULE_PATTERN_CASES = [
     ("FSW-002", "settings.json", 'echo x > ~/.claude/settings.json', True),
     ("FSW-002", "CLAUDE.md", 'echo evil >> CLAUDE.md', True),
     ("FSW-002", "mcp config", 'echo x > .mcp.json', True),
-    # D4 (odd/tasks/declaration-files-and-fsw002.md): the bare `>` alternative
-    # had nothing requiring it to be a shell redirect, so every HTML tag within
-    # 80 characters of a control-plane filename fired CRITICAL at high
-    # confidence — every tag in HTML ends in `>`. Measured verbatim against a
-    # real skill's rendered documentation.
-    ("FSW-002", "GAP-killed: a paragraph tag's '>' is not a redirect",
-     "<p>Edit <code>AGENTS.md</code> directly.</p>", False),
-    ("FSW-002", "GAP-killed: a list-item tag's '>' is not a redirect either",
-     "<li>AGENTS.md に追記してください</li>", False),
+    # The pattern matches a tag's `>` (markup lowers confidence in the engine,
+    # it does not drop the match); `_fsw002_context_cases` pins that these lines
+    # are reported at `low` and never lead the report.
+    ("FSW-002", "a paragraph tag's '>' still matches the pattern",
+     "<p>Edit <code>AGENTS.md</code> directly.</p>", True),
+    ("FSW-002", "a list-item tag's '>' still matches the pattern",
+     "<li>AGENTS.md に追記してください</li>", True),
+    ("FSW-002", "the tail of an arrow is not a redirect",
+     "a -> CLAUDE.md", False),
+    ("FSW-002", "the tail of a fat arrow is not a redirect",
+     "x => AGENTS.md", False),
     # The unrelated near miss that must stay quiet regardless: naming the file
     # in prose, no punctuation that could be misread as shell syntax at all.
     ("FSW-002", "prose that only NAMES the file is not a write",
@@ -2049,187 +2051,191 @@ def _evasion_cases() -> None:
 _evasion_cases()
 
 
-# ------------------------------------------------ FSW-002 input-redirect evasion
-# FSW-002's HTML-tag exclusion (see the comment on the rule in rules.py) reads a
-# CLOSING html tag's own `>` as harmless markup. That is correct in prose, but a
-# file whose content IS shell has no HTML in it at all: `<p>`, `<a>`, `<in>` are
-# real input-redirect operators there (`cat<p>CLAUDE.md` redirects stdin from a
-# file literally named `p` and stdout to CLAUDE.md), and the exclusion silenced
-# them just as it silences a real `<p>` tag in a rendered doc. Pinned in both
-# directions: the shapes must fire where shell is genuinely being read (a `.sh`
-# file, a ```bash fence) and must stay quiet where HTML can still plausibly
-# appear (markdown prose outside a fence, a `.html` file).
+# ------------------------------------------------------ FSW-002 context cases
+# One detection pattern in every context. Context (file suffix, fence label)
+# may only LOWER a match's confidence, never drop it, and a route that executes
+# the file cancels the lowering. Both directions are pinned below: every
+# evasion shape must lead the report, and every false-positive twin must stay
+# out of the headline (present at `low` where the markup demotion applies).
 
-def _fsw002_shell_context_cases() -> None:
+def _fsw002_state(base: Path, name: str, files: dict[str, str]):
+    """(in the headline, present at all, confidences) for FSW-002."""
+    root = base / name
+    _write(root, files)
+    from scanner import engine
+    found = [f for f in _scan_findings(root) if f.id == "FSW-002"]
+    head = {(f.location, f.line) for f in found if f in engine.headline(
+        _scan_findings(root))}
+    return bool(head), bool(found), sorted({f.confidence for f in found})
+
+
+def _fsw002_context_cases() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
+        n = [0]
 
-        shell_detect_lines = {
-            "cat<p>CLAUDE.md": "stdin-from-file-`p` redirect into CLAUDE.md",
-            "cat<a>AGENTS.md": "stdin-from-file-`a` redirect into AGENTS.md",
-            "<p>CLAUDE.md": "a bare input redirect truncating CLAUDE.md",
-            "echo x<in>>~/.claude/settings.json":
-                "stdin-from-`in`, then an append redirect into settings.json",
-        }
+        def state(files):
+            n[0] += 1
+            return _fsw002_state(base, f"c{n[0]}", files)
 
-        for line, label in shell_detect_lines.items():
-            sh = base / f"sh-{abs(hash(line))}"
-            _write(sh, {"SKILL.md": SKILL, "setup.sh": line + "\n"})
-            _, all_ids = _scan_tree(sh)
-            check("fsw002-shell-context",
-                  f"{label} still fires in a .sh file",
-                  "FSW-002" in all_ids, True,
-                  "an HTML tag is meaningless in a file whose content is shell")
+        def fenced(line):
+            return {"SKILL.md": SKILL + "```bash\n" + line + "\n```\n"}
 
-            fenced = base / f"fence-{abs(hash(line))}"
-            _write(fenced, {"SKILL.md": SKILL + "```bash\n" + line + "\n```\n"})
-            _, all_ids = _scan_tree(fenced)
-            check("fsw002-shell-context",
-                  f"{label} still fires inside a ```bash fence",
-                  "FSW-002" in all_ids, True,
-                  "labeling a fence bash buys detection, never demotion")
+        def lead(label, files, why):
+            head, _present, _c = state(files)
+            check("fsw002-context", label, head, True, why)
 
-        # The false-positive twins: the same tag shapes, where HTML is the
-        # genuine content and must stay excluded exactly as before.
-        prose = base / "prose"
-        _write(prose, {"SKILL.md": SKILL +
-                       "<p>Edit <code>AGENTS.md</code> directly.</p>\n"})
-        _, all_ids = _scan_tree(prose)
-        check("fsw002-shell-context",
-              "a paragraph tag's '>' stays quiet in markdown prose",
-              "FSW-002" in all_ids, False,
-              "outside a shell-labeled fence, markdown can still hold real HTML")
+        def quiet(label, files, why, present=None):
+            head, got, conf = state(files)
+            check("fsw002-context", label + " stays out of the headline",
+                  head, False, why)
+            if present is not None:
+                check("fsw002-context", label + " is still reported",
+                      got, present, "markup demotes, it never drops")
+                if present:
+                    check("fsw002-context", label + " is reported at low",
+                          conf, ["low"], "a tag close lowers confidence")
 
-        html_doc = base / "html-doc"
-        _write(html_doc, {"SKILL.md": SKILL,
-                          "notes.html":
-                              "<li>AGENTS.md に追記してください</li>\n"})
-        _, all_ids = _scan_tree(html_doc)
-        check("fsw002-shell-context",
-              "a list-item tag's '>' stays quiet in a .html file",
-              "FSW-002" in all_ids, False,
-              "an .html file is markup, not a shell/code suffix")
+        why = "a .html suffix is chosen by the audited unit and cannot narrow detection"
+        lead("no-space redirect in .html",
+             {"SKILL.md": SKILL, "notes.html": "echo x>CLAUDE.md\n"}, why)
+        lead("quoted-variable redirect in .html",
+             {"SKILL.md": SKILL,
+              "notes.html": 'printf %s "$P">~/.claude/settings.json\n'}, why)
+        lead("redirect inside <pre> in .html",
+             {"SKILL.md": SKILL,
+              "notes.html": "<pre>echo x>CLAUDE.md</pre>\n"}, why)
+        lead("shell script named .html and run from SKILL.md",
+             {"SKILL.md": SKILL + "Run `bash scripts/setup.html` first.\n",
+              "scripts/setup.html": "#!/bin/bash\necho x>CLAUDE.md\n"},
+             "an execution route cancels every markup lowering")
+        lead("input redirect in an invoked suffixless script",
+             {"SKILL.md": SKILL + "Run `bash bin/install` first.\n",
+              "bin/install": "#!/bin/sh\ncat<p>CLAUDE.md\n"},
+             "an invoked file is shell whatever it looks like")
 
+        for op, line in {
+            ";>": "echo x;>CLAUDE.md", "(>": "(>CLAUDE.md)",
+            "{>": "{ :;}; {>CLAUDE.md;}", "|>": "echo x|>CLAUDE.md",
+            ":>": ":>CLAUDE.md", "!>": "!>CLAUDE.md",
+            "*>": "*>CLAUDE.md", "1<>": "1<>CLAUDE.md",
+            "cat<p>": "cat<p>CLAUDE.md",
+        }.items():
+            lead(f"operator {op} in a .sh file",
+                 {"SKILL.md": SKILL, "setup.sh": line + "\n"},
+                 "the operator class never narrows detection")
+            lead(f"operator {op} in a bash fence", fenced(line),
+                 "the operator class never narrows detection")
 
-_fsw002_shell_context_cases()
+        lead("earlier <p> in backticks cannot hide the real redirect",
+             fenced("echo `<p>/dev/null` x>CLAUDE.md"),
+             "every candidate on the line is judged; the strongest wins")
 
+        for label, files in {
+            "space-separated redirect in .htm": {"notes.htm": " echo x > AGENTS.md\n"},
+            "space-separated redirect in .xhtml": {"notes.xhtml": " echo x > AGENTS.md\n"},
+            "space-separated redirect in .html": {"notes.html": " echo x > AGENTS.md\n"},
+        }.items():
+            lead(label, {"SKILL.md": SKILL, **files}, "a real redirect is a real redirect")
 
-# --------------------------------------------------- FSW-002 HTML-file context
-# The HTML-tag exclusion `_fsw002_shell_context_cases` above pins as correct in
-# markdown prose over-corrects in the one context where NOTHING is prose: a
-# genuine `.html`/`.htm`/`.xhtml` document. There, `pattern`'s exclusion
-# `(?<!<[A-Za-z]{1,8})` only refuses a `>` that closes a BARE opening tag
-# (`<p>`, `<li>`) — it does nothing for a `>` that closes a tag with an
-# attribute, because the character right before that `>` is a quote, not a
-# tag-name letter. Measured verbatim against a real public repo's rendered
-# release notes (`release-notes-v1.5.0.html:924`): silent at 0df3477 and
-# a2aca1a, CRITICAL again at 6676b17 and unpatched HEAD. `Rule.html_pattern`
-# fixes this by using the STRICT 0df3477 anchor for `.html` files, where a `>`
-# after a quote, a tag name, or `/` is always markup, never a redirect.
+        # Twins: markup is demoted to low, never dropped.
+        quiet("paragraph and code tags in markdown prose",
+              {"SKILL.md": SKILL + "<p>Edit <code>AGENTS.md</code> directly.</p>\n"},
+              "a tag close lowers confidence", present=True)
+        quiet("list item in .html",
+              {"SKILL.md": SKILL, "notes.html": "<li>AGENTS.md に追記</li>\n"},
+              "a tag close lowers confidence", present=True)
+        quiet("anchor tag in markdown prose",
+              {"SKILL.md": SKILL + '<a href="x">CLAUDE.md</a>\n'},
+              "a tag close lowers confidence", present=True)
+        quiet("anchor tag in .html",
+              {"SKILL.md": SKILL,
+               "notes.html": '<a href="x">CLAUDE.md</a>\n'},
+              "a tag close lowers confidence", present=True)
+        quiet("heading tag in .html",
+              {"SKILL.md": SKILL, "notes.html": "<h2>CLAUDE.md</h2>\n"},
+              "any tag name, not only short ones", present=True)
+        quiet("spaced tag close in .html",
+              {"SKILL.md": SKILL, "notes.html": "<p >CLAUDE.md\n"},
+              "whitespace before the close is still a tag", present=True)
+        quiet("release-notes attribute tag",
+              {"SKILL.md": SKILL,
+               "release-notes-v1.5.0.html":
+                   '<p class="text-[11px] sm:text-xs text-zinc-500">'
+                   '<code>AGENTS.md</code> を介して。</p>\n'},
+              "measured regression: an attribute close is markup", present=True)
+        quiet("HTML list item in .php", {"SKILL.md": SKILL,
+              "page.php": "<li>Edit AGENTS.md</li>\n"}, "not invoked: markup")
+        quiet("HTML in a .js string", {"SKILL.md": SKILL,
+              "page.js": "el.innerHTML = '<p>Edit CLAUDE.md</p>'\n"},
+              "not invoked: markup")
+        quiet("HTML in a .py string", {"SKILL.md": SKILL,
+              "page.py": "out.write('<li>AGENTS.md</li>')\n"},
+              "not invoked: markup")
+        quiet("TypeScript generic", {"SKILL.md": SKILL,
+              "page.ts": 'const p: Promise<string> = read("CLAUDE.md")\n'},
+              "not invoked: a generic close is not a redirect")
+        quiet("mcp add placeholder in a bash fence",
+              fenced("claude mcp add --scope project <name> --env K=v -- npx x"
+                     "  # saved to .mcp.json"),
+              "the name is not the operand that follows the close")
+        for line in ("a -> CLAUDE.md", "x => AGENTS.md"):
+            _h, got, _c = state({"SKILL.md": SKILL + line + "\n"})
+            check("fsw002-context", f"{line!r} is an arrow, not a redirect",
+                  got, False, "`->` and `=>` are not redirect operators")
 
-def _fsw002_html_context_cases() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
+        # Residual, pinned as behaviour: `<path> CLAUDE.md` is lexically the
+        # same as the real `cat <in> CLAUDE.md`, so shell context keeps it.
+        lead("placeholder directly followed by the control file in a fence",
+             fenced("tool --file <path> CLAUDE.md"),
+             "indistinguishable from `cat <in> CLAUDE.md`; not demoted")
 
-        real_bug = base / "real-bug"
-        _write(real_bug, {"SKILL.md": SKILL,
-                          "release-notes-v1.5.0.html":
-                              '<p class="text-[11px] sm:text-xs text-zinc-500">'
-                              '<code>AGENTS.md</code> '
-                              'を介してあらゆる'
-                              'エージェントで'
-                              '利用可能。</p>\n'})
-        _, all_ids = _scan_tree(real_bug)
-        check("fsw002-html-context",
-              "a quote-preceded '>' in a real minified .html attribute stays quiet",
-              "FSW-002" in all_ids, False,
-              "an attribute quote's close is never a shell redirect in HTML")
-
-        attrs = base / "attrs"
-        _write(attrs, {"SKILL.md": SKILL,
-                       "notes.html":
-                           '<p class="x">AGENTS.md</p>\n'
-                           '<a href="/x">CLAUDE.md</a>\n'})
-        _, all_ids = _scan_tree(attrs)
-        check("fsw002-html-context",
-              "attribute-quoted tag closes around control filenames stay quiet",
-              "FSW-002" in all_ids, False,
-              "the middle pattern's word/quote allowance would fire here; strict must not")
-
-        real_redirect = base / "real-redirect"
-        _write(real_redirect, {"SKILL.md": SKILL,
-                               "notes.html": " echo x > AGENTS.md\n"})
-        _, all_ids = _scan_tree(real_redirect)
-        check("fsw002-html-context",
-              "a genuine space-separated redirect inside a .html file still fires",
-              "FSW-002" in all_ids, True,
-              "the strict anchor still catches a real shell redirect, HTML or not")
-
-        real_redirect_htm = base / "real-redirect-htm"
-        _write(real_redirect_htm, {"SKILL.md": SKILL,
-                                   "notes.htm": " echo x > AGENTS.md\n"})
-        _, all_ids = _scan_tree(real_redirect_htm)
-        check("fsw002-html-context",
-              "a genuine space-separated redirect inside a .htm file still fires",
-              "FSW-002" in all_ids, True,
-              "is_html_suffix recognizes .htm, not just .html")
-
-        real_redirect_xhtml = base / "real-redirect-xhtml"
-        _write(real_redirect_xhtml, {"SKILL.md": SKILL,
-                                     "notes.xhtml": " echo x > AGENTS.md\n"})
-        _, all_ids = _scan_tree(real_redirect_xhtml)
-        check("fsw002-html-context",
-              "a genuine space-separated redirect inside a .xhtml file still fires",
-              "FSW-002" in all_ids, True,
-              "is_html_suffix recognizes .xhtml, not just .html")
-
-        shell_printf = base / "shell-printf"
-        _write(shell_printf, {"SKILL.md": SKILL,
-                              "setup.sh": 'printf a "$P">>~/.claude/settings.json\n'})
-        _, all_ids = _scan_tree(shell_printf)
-        check("fsw002-html-context",
-              "a printf append-redirect with no space still fires in a .sh file",
-              "FSW-002" in all_ids, True,
-              "shell_pattern is untouched by the HTML-file split")
-
-        shell_echo = base / "shell-echo"
-        _write(shell_echo, {"SKILL.md": SKILL,
-                            "setup.sh": 'echo x>AGENTS.md\n'})
-        _, all_ids = _scan_tree(shell_echo)
-        check("fsw002-html-context",
-              "an echo output-redirect with no space still fires in a .sh file",
-              "FSW-002" in all_ids, True,
-              "shell_pattern is untouched by the HTML-file split")
-
-        shell_cat_redirect = base / "shell-cat-redirect"
-        _write(shell_cat_redirect, {"SKILL.md": SKILL,
-                                    "setup.sh": 'cat<p>CLAUDE.md\n'})
-        _, all_ids = _scan_tree(shell_cat_redirect)
-        check("fsw002-html-context",
-              "the cat<p> input-redirect evasion still fires in a .sh file",
-              "FSW-002" in all_ids, True,
-              "shell_pattern's HTML-tag exclusion is dropped entirely, unlike MIDDLE")
-
-        md_prose = base / "md-prose"
-        _write(md_prose, {"SKILL.md": SKILL +
-                          "echo x>AGENTS.md\n"})
-        _, all_ids = _scan_tree(md_prose)
-        check("fsw002-html-context",
-              "a no-space redirect in markdown prose still fires",
-              "FSW-002" in all_ids, True,
-              "the middle pattern used for prose is untouched by the HTML-file split")
-
-        md_tag = base / "md-tag"
-        _write(md_tag, {"SKILL.md": SKILL +
-                        "<p><code>AGENTS.md</code></p>\n"})
-        _, all_ids = _scan_tree(md_tag)
-        check("fsw002-html-context",
-              "a bare opening tag around a control filename stays quiet in markdown",
-              "FSW-002" in all_ids, False,
-              "the middle pattern's bare-tag exclusion is untouched by the HTML-file split")
+        # One finding per line, however many candidates.
+        root = base / "oneline"
+        _write(root, {"SKILL.md": SKILL, "setup.sh":
+                      "echo a>CLAUDE.md; echo b>AGENTS.md; <p>CLAUDE.md\n"})
+        count = sum(1 for f in _scan_findings(root) if f.id == "FSW-002")
+        check("fsw002-context", "several candidates give one finding per line",
+              count, 1, "the strongest candidate speaks for the line")
 
 
-_fsw002_html_context_cases()
+_fsw002_context_cases()
+
+
+def _line_probe_cases() -> None:
+    """`position.LineProbe` answers per-index questions in one pass; it must
+    agree with the per-call functions it replaces."""
+    import random
+
+    def naive_literal(line, index):
+        if any(m.start() < index and not pos.in_string_literal(line, m.start())
+               for m in pos._COMMENT.finditer(line)):
+            return 2
+        if not pos.in_string_literal(line, index):
+            return 0
+        if pos._exec_sink_outside_literal(line):
+            return 0
+        if (pos._REGEX_CONSTRUCTION.search(line)
+                or len(pos._REGEX_SHAPE.findall(line)) >= 2):
+            return 2
+        return 1
+
+    rng = random.Random(8)
+    alphabet = ["'", '"', "\\", "#", " ", "//", "a", "`", "os.system(", "\\d+",
+                "[^z]", ">", "<p>", "re.compile(", "eval"]
+    bad = 0
+    for _ in range(400):
+        line = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 24)))
+        probe = pos.LineProbe(line)
+        for i in range(len(line) + 1):
+            if (probe.literal_demotion(i) != naive_literal(line, i)
+                    or probe.in_inline_code(i) != (line.count("`", 0, i) % 2 == 1)):
+                bad += 1
+    check("line-probe", "agrees with the per-call functions on random lines",
+          bad, 0, "one pass must not change any answer")
+
+
+_line_probe_cases()
 
 
 # ---------------------------------------------------- declaration-file capability profile

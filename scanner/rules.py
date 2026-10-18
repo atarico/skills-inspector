@@ -8,6 +8,7 @@ DEFERRED and reported as coverage gaps, never silently dropped.
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass
 
@@ -76,29 +77,21 @@ class Rule:
     # on the line qualifies. One extra argument anywhere breaks it back to
     # this rule's own `severity`.
     tempered: "Tempered | None" = None
-    # A wider variant of `pattern`, used ONLY on a line `engine._scan_text`
-    # judges to be genuine shell/code (a shell/code file suffix, or inside a
-    # markdown fence labeled bash/sh/shell/zsh/console — see
-    # `position.is_code_suffix` / `position.shell_fence_lines`). Exists for a
-    # pattern whose base form excludes a shape that is meaningful ONLY in
-    # markup (an HTML tag), so the exclusion is itself the evasion wherever
-    # markup cannot occur. Widening detection this way costs an attacker
-    # nothing to defeat — see FSW-002 below — so it is never used to NARROW
-    # `pattern`, only to drop an exclusion that a non-markup context makes
-    # meaningless.
-    shell_pattern: re.Pattern | None = None
-    # The other end of the same axis: a NARROWER variant of `pattern`, used
-    # ONLY on a file `position.is_html_suffix` recognizes as genuine rendered
-    # markup (`.html`/`.htm`/`.xhtml`). `pattern`'s HTML-tag exclusion stays
-    # deliberately narrow there too — it only refuses a `>` closing a BARE
-    # opening tag, not one closing a tag with an attribute (`<p class="x">`),
-    # because in prose or any other file a real redirect could sit right next
-    # to real markup and the exclusion cannot afford to swallow it. A genuine
-    # `.html` document has no such redirect to protect — nothing in it is a
-    # shell command — so `html_pattern` can use the strictest anchor instead
-    # (FSW-002's 0df3477 anchor: a `>`/`>>` counts only at line start or after
-    # whitespace/a digit/`&`) without losing any real detection.
-    html_pattern: re.Pattern | None = None
+    # Every place `pattern` matches on a line, in order, for a rule whose
+    # leftmost match is not the whole story: the engine judges each one and
+    # keeps the strongest, still reporting one finding per rule per line. Only
+    # FSW-002 sets it (see its comment below). Each yielded match must be a
+    # `pattern` match starting where it says it does, and the walk must cost
+    # O(len(line)) plus a bounded window per candidate.
+    candidates: "Callable[[str], Iterator[re.Match]] | None" = None
+    # The rule's operator can be the `>` that closes a markup tag, so the
+    # engine lowers such a candidate's confidence (never drops it) unless the
+    # line is shell, a shell-labelled fence or an invoked file. Needs `operand`.
+    tag_close_sensitive: bool = False
+    # Matched at the end of a tag-close operator, it says the thing the rule
+    # looks for is the operand directly after it. A `<placeholder> ` followed
+    # by whitespace keeps full confidence in shell context only when this does.
+    operand: re.Pattern | None = None
 
 
 @dataclass(frozen=True)
@@ -250,66 +243,48 @@ _CONCEAL_DIRECTIVE = (
     r"(mention|tell|inform|notify|show|display|report|reveal|disclose|log)"
     r"\s+(\w+\s+){0,2}")
 
-# FSW-002's target alternation — which control-plane filename must sit within
-# 80 characters of the write for the rule to fire — used to be spelled out
-# TWICE, once in `pattern` and once in `shell_pattern`, so a change to the
-# allowlist could drift between the two without either test suite noticing
-# (R2-dup-target-alternation). One shared fragment now feeds every pattern
-# variant below, including the `.html`-only one, so they cannot drift.
-_FSW002_TARGETS = (
-    r"[^\n]{0,80}(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
+# FSW-002's pieces, shared so the pattern, the candidate walk and the operand
+# test cannot drift apart. See the comment on the rule for what they mean.
+_FSW002_NAMES = (
+    r"(CLAUDE\.md|AGENTS\.md|opencode\.json|\.mcp\.json"
     r"|settings\.local\.json|settings\.json"
     r"|\.(?:claude|codex)/(?![^\n\"']{0,80}"
     r"\.(?:log|lock|tmp|temp|cache|flag|pid|bak|swp)\b))"
 )
-# The non-redirect write forms (`tee -a`, `write_text(...)`, `writeFile(...)`,
-# `open(..., "w")`) already carry their own distinguishing tokens that markup
-# never produces, so all three redirect variants below share this half too —
-# it is untouched by the HTML/shell/prose split.
+_FSW002_TARGETS = r"[^\n]{0,80}" + _FSW002_NAMES
+# The non-redirect write forms carry tokens that markup never produces.
 _FSW002_WRITE_FORMS = (
     r"tee\s+-a?|write_text|writeFile"
     r"|open\s*\([^)]{0,60}[\"']w"
 )
-# Three redirect shapes, one per context `engine._scan_text` can tell apart
-# (see `Rule.shell_pattern` / `Rule.html_pattern` and the FSW-002 comment
-# below for the full history):
-#
-# - STRICT (the original 0df3477 anchor): a `>`/`>>` counts only at line
-#   start or after whitespace/a digit/`&`. Used for a genuine
-#   `.html`/`.htm`/`.xhtml` DOCUMENT (`position.is_html_suffix`), where
-#   nothing is prose: a bare or attribute-quoted tag close (`<p>`,
-#   `<p class="x">`) is preceded by a letter or a quote, never by this
-#   anchor's set, so both stay markup — verified against both shapes.
-#   Two gaps of its own, also verified: (1) a tag close with a SPACE
-#   before `>` (`<p >CLAUDE.md`, `<img src="x" >`) is preceded by
-#   whitespace and DOES satisfy the anchor, so it can still misfire as
-#   a redirect in a `.html` file; (2) a real redirect with no space
-#   before `>` (`cat<p>CLAUDE.md`, `echo x<in>>~/.claude/settings.json`)
-#   is preceded by a letter, not whitespace/a digit/`&`, so it fails the
-#   anchor and stays silent — the same no-space shapes SHELL below still
-#   catches in code files.
-# - MIDDLE (`pattern`'s own shape): STRICT, OR a `>`/`>>` preceded by a
-#   word/quote/bracket character that is NOT the close of a bare HTML opening
-#   tag (`(?<!<[A-Za-z]{1,8})`, chained because `re` has no variable-width
-#   lookbehind — see the FSW-002 comment). Used everywhere else: markdown
-#   prose and any other file, where real HTML might sit beside a real
-#   redirect. Only excludes a BARE tag close (`<p>`, `<li>`); a `>` that
-#   closes a tag WITH an attribute (`<p class="x">`) is preceded by a quote,
-#   not a tag-name letter, so it is not excluded and can still fire — known
-#   gap, see the FSW-002 comment.
-# - SHELL (`shell_pattern`'s own shape): MIDDLE with the HTML-tag exclusion
-#   dropped entirely. Used only where `engine._scan_text` judges the line
-#   genuine shell/code (`position.is_code_suffix` / `shell_fence_lines`),
-#   where an HTML tag is never real and the exclusion is a live evasion
-#   (`cat<p>CLAUDE.md`, `echo x<in>>~/.claude/settings.json`).
-_FSW002_REDIRECT_STRICT = r"(?:^|(?<=[\s\d&]))(?:>>|>)"
-_FSW002_REDIRECT_MIDDLE = (
-    _FSW002_REDIRECT_STRICT
-    + r"|(?<!<[A-Za-z])(?<!<[A-Za-z]{2})"
-      r"(?<!<[A-Za-z]{3})(?<!<[A-Za-z]{4})(?<!<[A-Za-z]{5})(?<!<[A-Za-z]{6})"
-      r"(?<!<[A-Za-z]{7})(?<!<[A-Za-z]{8})(?<=[\w\"'`)}\]])(?:>>|>)"
-)
-_FSW002_REDIRECT_SHELL = r"(?:^|(?<=[\s\d&\w\"'`)}\]]))(?:>>|>)"
+# A redirect is any `>` that is not the tail of `->` or `=>`. `>>` is two
+# candidates: the first is the operator, the second is judged on its own.
+_FSW002_REDIRECT = r"(?<![-=])>"
+_FSW002_PATTERN = _r(rf"({_FSW002_REDIRECT}|{_FSW002_WRITE_FORMS}){_FSW002_TARGETS}")
+_FSW002_ANCHOR = _r(rf"{_FSW002_REDIRECT}|{_FSW002_WRITE_FORMS}")
+_FSW002_NAME_AT = _r(rf"(?={_FSW002_NAMES})")
+# The operand directly after a `>`: optional whitespace, an optional quote and
+# one path word (no whitespace, quote or shell separator), then the name.
+_FSW002_OPERAND = _r(r"\s*[\"']?[^\s\"'|;&<>]{0,80}" + _FSW002_NAMES)
+
+
+def _fsw002_candidates(line: str):
+    """Every `_FSW002_PATTERN` match on the line, not only the leftmost.
+
+    Names are located once, so a candidate is tried only when one lies inside
+    its 80-character window: a line of a hundred thousand `>` and no name costs
+    one pass, not a window scan per `>`.
+    """
+    starts = [m.start() for m in _FSW002_NAME_AT.finditer(line)]
+    if not starts:
+        return
+    for anchor in _FSW002_ANCHOR.finditer(line):
+        i = bisect.bisect_left(starts, anchor.end())
+        if i == len(starts) or starts[i] - anchor.end() > 80:
+            continue
+        match = _FSW002_PATTERN.match(line, anchor.start())
+        if match:
+            yield match
 
 
 RULES: list[Rule] = [
@@ -719,110 +694,56 @@ RULES: list[Rule] = [
          "Rewrites the rules the agent follows — a persistent foothold in your assistant.",
          "Only as the unit's stated purpose.",
          "What exactly is written into the agent config?",
-         # The `.claude/` and `.codex/` alternatives used to match ANY path under
-         # those directories, so `echo ... >> .claude/deployment-checkpoints.log`
-         # was reported as rewriting the agent's instructions. It is not: the
-         # rule's own name is "modifies agent instructions or CONFIG", and a log,
-         # lock or cache file is neither. Writing `.claude/commands/x.md` still
-         # fires, because that IS a command definition.
+         # What the rule means. A control-plane filename within 80 characters
+         # after a redirect (`>`, `>>`) or a write form (`tee -a`, `write_text`,
+         # `writeFile`, `open(..., "w")`). `.claude/` and `.codex/` count only
+         # for config: a log, lock, cache or flag file there is not the agent's
+         # instructions, while `.claude/commands/x.md` is.
          #
-         # The bare `>` / `>>` alternative used to have nothing requiring it to
-         # be a shell redirect at all, so it read the CLOSE of an HTML tag the
-         # same way — every tag in HTML ends in `>`. Measured verbatim against a
-         # real skill's rendered documentation: `<p>…<code>AGENTS.md</code>…`
-         # matched on the `<p>`'s `>`, and `<li>AGENTS.md に追記してください</li>`
-         # matched on the `<li>`'s. Any tag within 80 characters of a
-         # control-plane filename fired CRITICAL at high confidence — this is
-         # the third instance of the same shape in this repository; the same
-         # rule already fired on the `>` of a markdown arrow `->` in a fixture
-         # note (odd/tasks/declaration-files-and-fsw002.md, D4).
+         # One pattern in every context. The audited unit picks its own file
+         # suffix and fence labels, so context may only LOWER a match's
+         # confidence, never drop it, and an execution route cancels the
+         # lowering. An earlier design chose a narrower pattern for `.html`
+         # files and a wider one for code suffixes and shell fences; both
+         # choices were attacker-controlled (a shell script named `setup.html`
+         # and run with `bash setup.html` was silent), and the narrow class
+         # missed `;>`, `(>`, `{>`, `|>`, `:>`, `!>`, `*>` and `1<>`.
          #
-         # That over-corrected, silencing the real no-space redirect
-         # (`echo x>AGENTS.md`) the comment above still claims is covered. The
-         # anchored alternative (`_FSW002_REDIRECT_STRICT`) stays; a second one
-         # excludes an HTML OPEN tag's close instead of every bare `>`, via
-         # `(?<!<[A-Za-z]{N})` chained for N=1..8 (`re` has no variable-width
-         # lookbehind). A tag name over 8 letters is a known gap; a CLOSING tag
-         # needs no exclusion — its `>` sits after the content it names.
+         # Every `>` is a redirect candidate except the tail of `->` and `=>`
+         # (arrows in prose). `candidates` walks all of them and the engine
+         # keeps the strongest per line, because the leftmost can be a tag
+         # close or sit in backticks while a later one on the same line is the
+         # real redirect. `echo x->CLAUDE.md` is a real redirect this reading
+         # misses; arrows are far commoner, so it is left out on purpose.
          #
-         # This narrows only the `>` / `>>` branch. The other alternatives
-         # (`tee`, `write_text`, `writeFile`, `open(...` w") already carry
-         # their own distinguishing tokens that markup never produces, so they
-         # are untouched — `_FSW002_WRITE_FORMS`, shared by every variant below.
+         # A `>` that closes a markup tag (`position.tag_close_positions`: the
+         # nearest `<` is followed by a letter, `/`, `!` or `?` and no `>`
+         # lies between) is a weaker candidate: `<li>AGENTS.md</li>` is HTML,
+         # and every tag in rendered documentation ends in `>`. The engine
+         # lowers it to `low` (reported, out of the headline) instead of
+         # excluding it, because `cat<p>CLAUDE.md` is a real input redirect
+         # plus an output redirect. The lowering is lexical and has no HTML
+         # parser behind it, so it also lowers `a<b && x>CLAUDE.md`.
          #
-         # A markdown blockquote `> …` still matches this anchor (start-of-line
-         # then `>`) — it is prose inside a `.md` file, which the position
-         # taxonomy already reads as documentary rather than active shell.
-         # Noted, not chased here (D4).
+         # The lowering does not apply where the text is shell: a shell file
+         # (`taint._is_shell`, `.bat`, `.cmd`), a line in a bash/sh/shell/zsh/
+         # console fence, or a file something invokes. There a tag close
+         # directly followed by the name (`cat<p>CLAUDE.md`) keeps full
+         # confidence. One exception: a tag close followed by whitespace
+         # (`claude mcp add --scope project <name> ... # saved to .mcp.json`)
+         # keeps it only when the name is the operand directly after the `>`
+         # (`operand`). That leaves `tool --file <path> CLAUDE.md` in the
+         # headline in shell context, because it reads exactly like the real
+         # `cat <in> CLAUDE.md`; the scanner cannot tell them apart.
          #
-         # The HTML exclusion above bought back the false positive, but it also
-         # buys back an EVASION: `<p>`, `<a>`, `<in>` are real shell — `cat<p>
-         # CLAUDE.md` redirects stdin from a file literally named `p` and
-         # stdout to CLAUDE.md; `echo x<in>>~/.claude/settings.json` redirects
-         # stdin from `in` and appends to settings.json — and the exclusion
-         # read every one of those as an HTML tag's close and went quiet,
-         # exactly where main (before this branch) still fired.
-         #
-         # The exclusion is only ever meaningful where HTML can plausibly
-         # appear ALONGSIDE a real redirect: prose and markup mixed in the same
-         # file. `shell_pattern` (`_FSW002_REDIRECT_SHELL`) is the same shape
-         # with the exclusion dropped, and `engine._scan_text` swaps to it only
-         # on a line it judges to be genuine shell/code — a shell/code file
-         # suffix (`position.is_code_suffix`) or inside a markdown fence
-         # explicitly labeled bash/sh/shell/zsh/console
-         # (`position.shell_fence_lines`). Declaring a fence `bash` cannot buy
-         # a demotion this way, only detection: the exclusion is dropped,
-         # never added, so the audited unit has nothing cheap to gain by
-         # labeling its fences.
-         #
-         # A THIRD context needs neither shape: a genuine `.html`/`.htm`/
-         # `.xhtml` DOCUMENT (`position.is_html_suffix`) has no prose and no
-         # shell in it at all — every `>` is markup. The base `pattern` above
-         # only excludes a `>` closing a BARE opening tag (`<p>`), not one
-         # closing a tag WITH an attribute (`<p class="x">…</p>`), because the
-         # character right before that `>` is a quote, not a tag-name letter —
-         # so in prose or any other file, `pattern` still fires on it. Measured
-         # verbatim against a real public repo's rendered release notes
-         # (`release-notes-v1.5.0.html:924`,
-         # `<p class="text-[11px] …"><code>AGENTS.md</code> …</p>`): silent at
-         # 0df3477 and a2aca1a, CRITICAL again from `pattern` at 6676b17
-         # onward. `html_pattern` (`_FSW002_REDIRECT_STRICT`) fixes this by
-         # using the strictest anchor for `.html` files only — a `>` counts
-         # only at line start or after whitespace/a digit/`&` — since there is
-         # no redirect beside it to protect there.
-         #
-         # KNOWN GAPS, not chased here. Both apply exactly where `pattern`
-         # (MIDDLE) is the line's active pattern: `engine._scan_text` already
-         # picks SHELL for a code-suffix file (`position.is_code_suffix`:
-         # `.sh`/`.bash`/`.zsh`/`.fish`/`.ps1`/`.bat`/`.cmd`/`.py`/`.js`/
-         # `.mjs`/`.cjs`/`.ts`/`.rb`/`.pl`/`.php`/`.lua`/`.r`) or a
-         # shell-labeled fence, and STRICT for `.html`/`.htm`/`.xhtml`
-         # (`position.is_html_suffix`, with its own narrower gaps — see the
-         # STRICT bullet above), so MIDDLE is left running only on markdown
-         # prose OUTSIDE a shell-labeled fence and any other file suffix
-         # (`.json`, `.txt`, `.yaml`, unrecognized). Verified with
-         # `engine.scan`: both gaps below reproduce in `.txt`/`.json`
-         # fixtures and in markdown prose; the identical content in a `.py`
-         # or `.sh` fixture does not share them (SHELL applies there
-         # instead, and SHELL has no exclusion to misread in either
-         # direction):
-         # - The input-redirect shapes (`<p>CLAUDE.md`, `cat<p>CLAUDE.md`)
-         #   still read as an HTML tag and stay silent, because a real `<p>`
-         #   tag can legitimately appear there too and this scanner has no way
-         #   to tell the two apart without semantics (false-NEGATIVE
-         #   direction).
-         # - RAW HTML with an attribute (`<p class="x">AGENTS.md` sitting in
-         #   a `.md` file's body, or in `.txt`/`.json`): `pattern`'s
-         #   exclusion does not reach it — see above — so it can still fire
-         #   (false-POSITIVE direction, the mirror of the bug this fix
-         #   closes, just outside a real `.html` document).
-         _r(rf"({_FSW002_REDIRECT_MIDDLE}|{_FSW002_WRITE_FORMS})"
-            rf"{_FSW002_TARGETS}"),
+         # Gaps not closed here: a markdown blockquote (`> AGENTS.md`) matches
+         # and is read as prose by the position taxonomy; `tee CLAUDE.md`
+         # without `-` is not a write form.
+         _FSW002_PATTERN,
          specificity=93,
-         shell_pattern=_r(rf"({_FSW002_REDIRECT_SHELL}|{_FSW002_WRITE_FORMS})"
-            rf"{_FSW002_TARGETS}"),
-         html_pattern=_r(rf"({_FSW002_REDIRECT_STRICT}|{_FSW002_WRITE_FORMS})"
-            rf"{_FSW002_TARGETS}")),
+         candidates=_fsw002_candidates,
+         tag_close_sensitive=True,
+         operand=_FSW002_OPERAND),
 
     Rule("AGT-015", "HIGH", "high", CONTROL_PLANE,
          "Writes instructions for a different assistant",

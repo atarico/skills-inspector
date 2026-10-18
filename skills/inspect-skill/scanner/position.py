@@ -11,6 +11,7 @@ here as an experiment, not a guarantee.
 
 from __future__ import annotations
 
+import bisect
 import re
 from pathlib import PurePosixPath
 
@@ -123,39 +124,6 @@ _TEXT_CODE_SUFFIXES = {
 }
 _CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".conf", ".env"}
 _DOC_SUFFIXES = {".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc"}
-
-
-def is_code_suffix(relpath: str) -> bool:
-    """Is this file's content executable shell/code, never markup?
-
-    FSW-002 (rules.py) excludes an HTML opening tag's own `>` from its
-    input-redirect alternative, because in prose or `.html` that `>` is
-    genuinely a tag close, not a redirect. That exclusion is meaningless — and
-    a live evasion — in a file `_TEXT_CODE_SUFFIXES` already treats as ACTIVE
-    code: `.html` is deliberately absent from that set, so it is unaffected
-    here and keeps the HTML exclusion it needs.
-    """
-    return PurePosixPath(relpath).suffix.lower() in _TEXT_CODE_SUFFIXES
-
-
-_HTML_SUFFIXES = {".html", ".htm", ".xhtml"}
-
-
-def is_html_suffix(relpath: str) -> bool:
-    """Is this file rendered markup, where EVERY `>` is a tag close and never
-    a shell redirect — never prose that might merely be quoting HTML?
-
-    FSW-002 (rules.py) keeps a wider tag-name-only exclusion (`pattern`) for
-    markdown prose and any other file, because prose can genuinely contain
-    both real HTML and a real redirect side by side, so the exclusion has to
-    stay narrow enough to still catch the redirect (an attribute-quoted tag
-    close, `<p class="x">`, is NOT excluded there — see the FSW-002 comment).
-    A real `.html`/`.htm`/`.xhtml` document has no such ambiguity: nothing in
-    it is a shell command, so `Rule.html_pattern` can use the strictest
-    anchor (a `>` only counts at line start or after whitespace/a digit/`&`)
-    without losing any real detection.
-    """
-    return PurePosixPath(relpath).suffix.lower() in _HTML_SUFFIXES
 
 
 # Execution sinks. A string literal is inert data UNLESS it flows into one of
@@ -416,6 +384,119 @@ def _in_comment(line: str, index: int) -> bool:
     return False
 
 
+class LineProbe:
+    """Per-index position questions about ONE line, answered in a single pass.
+
+    `in_string_literal`, `_in_comment` and `in_inline_code` each re-walk the
+    line from column zero, which is right for one question and quadratic for a
+    rule that judges every candidate on a line: this scanner reads untrusted
+    lines up to megabytes long, and a hostile line made of a hundred thousand
+    candidates would turn one lookup per candidate into a hang. Each table
+    below is built once, lazily, and answered by bisection.
+
+    `tests/unit_test.py` pins agreement with the per-call functions on random
+    lines, so the one-pass walk cannot drift from what they promise.
+    """
+
+    def __init__(self, line: str) -> None:
+        self.line = line
+        self._ticks: list[int] | None = None
+        self._lits: tuple[list[int], list[float]] | None = None
+        self._comment: int | None | bool = False
+        self._shape: int | None = None
+
+    def in_inline_code(self, index: int) -> bool:
+        """Same answer as `in_inline_code`: an odd number of backticks before."""
+        if self._ticks is None:
+            self._ticks = [i for i, ch in enumerate(self.line) if ch == "`"]
+        return bisect.bisect_left(self._ticks, index) % 2 == 1
+
+    def _in_string(self, index: int) -> bool:
+        """Same answer as `in_string_literal`, from precomputed spans.
+
+        A literal opened at `a` and closed at `b` holds every index in
+        `(a, b]`; one never closed holds everything after its opener.
+        """
+        if self._lits is None:
+            starts: list[int] = []
+            ends: list[float] = []
+            line, n = self.line, len(self.line)
+            quote: str | None = None
+            i = 0
+            while i < n:
+                ch = line[i]
+                if quote:
+                    if ch == "\\":
+                        i += 2
+                        continue
+                    if ch == quote:
+                        ends.append(i)
+                        quote = None
+                elif ch in "\"'":
+                    quote = ch
+                    starts.append(i)
+                i += 1
+            if quote:
+                ends.append(float("inf"))
+            self._lits = (starts, ends)
+        starts, ends = self._lits
+        k = bisect.bisect_left(starts, index) - 1
+        return k >= 0 and index <= ends[k]
+
+    def _in_comment(self, index: int) -> bool:
+        if self._comment is False:
+            self._comment = next(
+                (m.start() for m in _COMMENT.finditer(self.line)
+                 if not self._in_string(m.start())), None)
+        return self._comment is not None and self._comment < index
+
+    def literal_demotion(self, index: int) -> int:
+        """See the module-level `literal_demotion` for the contract."""
+        if self._in_comment(index):
+            return 2
+        if not self._in_string(index):
+            return 0
+        if self._shape is None:
+            if _exec_sink_outside_literal(self.line):
+                self._shape = 0
+            elif (_REGEX_CONSTRUCTION.search(self.line)
+                  or len(_REGEX_SHAPE.findall(self.line)) >= 2):
+                self._shape = 2
+            else:
+                self._shape = 1
+        return self._shape
+
+
+_ANGLE = re.compile(r"[<>]")
+
+
+def tag_close_positions(line: str) -> set[int]:
+    """Indices of every `>` that closes a markup tag.
+
+    A `>` closes a tag when the nearest `<` before it is followed by an ASCII
+    letter, `/`, `!` or `?` and no other `>` lies between them. One walk over
+    the angle brackets, so a line of a hundred thousand `<p>` costs one pass.
+    It is a lexical test with no HTML parser behind it: `a<b && x>f` reads as
+    a tag, which is why callers LOWER a candidate's confidence with it and
+    never drop the candidate.
+    """
+    closes: set[int] = set()
+    last_open = -1
+    for m in _ANGLE.finditer(line):
+        if m.group() == "<":
+            last_open = m.start()
+            continue
+        if last_open >= 0 and last_open + 1 < len(line):
+            nxt = line[last_open + 1]
+            if nxt in _TAG_START or ("a" <= nxt.lower() <= "z" and nxt.isascii()):
+                closes.add(m.start())
+        last_open = -1
+    return closes
+
+
+_TAG_START = "/!?"
+
+
 def literal_demotion(line: str, index: int) -> int:
     """Confidence levels a code-file match loses for being inert data.
 
@@ -440,17 +521,7 @@ def literal_demotion(line: str, index: int) -> int:
     True and must win. `tests/unit_test.py` pins both directions, and
     `fixtures/benign/security-tool` pins the catalogue case end to end.
     """
-    if _in_comment(line, index):
-        return 2
-    if not in_string_literal(line, index):
-        return 0
-    if _exec_sink_outside_literal(line):
-        return 0
-    # Structurally a regex: a description of a pattern, not a value. This is the
-    # source-code equivalent of a markdown table row.
-    if _REGEX_CONSTRUCTION.search(line) or len(_REGEX_SHAPE.findall(line)) >= 2:
-        return 2
-    return 1
+    return LineProbe(line).literal_demotion(index)
 
 
 def demote(confidence: str, position: str) -> str:
@@ -962,12 +1033,11 @@ def classify_lines(relpath: str, text: str,
     return [(_ORDER[max(_ORDER.index(p), floor)], k) for p, k in classified]
 
 
-# Fence languages an attacker cannot cheaply buy a demotion from: labeling a
-# fence with one of these tells FSW-002 to drop its HTML-tag exclusion for the
-# lines inside it (see `is_code_suffix`'s docstring for the file-suffix half of
-# the same rule). That only ever WIDENS detection — a real shell input redirect
-# that the exclusion used to misread as a tag close now fires — so declaring
-# `bash` buys nothing an attacker would want.
+# Fence languages that mark a line as shell. FSW-002 (rules.py) lowers the
+# confidence of a `>` that closes a markup tag, and a fence labelled with one of
+# these cancels that lowering for the lines inside it. Declaring `bash` can only
+# restore a candidate's confidence, never lower anything, so the label buys the
+# audited unit nothing it would want.
 _SHELL_FENCE_LANGS = {"bash", "sh", "shell", "zsh", "console"}
 
 

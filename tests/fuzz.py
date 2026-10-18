@@ -301,6 +301,30 @@ def _(b: Path):
     write(b, "settings.json/inner.txt", "not a config")
 
 
+# ------------------------------------------------- FSW-002 candidate walk
+# FSW-002 judges every `>` on a line, so a hostile line made of a hundred
+# thousand candidates must cost one pass, not one pass per candidate.
+@case("fsw002-many-tag-closes-then-name")
+def _(b: Path):
+    write(b, "SKILL.md", skill())
+    write(b, "notes.html", "<p>" * 170_000 + "CLAUDE.md\n")
+
+
+@case("fsw002-many-redirects")
+def _(b: Path):
+    write(b, "SKILL.md", skill())
+    write(b, "setup.sh", ">CLAUDE.md" * 50_000 + "\n")
+
+
+@case("fsw002-many-demoted-candidates")
+def _(b: Path):
+    # Every candidate is demoted (a comment, then backtick parity), so the walk
+    # never stops early and each per-index answer must be O(log n).
+    write(b, "SKILL.md", skill() + "`" + "<a>CLAUDE.md `" * 30_000 + "\n")
+    write(b, "tool.py", "# " + ">CLAUDE.md" * 50_000 + "\n")
+    write(b, "lit.py", "x = '" + ">CLAUDE.md" * 40_000 + "'\n")
+
+
 def run_case(name: str, builder) -> tuple[bool, str]:
     base = Path(tempfile.mkdtemp(prefix=f"fuzz-{name}-"))
     try:
