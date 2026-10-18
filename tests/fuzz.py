@@ -325,6 +325,18 @@ def _(b: Path):
     write(b, "lit.py", "x = '" + ">CLAUDE.md" * 40_000 + "'\n")
 
 
+@case("fsw002-many-spaced-tag-closes")
+def _(b: Path):
+    # One ~900KB line of `<p >CLAUDE.md `: every `>` is a candidate with the
+    # name in its window, and every one reads as markup and is lowered, so the
+    # walk never stops early. An earlier tag check re-searched the line from
+    # column zero per rejected `>` and took 21.4s at half this size; the
+    # markup lexer reads the line once (measured 2.9s at 32000 repeats, 5.7s
+    # at 64000, a whole scanner run).
+    write(b, "SKILL.md", skill())
+    write(b, "notes.html", "<p >CLAUDE.md " * 64_000 + "\n")
+
+
 @case("fsw002-markup-lexer-floods")
 def _(b: Path):
     # Each shape makes the tag lexer look ahead for a close that never comes
